@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -45,6 +44,11 @@ const Dashboard = () => {
     localStorage.setItem('fillo_onboarding_complete', 'true');
   };
 
+  const handleDeleteProfile = (profileId: string) => {
+    setProfiles(prev => prev.filter(profile => profile.id !== profileId));
+    console.log('Profile deleted:', profileId);
+  };
+
   if (showOnboarding) {
     return <Onboarding onComplete={handleOnboardingComplete} />;
   }
@@ -62,10 +66,12 @@ const Dashboard = () => {
               <span className="text-2xl font-bold text-gray-900">Fillo</span>
             </div>
             <div className="flex items-center space-x-4">
-              <Button variant="ghost" size="sm">
-                <Settings className="h-4 w-4 mr-2" />
-                Settings
-              </Button>
+              <Link to="/settings">
+                <Button variant="ghost" size="sm">
+                  <Settings className="h-4 w-4 mr-2" />
+                  Settings
+                </Button>
+              </Link>
               <Button variant="ghost" size="sm">
                 <User className="h-4 w-4 mr-2" />
                 Profile
@@ -127,7 +133,7 @@ const Dashboard = () => {
               </Button>
             </div>
             
-            <ProfileList profiles={profiles} />
+            <ProfileList profiles={profiles} onDeleteProfile={handleDeleteProfile} />
           </div>
 
           {/* Sidebar */}
