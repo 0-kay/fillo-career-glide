@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { ArrowRight, Upload, RefreshCw, CheckCircle, Chrome, Users, Clock, Target } from 'lucide-react';
+import { Link } from 'react-router-dom';
 
 const LandingPage = () => {
   return (
@@ -19,13 +20,17 @@ const LandingPage = () => {
               <span className="text-2xl font-bold text-gray-900">Fillo</span>
             </div>
             <div className="flex items-center space-x-4">
-              <Button variant="ghost" className="text-gray-600 hover:text-gray-900">
-                Sign In
-              </Button>
-              <Button className="bg-blue-600 hover:bg-blue-700 text-white">
-                Get Started
-                <ArrowRight className="ml-2 h-4 w-4" />
-              </Button>
+              <Link to="/auth">
+                <Button variant="ghost" className="text-gray-600 hover:text-gray-900">
+                  Sign In
+                </Button>
+              </Link>
+              <Link to="/auth">
+                <Button className="bg-blue-600 hover:bg-blue-700 text-white">
+                  Get Started
+                  <ArrowRight className="ml-2 h-4 w-4" />
+                </Button>
+              </Link>
             </div>
           </div>
         </div>
@@ -48,10 +53,12 @@ const LandingPage = () => {
           </p>
           
           <div className="flex flex-col sm:flex-row gap-4 justify-center items-center mb-12">
-            <Button size="lg" className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-3">
-              Start Applying Smarter
-              <ArrowRight className="ml-2 h-5 w-5" />
-            </Button>
+            <Link to="/auth">
+              <Button size="lg" className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-3">
+                Start Applying Smarter
+                <ArrowRight className="ml-2 h-5 w-5" />
+              </Button>
+            </Link>
             <Button size="lg" variant="outline" className="px-8 py-3">
               <Chrome className="mr-2 h-5 w-5" />
               Install Extension
@@ -122,7 +129,6 @@ const LandingPage = () => {
         </div>
       </section>
 
-      {/* Problem Statement */}
       <section className="py-20 px-4 sm:px-6 lg:px-8 bg-gray-50">
         <div className="max-w-7xl mx-auto">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
@@ -176,7 +182,6 @@ const LandingPage = () => {
         </div>
       </section>
 
-      {/* CTA Section */}
       <section className="py-20 px-4 sm:px-6 lg:px-8 bg-gradient-to-r from-blue-600 to-indigo-600">
         <div className="max-w-4xl mx-auto text-center">
           <h2 className="text-4xl font-bold text-white mb-6">
@@ -187,10 +192,12 @@ const LandingPage = () => {
           </p>
           
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
-            <Button size="lg" className="bg-white text-blue-600 hover:bg-gray-100 px-8 py-3">
-              Get Started Free
-              <ArrowRight className="ml-2 h-5 w-5" />
-            </Button>
+            <Link to="/auth">
+              <Button size="lg" className="bg-white text-blue-600 hover:bg-gray-100 px-8 py-3">
+                Get Started Free
+                <ArrowRight className="ml-2 h-5 w-5" />
+              </Button>
+            </Link>
             <Button size="lg" variant="outline" className="border-white text-white hover:bg-white hover:text-blue-600 px-8 py-3">
               <Chrome className="mr-2 h-5 w-5" />
               Install Extension
