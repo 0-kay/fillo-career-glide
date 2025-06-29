@@ -25,21 +25,38 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
     try {
       console.log('Extracting text from PDF...');
       const arrayBuffer = await file.arrayBuffer();
-      const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+      
+      // Use a more compatible approach for PDF loading
+      const loadingTask = pdfjsLib.getDocument({
+        data: arrayBuffer,
+        cMapUrl: `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/cmaps/`,
+        cMapPacked: true,
+      });
+      
+      const pdf = await loadingTask.promise;
 
       let text = '';
       for (let i = 1; i <= pdf.numPages; i++) {
-        const page = await pdf.getPage(i);
-        const content = await page.getTextContent();
-        const pageText = content.items.map((item: any) => item.str).join(' ');
-        text += pageText + '\n';
+        try {
+          const page = await pdf.getPage(i);
+          const content = await page.getTextContent();
+          const pageText = content.items
+            .filter((item: any) => item.str && typeof item.str === 'string')
+            .map((item: any) => item.str)
+            .join(' ');
+          text += pageText + '\n';
+        } catch (pageError) {
+          console.warn(`Error processing page ${i}:`, pageError);
+          // Continue with other pages
+        }
       }
 
       console.log('PDF text extracted successfully, length:', text.length);
-      return text;
+      return text.trim();
     } catch (error) {
       console.error('Error extracting PDF text:', error);
-      throw new Error('Failed to extract text from PDF');
+      // Instead of throwing, return a fallback message
+      return `PDF file: ${file.name} (text extraction failed)`;
     }
   };
 
@@ -56,21 +73,21 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
       console.log('Processing PDF file');
       const resumeText = await extractTextFromPDF(file);
       requestBody = {
-        resumeText: resumeText.substring(0, 3000), // Limit text length
+        resumeText: resumeText.substring(0, 15000), // Limit text length
         fileName: file.name
       };
     } else if (file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
       try {
         const arrayBuffer = await file.arrayBuffer();
         const result = await mammoth.extractRawText({ arrayBuffer });
-        requestBody.resumeText = result.value.substring(0, 3000);
+        requestBody.resumeText = result.value.substring(0, 15000);
       } catch (error) {
         console.log('DOCX extraction failed, using filename');
       }
     } else if (file.type === 'text/plain') {
       try {
         const text = await file.text();
-        requestBody.resumeText = text.substring(0, 3000);
+        requestBody.resumeText = text.substring(0, 15000);
       } catch (error) {
         console.log('Text extraction failed, using filename');
       }
