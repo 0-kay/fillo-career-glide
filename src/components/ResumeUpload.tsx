@@ -1,3 +1,4 @@
+
 import React, { useState, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Upload, FileText, X, Loader2 } from 'lucide-react';
@@ -19,118 +20,76 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
 
   const calculateCompleteness = (data: any) => {
     let score = 0;
-    let maxScore = 0;
+    let maxScore = 100;
     
-    // Personal details (20 points)
-    maxScore += 20;
-    if (data.personalInfo?.fullName) score += 5;
-    if (data.personalInfo?.email) score += 5;
-    if (data.personalInfo?.phone) score += 5;
-    if (data.personalInfo?.address) score += 5;
+    // Personal details (30 points)
+    if (data.personalInfo?.fullName) score += 10;
+    if (data.personalInfo?.email) score += 10;
+    if (data.personalInfo?.phone) score += 10;
     
-    // Work experience (25 points)
-    maxScore += 25;
-    if (data.experience?.length > 0) score += 25;
+    // Work experience (30 points)
+    if (data.experience?.length > 0) score += 30;
     
     // Education (20 points)
-    maxScore += 20;
     if (data.education?.length > 0) score += 20;
     
-    // Skills (15 points)
-    maxScore += 15;
-    if (data.skills?.technical?.length > 0) score += 10;
-    if (data.skills?.soft?.length > 0) score += 5;
+    // Skills (20 points)
+    if (data.skills?.technical?.length > 0 || data.skills?.soft?.length > 0) score += 20;
     
-    // Projects (10 points)
-    maxScore += 10;
-    if (data.projects?.length > 0) score += 10;
-    
-    // Additional sections (10 points)
-    maxScore += 10;
-    if (data.certifications?.length > 0) score += 3;
-    if (data.languages?.length > 0) score += 3;
-    if (data.volunteer?.length > 0) score += 2;
-    if (data.preferences) score += 2;
-    
-    return Math.round((score / maxScore) * 100);
+    return Math.min(score, maxScore);
   };
 
-  const extractTextFromPDF = async (file: File): Promise<string> => {
-    // For PDF files, we'll send the file directly to the edge function
-    // which will handle the text extraction server-side
-    console.log('PDF file will be processed server-side:', file.name);
-    return '[PDF_FILE_CONTENT]'; // Placeholder - actual extraction happens server-side
-  };
-
-  const extractTextFromDOCX = async (file: File): Promise<string> => {
+  const parseResumeWithAI = async (file: File): Promise<any> => {
+    console.log('Starting resume parsing for:', file.name, 'Type:', file.type);
+    
+    let requestBody;
+    
     try {
-      console.log('Starting DOCX text extraction for:', file.name);
-      const arrayBuffer = await file.arrayBuffer();
-      const result = await mammoth.extractRawText({ arrayBuffer });
-      console.log('DOCX text extracted, length:', result.value.length);
-      console.log('DOCX text preview:', result.value.substring(0, 500) + '...');
-      return result.value;
-    } catch (error) {
-      console.error('Error extracting DOCX:', error);
-      throw new Error('Failed to extract text from DOCX file');
-    }
-  };
-
-  const parseResumeWithOpenAI = async (file: File): Promise<any> => {
-    let text = '';
-    
-    console.log('Processing file:', file.name, 'Type:', file.type);
-    
-    if (file.type === 'application/pdf') {
-      // For PDF files, we'll send the file data directly to the edge function
-      const arrayBuffer = await file.arrayBuffer();
-      const base64Data = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)));
-      
-      console.log('Sending PDF file to edge function for processing...');
-      
-      const { data, error } = await supabase.functions.invoke('azure-resume-parser', {
-        body: {
+      if (file.type === 'application/pdf') {
+        console.log('Processing PDF file');
+        const arrayBuffer = await file.arrayBuffer();
+        const base64Data = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)));
+        
+        requestBody = {
           fileData: base64Data,
           fileName: file.name,
           fileType: file.type
-        }
+        };
+      } else if (file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+        console.log('Processing DOCX file');
+        const arrayBuffer = await file.arrayBuffer();
+        const result = await mammoth.extractRawText({ arrayBuffer });
+        
+        requestBody = {
+          resumeText: result.value,
+          fileName: file.name
+        };
+      } else {
+        console.log('Processing text file');
+        const text = await file.text();
+        
+        requestBody = {
+          resumeText: text,
+          fileName: file.name
+        };
+      }
+
+      console.log('Sending request to edge function...');
+      const { data, error } = await supabase.functions.invoke('azure-resume-parser', {
+        body: requestBody
       });
 
       if (error) {
         console.error('Edge function error:', error);
-        throw new Error('Failed to parse PDF file');
+        throw new Error(`Failed to parse resume: ${error.message}`);
       }
 
+      console.log('Successfully parsed resume');
       return data;
-    } else if (file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
-      text = await extractTextFromDOCX(file);
-    } else if (file.type === 'application/msword') {
-      text = await file.text();
-    } else {
-      throw new Error('Unsupported file format');
+    } catch (error) {
+      console.error('Error in parseResumeWithAI:', error);
+      throw error;
     }
-
-    if (!text || text.trim().length === 0) {
-      throw new Error('No text could be extracted from the file');
-    }
-
-    console.log('Final extracted text length:', text.length);
-    console.log('Sending text to OpenAI via edge function...');
-
-    const { data, error } = await supabase.functions.invoke('azure-resume-parser', {
-      body: {
-        resumeText: text,
-        fileName: file.name
-      }
-    });
-
-    if (error) {
-      console.error('OpenAI parsing error:', error);
-      throw new Error('Failed to parse resume with OpenAI');
-    }
-
-    console.log('OpenAI response data:', data);
-    return data;
   };
 
   const handleDrag = useCallback((e: React.DragEvent) => {
@@ -176,7 +135,7 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
       return;
     }
 
-    if (file.size > 25 * 1024 * 1024) { // 10MB limit
+    if (file.size > 10 * 1024 * 1024) { // 10MB limit
       toast({
         title: "File too large",
         description: "File size must be less than 10MB",
@@ -189,13 +148,13 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
     setUploading(true);
 
     try {
-      console.log('Starting resume parsing with OpenAI:', file.name);
-      const parsedData = await parseResumeWithOpenAI(file);
-      console.log('Parsed data from OpenAI:', parsedData);
+      console.log('Starting resume parsing...');
+      const parsedData = await parseResumeWithAI(file);
+      console.log('Parsed data:', parsedData);
       
       const completeness = calculateCompleteness(parsedData);
       
-      // Create comprehensive profile data structure
+      // Create profile data structure
       const profileData = {
         name: parsedData.personalInfo?.fullName || `${file.name.split('.')[0]}'s Resume`,
         
@@ -236,8 +195,8 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
             zip: '',
             country: parsedData.personalInfo?.address || ''
           },
-          work_authorization: parsedData.personalInfo?.workAuthorization || '',
-          preferred_name: parsedData.personalInfo?.preferredName || ''
+          work_authorization: '',
+          preferred_name: ''
         },
         
         education_history: parsedData.education?.map((edu: any) => ({
@@ -247,7 +206,7 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
           start_date: edu.startDate || '',
           end_date: edu.endDate || '',
           gpa: edu.gpa || '',
-          honors: edu.honors || ''
+          honors: ''
         })) || [],
         
         work_experience: parsedData.experience?.map((exp: any) => ({
@@ -282,9 +241,9 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
           name: typeof cert === 'string' ? cert : cert.name || '',
           issuer: typeof cert === 'object' ? cert.issuer || '' : '',
           issue_date: typeof cert === 'object' ? cert.issueDate || '' : '',
-          expiration_date: typeof cert === 'object' ? cert.expirationDate || '' : '',
-          credential_id: typeof cert === 'object' ? cert.credentialId || '' : '',
-          credential_url: typeof cert === 'object' ? cert.credentialUrl || '' : ''
+          expiration_date: '',
+          credential_id: '',
+          credential_url: ''
         })) || [],
         
         awards_honors: [],
@@ -294,8 +253,8 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
           description: project.description || '',
           technologies: Array.isArray(project.tools) ? project.tools : [],
           link: project.link || '',
-          start_date: project.startDate || '',
-          end_date: project.endDate || ''
+          start_date: '',
+          end_date: ''
         })) || [],
         
         languages: parsedData.languages?.map((lang: any) => ({
@@ -303,25 +262,16 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
           proficiency: typeof lang === 'object' ? lang.proficiency || '' : 'Conversational'
         })) || [],
         
-        volunteer_experience: parsedData.volunteer?.map((vol: any) => ({
-          organization: vol.organization || '',
-          role: vol.role || '',
-          description: vol.description || '',
-          start_date: vol.startDate || '',
-          end_date: vol.endDate || ''
-        })) || [],
+        volunteer_experience: [],
         
         job_preferences: {
-          desired_titles: Array.isArray(parsedData.preferences?.desiredTitles) ? 
-            parsedData.preferences.desiredTitles : [],
-          industries: Array.isArray(parsedData.preferences?.industries) ? 
-            parsedData.preferences.industries : [],
-          location_preferences: Array.isArray(parsedData.preferences?.locationPreferences) ? 
-            parsedData.preferences.locationPreferences : [],
-          employment_type: parsedData.preferences?.employmentType || '',
-          relocation_willingness: parsedData.preferences?.relocationWillingness || '',
-          availability: parsedData.preferences?.availability || '',
-          salary_expectation: parsedData.preferences?.salaryExpectation || ''
+          desired_titles: [],
+          industries: [],
+          location_preferences: [],
+          employment_type: '',
+          relocation_willingness: '',
+          availability: '',
+          salary_expectation: ''
         },
         
         resume_metadata: {
@@ -337,7 +287,7 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
         completeness
       };
       
-      console.log('Final profile data to save:', profileData);
+      console.log('Creating profile with data:', profileData);
       
       // Save to database
       const { error } = await createProfile(profileData);
@@ -380,7 +330,7 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
     return (
       <div className="text-center py-12">
         <Loader2 className="h-12 w-12 animate-spin text-blue-600 mx-auto mb-4" />
-        <h3 className="text-lg font-semibold text-gray-900 mb-2">Analyzing Your Resume with OpenAI</h3>
+        <h3 className="text-lg font-semibold text-gray-900 mb-2">Analyzing Your Resume with AI</h3>
         <p className="text-gray-600">
           Using advanced AI to extract comprehensive information from your resume...
         </p>

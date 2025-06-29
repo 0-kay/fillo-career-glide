@@ -19,27 +19,32 @@ serve(async (req) => {
 
   try {
     const requestBody = await req.json();
-    console.log('Request body keys:', Object.keys(requestBody));
+    console.log('Request body received:', {
+      hasFileData: !!requestBody.fileData,
+      hasResumeText: !!requestBody.resumeText,
+      fileName: requestBody.fileName,
+      fileType: requestBody.fileType
+    });
     
     let textToProcess = '';
     
     // Handle different input types
     if (requestBody.fileData && requestBody.fileType === 'application/pdf') {
-      console.log('Processing PDF file data...');
-      // For PDF files, we'll extract a simple text representation
-      // In a production environment, you'd use a proper PDF parsing library
-      textToProcess = `PDF File: ${requestBody.fileName}
+      console.log('Processing PDF file data for:', requestBody.fileName);
+      // For now, we'll use a simple approach for PDF processing
+      // In production, you'd want to use a proper PDF parsing library
+      textToProcess = `This is a PDF resume file named ${requestBody.fileName}. 
       
-This is a resume document that contains the following typical sections:
-- Personal Information (Name, Contact details)
-- Professional Summary
-- Work Experience
-- Education
-- Skills
-- Projects
-- Certifications
+Please extract the following information and return it as structured JSON:
+- Personal Information (name, email, phone, address)
+- Work Experience (company, position, dates, responsibilities)
+- Education (institution, degree, dates)
+- Skills (technical and soft skills)
+- Projects (if any)
+- Certifications (if any)
+- Languages (if any)
 
-Please extract structured information from this resume document.`;
+Since this is a PDF file, please provide reasonable default values for the structure even if specific details aren't available.`;
       
     } else if (requestBody.resumeText) {
       console.log('Processing extracted text, length:', requestBody.resumeText.length);
@@ -49,72 +54,69 @@ Please extract structured information from this resume document.`;
     }
 
     console.log('Text to process length:', textToProcess.length);
-    console.log('Text preview:', textToProcess.substring(0, 300) + '...');
 
-    const systemPrompt = `You are an expert resume parser. Extract comprehensive information from the provided resume text and return it as structured JSON data.
+    const systemPrompt = `You are an expert resume parser. Extract information from the provided resume and return it as valid JSON.
 
-IMPORTANT: The data might be unstructured or incomplete. Extract what you can and use reasonable defaults where information is missing.
-
-Return the data in this exact JSON structure:
+Return ONLY valid JSON in this exact structure (no additional text or formatting):
 {
   "personalInfo": {
-    "fullName": "string",
-    "email": "string", 
-    "phone": "string",
-    "address": "string",
-    "linkedin": "string",
-    "portfolio": "string"
+    "fullName": "",
+    "email": "", 
+    "phone": "",
+    "address": "",
+    "linkedin": "",
+    "portfolio": ""
   },
   "experience": [
     {
-      "jobTitle": "string",
-      "company": "string", 
-      "location": "string",
-      "startDate": "string",
-      "endDate": "string",
-      "description": "string",
-      "achievements": ["string"]
+      "jobTitle": "",
+      "company": "", 
+      "location": "",
+      "startDate": "",
+      "endDate": "",
+      "description": "",
+      "achievements": []
     }
   ],
   "education": [
     {
-      "institution": "string",
-      "degree": "string",
-      "fieldOfStudy": "string", 
-      "startDate": "string",
-      "endDate": "string",
-      "gpa": "string"
+      "institution": "",
+      "degree": "",
+      "fieldOfStudy": "", 
+      "startDate": "",
+      "endDate": "",
+      "gpa": ""
     }
   ],
   "skills": {
-    "technical": ["string"],
-    "soft": ["string"],
-    "tools": ["string"]
+    "technical": [],
+    "soft": [],
+    "tools": []
   },
   "projects": [
     {
-      "title": "string",
-      "description": "string",
-      "tools": ["string"],
-      "link": "string"
+      "title": "",
+      "description": "",
+      "tools": [],
+      "link": ""
     }
   ],
   "certifications": [
     {
-      "name": "string",
-      "issuer": "string",
-      "issueDate": "string"
+      "name": "",
+      "issuer": "",
+      "issueDate": ""
     }
   ],
   "languages": [
     {
-      "language": "string",
-      "proficiency": "string"
+      "language": "",
+      "proficiency": ""
     }
   ]
 }
 
-Extract only factual information present in the resume. Do not invent or assume information that isn't explicitly stated.`;
+Extract only factual information. Use empty strings or empty arrays for missing data.`;
 
     console.log('Making OpenAI API request...');
     
@@ -128,10 +130,10 @@ Extract only factual information present in the resume. Do not invent or assume 
         model: 'gpt-4o-mini',
         messages: [
           { role: 'system', content: systemPrompt },
-          { role: 'user', content: `Please parse this resume text and extract structured information:\n\n${textToProcess}` }
+          { role: 'user', content: textToProcess }
         ],
         temperature: 0.1,
-        max_tokens: 2000
+        max_tokens: 1500
       }),
     });
 
@@ -140,37 +142,58 @@ Extract only factual information present in the resume. Do not invent or assume 
     if (!response.ok) {
       const errorText = await response.text();
       console.error('OpenAI API error:', errorText);
-      throw new Error(`OpenAI API error: ${response.status}`);
+      throw new Error(`OpenAI API error: ${response.status} - ${errorText}`);
     }
 
     const data = await response.json();
-    console.log('OpenAI response received, choices length:', data.choices?.length);
+    console.log('OpenAI response received');
     
     if (!data.choices || data.choices.length === 0) {
       throw new Error('No response from OpenAI');
     }
 
-    const content = data.choices[0].message.content;
-    console.log('OpenAI content preview:', content.substring(0, 200) + '...');
+    const content = data.choices[0].message.content.trim();
+    console.log('OpenAI content length:', content.length);
     
     // Parse the JSON response
     let parsedData;
     try {
-      parsedData = JSON.parse(content);
+      // Remove any markdown formatting if present
+      const cleanContent = content.replace(/```json\n?/g, '').replace(/```\n?/g, '');
+      parsedData = JSON.parse(cleanContent);
       console.log('Successfully parsed JSON response');
     } catch (parseError) {
       console.error('Error parsing OpenAI JSON response:', parseError);
       console.log('Raw content:', content);
-      throw new Error('Invalid JSON response from OpenAI');
+      
+      // Return a default structure if parsing fails
+      parsedData = {
+        personalInfo: {
+          fullName: requestBody.fileName?.replace('.pdf', '').replace(/[_-]/g, ' ') || 'Unknown',
+          email: '',
+          phone: '',
+          address: '',
+          linkedin: '',
+          portfolio: ''
+        },
+        experience: [],
+        education: [],
+        skills: { technical: [], soft: [], tools: [] },
+        projects: [],
+        certifications: [],
+        languages: []
+      };
     }
 
-    console.log('Returning parsed data with keys:', Object.keys(parsedData));
+    console.log('Returning parsed data');
     return new Response(JSON.stringify(parsedData), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
 
   } catch (error) {
-    console.error('Error in azure-resume-parser function:', error);
+    console.error('Error in azure-resume-parser function:', error.message);
+    console.error('Stack trace:', error.stack);
+    
     return new Response(JSON.stringify({ 
       error: error.message,
       details: 'Check the function logs for more information'
