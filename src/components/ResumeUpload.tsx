@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Upload, FileText, X, Loader2 } from 'lucide-react';
 import { useProfiles } from '@/hooks/useProfiles';
 import { useToast } from '@/hooks/use-toast';
+import { parseResumeFile } from '@/utils/resumeParser';
 
 interface ResumeUploadProps {
   onComplete?: () => void;
@@ -15,44 +16,6 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const { createProfile } = useProfiles();
   const { toast } = useToast();
-
-  // Mock parsing function (in real app, this would call backend API)
-  const mockParseResume = async (file: File) => {
-    // Simulate API call delay
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    
-    return {
-      personalInfo: {
-        name: 'John Doe',
-        email: 'john.doe@email.com',
-        phone: '+1 (555) 123-4567',
-        address: 'San Francisco, CA'
-      },
-      experience: [
-        {
-          title: 'Senior Software Engineer',
-          company: 'Tech Corp',
-          duration: '2022 - Present',
-          description: 'Led development of web applications using React and Node.js'
-        },
-        {
-          title: 'Software Engineer',
-          company: 'StartupXYZ',
-          duration: '2020 - 2022',
-          description: 'Developed full-stack applications and improved system performance'
-        }
-      ],
-      education: [
-        {
-          degree: 'Bachelor of Science in Computer Science',
-          school: 'University of California',
-          year: '2020'
-        }
-      ],
-      skills: ['JavaScript', 'React', 'Node.js', 'Python', 'SQL', 'AWS'],
-      certifications: ['AWS Certified Developer']
-    };
-  };
 
   const calculateCompleteness = (data: any) => {
     let score = 0;
@@ -95,7 +58,11 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
   };
 
   const handleFile = async (file: File) => {
-    const validTypes = ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
+    const validTypes = [
+      'application/pdf', 
+      'application/msword', 
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    ];
     
     if (!validTypes.includes(file.type)) {
       toast({
@@ -120,14 +87,14 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
 
     try {
       console.log('Parsing resume:', file.name);
-      const parsedData = await mockParseResume(file);
+      const parsedData = await parseResumeFile(file);
       console.log('Parsed data:', parsedData);
       
       const completeness = calculateCompleteness(parsedData);
       
       // Save to database
       const { error } = await createProfile({
-        name: `${parsedData.personalInfo.name}'s Profile`,
+        name: `${parsedData.personalInfo.name || 'Unnamed'}'s Profile`,
         personal_info: parsedData.personalInfo,
         experience: parsedData.experience,
         education: parsedData.education,
@@ -157,7 +124,7 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
       console.error('Error parsing resume:', error);
       toast({
         title: "Error parsing resume",
-        description: "Please try again",
+        description: "Please try again or check if your file format is supported",
         variant: "destructive"
       });
     } finally {
@@ -176,7 +143,7 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
         <Loader2 className="h-12 w-12 animate-spin text-blue-600 mx-auto mb-4" />
         <h3 className="text-lg font-semibold text-gray-900 mb-2">Parsing Your Resume</h3>
         <p className="text-gray-600">
-          Our AI is extracting your information and saving it to your profile...
+          Extracting your information and saving it to your profile...
         </p>
       </div>
     );
