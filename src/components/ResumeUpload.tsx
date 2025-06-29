@@ -19,56 +19,43 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
   const { toast } = useToast();
 
   const parseResumeWithAI = async (file: File) => {
-    console.log('Starting parsing for:', file.name, file.type);
+    console.log('Starting parse for:', file.name);
     
-    let requestBody = {};
-    
-    if (file.type === 'application/pdf') {
-      console.log('Processing PDF file');
-      // For PDF, we'll send the file info but not the binary data to avoid stack overflow
-      requestBody = {
-        fileName: file.name,
-        fileType: file.type,
-        fileSize: file.size
-      };
-    } else if (file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
-      console.log('Processing DOCX file');
-      const arrayBuffer = await file.arrayBuffer();
-      const result = await mammoth.extractRawText({ arrayBuffer });
-      requestBody = {
-        resumeText: result.value,
-        fileName: file.name
-      };
-    } else {
-      console.log('Processing text file');
-      const text = await file.text();
-      requestBody = {
-        resumeText: text,
-        fileName: file.name
-      };
+    let requestBody: any = {
+      fileName: file.name,
+      fileType: file.type
+    };
+
+    // Handle different file types
+    if (file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+      try {
+        const arrayBuffer = await file.arrayBuffer();
+        const result = await mammoth.extractRawText({ arrayBuffer });
+        requestBody.resumeText = result.value.substring(0, 3000); // Limit text
+      } catch (error) {
+        console.log('DOCX extraction failed, using filename');
+      }
+    } else if (file.type === 'text/plain') {
+      try {
+        const text = await file.text();
+        requestBody.resumeText = text.substring(0, 3000); // Limit text
+      } catch (error) {
+        console.log('Text extraction failed, using filename');
+      }
     }
 
-    console.log('Sending request to edge function');
+    console.log('Calling edge function...');
+    
     const { data, error } = await supabase.functions.invoke('azure-resume-parser', {
       body: requestBody
     });
 
     if (error) {
       console.error('Edge function error:', error);
-      throw new Error(`Failed to parse resume: ${error.message}`);
+      throw new Error('Failed to parse resume');
     }
 
     return data;
-  };
-
-  const calculateCompleteness = (data: any) => {
-    let score = 0;
-    if (data.personalInfo?.fullName) score += 20;
-    if (data.personalInfo?.email) score += 20;
-    if (data.experience?.length > 0) score += 30;
-    if (data.education?.length > 0) score += 20;
-    if (data.skills?.technical?.length > 0) score += 10;
-    return Math.min(score, 100);
   };
 
   const handleDrag = useCallback((e: React.DragEvent) => {
@@ -86,14 +73,14 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
     e.stopPropagation();
     setDragActive(false);
     
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+    if (e.dataTransfer.files?.[0]) {
       handleFile(e.dataTransfer.files[0]);
     }
   }, []);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     e.preventDefault();
-    if (e.target.files && e.target.files[0]) {
+    if (e.target.files?.[0]) {
       handleFile(e.target.files[0]);
     }
   };
@@ -102,13 +89,14 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
     const validTypes = [
       'application/pdf', 
       'application/msword', 
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'text/plain'
     ];
     
     if (!validTypes.includes(file.type)) {
       toast({
         title: "Invalid file type",
-        description: "Please upload a PDF, DOC, or DOCX file",
+        description: "Please upload a PDF, DOC, DOCX, or TXT file",
         variant: "destructive"
       });
       return;
@@ -116,8 +104,8 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
 
     if (file.size > 10 * 1024 * 1024) {
       toast({
-        title: "File too large",
-        description: "File size must be less than 10MB",
+        title: "File too large", 
+        description: "File must be less than 10MB",
         variant: "destructive"
       });
       return;
@@ -127,51 +115,37 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
     setUploading(true);
 
     try {
-      console.log('Starting resume parsing...');
+      console.log('Processing file...');
       const parsedData = await parseResumeWithAI(file);
-      console.log('Parsed data received:', parsedData);
       
-      const completeness = calculateCompleteness(parsedData);
-      
-      // Create simplified profile data
+      // Simple profile creation
       const profileData = {
-        name: parsedData.personalInfo?.fullName || `${file.name.split('.')[0]}'s Resume`,
-        personal_info: {
-          name: parsedData.personalInfo?.fullName || '',
-          email: parsedData.personalInfo?.email || '',
-          phone: parsedData.personalInfo?.phone || '',
-          address: parsedData.personalInfo?.address || ''
-        },
+        name: parsedData.personalInfo?.fullName || file.name.replace(/\.[^/.]+$/, ''),
+        personal_info: parsedData.personalInfo || {},
         education: parsedData.education || [],
         experience: parsedData.experience || [],
-        skills: [
-          ...(parsedData.skills?.technical || []),
-          ...(parsedData.skills?.soft || []),
-          ...(parsedData.skills?.tools || [])
-        ],
-        certifications: parsedData.certifications || [],
-        completeness
+        skills: parsedData.skills?.technical || [],
+        certifications: [],
+        completeness: 50
       };
       
-      console.log('Creating profile...');
-      const { error } = await createProfile(profileData);
-
-      if (error) {
+      const result = await createProfile(profileData);
+      
+      if (result.error) {
         throw new Error('Failed to save profile');
       }
 
       toast({
-        title: "Profile created successfully",
-        description: `Resume parsed with ${completeness}% completeness`,
+        title: "Success!",
+        description: "Resume processed and profile created",
       });
       
-      if (onComplete) {
-        onComplete();
-      }
+      onComplete?.();
+      
     } catch (error) {
-      console.error('Error processing resume:', error);
+      console.error('Error:', error);
       toast({
-        title: "Error processing resume",
+        title: "Processing failed",
         description: error instanceof Error ? error.message : "Please try again",
         variant: "destructive"
       });
@@ -189,10 +163,8 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
     return (
       <div className="text-center py-12">
         <Loader2 className="h-12 w-12 animate-spin text-blue-600 mx-auto mb-4" />
-        <h3 className="text-lg font-semibold text-gray-900 mb-2">Processing Your Resume</h3>
-        <p className="text-gray-600">
-          Analyzing your resume with AI...
-        </p>
+        <h3 className="text-lg font-semibold text-gray-900 mb-2">Processing Resume</h3>
+        <p className="text-gray-600">Please wait...</p>
       </div>
     );
   }
@@ -202,7 +174,7 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
       <div className="text-center mb-8">
         <h3 className="text-xl font-semibold text-gray-900 mb-2">Upload Your Resume</h3>
         <p className="text-gray-600">
-          Upload your resume and our AI will extract information to create your profile.
+          Upload your resume and AI will extract the information.
         </p>
       </div>
 
@@ -223,12 +195,12 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
             Drop your resume here, or click to browse
           </h4>
           <p className="text-gray-600 mb-6">
-            Supports PDF, DOC, and DOCX files up to 10MB
+            Supports PDF, DOC, DOCX, and TXT files up to 10MB
           </p>
           
           <input
             type="file"
-            accept=".pdf,.doc,.docx"
+            accept=".pdf,.doc,.docx,.txt"
             onChange={handleChange}
             className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
           />
@@ -258,7 +230,7 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
 
       <div className="mt-6 text-center">
         <p className="text-sm text-gray-500">
-          Your resume is processed securely and never shared with third parties.
+          Your resume is processed securely and never shared.
         </p>
       </div>
     </div>
