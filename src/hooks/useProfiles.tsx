@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react';
+
+import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from './useAuth';
 import { Json } from '@/integrations/supabase/types';
@@ -34,7 +35,7 @@ export function useProfiles() {
   const [loading, setLoading] = useState(true);
   const { user } = useAuth();
 
-  const fetchProfiles = async () => {
+  const fetchProfiles = useCallback(async () => {
     if (!user) {
       setProfiles([]);
       setLoading(false);
@@ -59,9 +60,9 @@ export function useProfiles() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [user?.id]); // Only depend on user.id, not the entire user object
 
-  const getProfile = async (id: string) => {
+  const getProfile = useCallback(async (id: string) => {
     if (!user) return { error: 'Not authenticated' };
 
     try {
@@ -81,9 +82,9 @@ export function useProfiles() {
       console.error('Error fetching profile:', error);
       return { error, data: null };
     }
-  };
+  }, [user?.id]);
 
-  const createProfile = async (profileData: {
+  const createProfile = useCallback(async (profileData: {
     name: string;
     personal_info?: Json;
     personal_details?: Json;
@@ -138,15 +139,15 @@ export function useProfiles() {
 
       if (error) throw error;
       
-      await fetchProfiles(); // Refresh the list
+      await fetchProfiles(); // This won't cause infinite loop now
       return { data, error: null };
     } catch (error) {
       console.error('Error creating profile:', error);
       return { error };
     }
-  };
+  }, [user?.id, fetchProfiles]);
 
-  const updateProfile = async (id: string, profileData: Partial<{
+  const updateProfile = useCallback(async (id: string, profileData: Partial<{
     name: string;
     personal_info: Json;
     personal_details: Json;
@@ -175,41 +176,43 @@ export function useProfiles() {
         .from('application_profiles')
         .update(profileData)
         .eq('id', id)
+        .eq('user_id', user.id)
         .select()
         .single();
 
       if (error) throw error;
       
-      await fetchProfiles(); // Refresh the list
+      await fetchProfiles(); // This won't cause infinite loop now
       return { data, error: null };
     } catch (error) {
       console.error('Error updating profile:', error);
       return { error };
     }
-  };
+  }, [user?.id, fetchProfiles]);
 
-  const deleteProfile = async (id: string) => {
+  const deleteProfile = useCallback(async (id: string) => {
     if (!user) return { error: 'Not authenticated' };
 
     try {
       const { error } = await supabase
         .from('application_profiles')
         .delete()
-        .eq('id', id);
+        .eq('id', id)
+        .eq('user_id', user.id);
 
       if (error) throw error;
       
-      await fetchProfiles(); // Refresh the list
+      await fetchProfiles(); // This won't cause infinite loop now
       return { error: null };
     } catch (error) {
       console.error('Error deleting profile:', error);
       return { error };
     }
-  };
+  }, [user?.id, fetchProfiles]);
 
   useEffect(() => {
     fetchProfiles();
-  }, [user]);
+  }, [fetchProfiles]);
 
   return {
     profiles,
