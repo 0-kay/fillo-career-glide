@@ -2,9 +2,8 @@
 import React, { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
-import { ArrowRight, ArrowLeft, Upload, Check } from 'lucide-react';
+import { ArrowRight, Check, Upload } from 'lucide-react';
 import ResumeUpload from '@/components/ResumeUpload';
-import ProfileForm from '@/components/ProfileForm';
 
 interface OnboardingProps {
   onComplete: () => void;
@@ -12,24 +11,17 @@ interface OnboardingProps {
 
 const Onboarding = ({ onComplete }: OnboardingProps) => {
   const [currentStep, setCurrentStep] = useState(1);
-  const [uploadedResume, setUploadedResume] = useState<File | null>(null);
-  const [parsedData, setParsedData] = useState<any>(null);
+  const [profileCreated, setProfileCreated] = useState(false);
 
   const steps = [
     { id: 1, title: 'Welcome', description: 'Get started with Fillo' },
     { id: 2, title: 'Upload Resume', description: 'Let us parse your information' },
-    { id: 3, title: 'Review & Edit', description: 'Verify and customize your profile' },
-    { id: 4, title: 'Complete', description: 'Your profile is ready!' }
+    { id: 3, title: 'Complete', description: 'Your profile is ready!' }
   ];
 
-  const handleResumeUpload = (file: File, data: any) => {
-    setUploadedResume(file);
-    setParsedData(data);
+  const handleResumeComplete = () => {
+    setProfileCreated(true);
     setCurrentStep(3);
-  };
-
-  const handleProfileSave = () => {
-    setCurrentStep(4);
   };
 
   const handleComplete = () => {
@@ -89,26 +81,18 @@ const Onboarding = ({ onComplete }: OnboardingProps) => {
           )}
 
           {currentStep === 2 && (
-            <ResumeUpload onUpload={handleResumeUpload} />
+            <ResumeUpload onComplete={handleResumeComplete} />
           )}
 
-          {currentStep === 3 && parsedData && (
-            <ProfileForm 
-              initialData={parsedData} 
-              onSave={handleProfileSave}
-              onBack={() => setCurrentStep(2)}
-            />
-          )}
-
-          {currentStep === 4 && (
+          {currentStep === 3 && (
             <div className="text-center">
               <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-6">
                 <Check className="h-8 w-8 text-green-600" />
               </div>
               <h3 className="text-2xl font-bold text-gray-900 mb-4">Profile Created Successfully!</h3>
               <p className="text-gray-600 mb-8 max-w-2xl mx-auto">
-                Your application profile is ready to use. Install our Chrome extension to start auto-filling 
-                job applications on Workday, ICIMS, and other platforms.
+                Your resume has been parsed and your application profile is ready to use. You can now start 
+                auto-filling job applications or create additional profiles for different roles.
               </p>
               <Button onClick={handleComplete} className="bg-blue-600 hover:bg-blue-700">
                 Go to Dashboard
@@ -117,25 +101,6 @@ const Onboarding = ({ onComplete }: OnboardingProps) => {
             </div>
           )}
         </Card>
-
-        {/* Navigation */}
-        {currentStep > 1 && currentStep < 4 && (
-          <div className="flex justify-between mt-6">
-            <Button 
-              variant="outline" 
-              onClick={() => setCurrentStep(Math.max(1, currentStep - 1))}
-            >
-              <ArrowLeft className="mr-2 h-4 w-4" />
-              Back
-            </Button>
-            {currentStep === 3 && (
-              <Button onClick={handleProfileSave} className="bg-blue-600 hover:bg-blue-700">
-                Continue
-                <ArrowRight className="ml-2 h-4 w-4" />
-              </Button>
-            )}
-          </div>
-        )}
       </div>
     </div>
   );

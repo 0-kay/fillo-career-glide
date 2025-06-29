@@ -3,28 +3,18 @@ import React, { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { FileText, Edit, Trash2, Clock } from 'lucide-react';
+import { FileText, Edit, Trash2, Clock, Plus } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useProfiles } from '@/hooks/useProfiles';
 import { useToast } from '@/hooks/use-toast';
 import DeleteProfileDialog from './DeleteProfileDialog';
+import ResumeUpload from './ResumeUpload';
 
-interface Profile {
-  id: string;
-  name: string;
-  lastUsed: string;
-  completeness: number;
-}
-
-interface ProfileListProps {
-  profiles: Profile[];
-  onDeleteProfile?: (profileId: string) => void;
-}
-
-const ProfileList = ({ profiles }: ProfileListProps) => {
+const ProfileList = () => {
   const navigate = useNavigate();
-  const { deleteProfile } = useProfiles();
+  const { profiles, loading, deleteProfile } = useProfiles();
   const { toast } = useToast();
+  const [showUpload, setShowUpload] = useState(false);
   const [deleteDialog, setDeleteDialog] = useState<{ isOpen: boolean; profileId: string; profileName: string }>({
     isOpen: false,
     profileId: '',
@@ -75,6 +65,34 @@ const ProfileList = ({ profiles }: ProfileListProps) => {
     setDeleteDialog({ isOpen: false, profileId: '', profileName: '' });
   };
 
+  const handleUploadComplete = () => {
+    setShowUpload(false);
+  };
+
+  if (loading) {
+    return (
+      <Card className="p-8 text-center">
+        <div className="animate-pulse">
+          <div className="h-4 bg-gray-200 rounded w-1/4 mx-auto"></div>
+        </div>
+      </Card>
+    );
+  }
+
+  if (showUpload) {
+    return (
+      <Card className="p-6">
+        <div className="flex items-center justify-between mb-6">
+          <h3 className="text-lg font-semibold">Upload New Resume</h3>
+          <Button variant="outline" onClick={() => setShowUpload(false)}>
+            Cancel
+          </Button>
+        </div>
+        <ResumeUpload onComplete={handleUploadComplete} />
+      </Card>
+    );
+  }
+
   if (profiles.length === 0) {
     return (
       <Card className="p-8 text-center">
@@ -83,6 +101,10 @@ const ProfileList = ({ profiles }: ProfileListProps) => {
         <p className="text-gray-600 mb-4">
           Create your first application profile to get started with auto-filling job applications.
         </p>
+        <Button onClick={() => setShowUpload(true)} className="bg-blue-600 hover:bg-blue-700">
+          <Plus className="h-4 w-4 mr-2" />
+          Upload Resume
+        </Button>
       </Card>
     );
   }
@@ -90,6 +112,14 @@ const ProfileList = ({ profiles }: ProfileListProps) => {
   return (
     <>
       <div className="space-y-4">
+        <div className="flex justify-between items-center">
+          <h2 className="text-xl font-semibold text-gray-900">Your Profiles</h2>
+          <Button onClick={() => setShowUpload(true)} className="bg-blue-600 hover:bg-blue-700">
+            <Plus className="h-4 w-4 mr-2" />
+            Upload Resume
+          </Button>
+        </div>
+        
         {profiles.map((profile) => (
           <Card key={profile.id} className="p-6 hover:shadow-md transition-shadow">
             <div className="flex items-center justify-between">
@@ -102,7 +132,7 @@ const ProfileList = ({ profiles }: ProfileListProps) => {
                   <div className="flex items-center space-x-4 mt-1">
                     <div className="flex items-center text-sm text-gray-600">
                       <Clock className="h-4 w-4 mr-1" />
-                      Last used: {new Date(profile.lastUsed).toLocaleDateString()}
+                      Last updated: {new Date(profile.updated_at).toLocaleDateString()}
                     </div>
                     <Badge 
                       variant={profile.completeness >= 90 ? "default" : "secondary"}

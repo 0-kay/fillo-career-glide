@@ -2,13 +2,14 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from './useAuth';
+import { Json } from '@/integrations/supabase/types';
 
 interface ApplicationProfile {
   id: string;
   name: string;
-  personal_info: any;
-  experience: any[];
-  education: any[];
+  personal_info: Json;
+  experience: Json;
+  education: Json;
   skills: string[];
   certifications: string[];
   completeness: number;
@@ -43,15 +44,29 @@ export function useProfiles() {
     }
   };
 
-  const createProfile = async (profileData: Partial<ApplicationProfile>) => {
+  const createProfile = async (profileData: {
+    name: string;
+    personal_info?: Json;
+    experience?: Json;
+    education?: Json;
+    skills?: string[];
+    certifications?: string[];
+    completeness?: number;
+  }) => {
     if (!user) return { error: 'Not authenticated' };
 
     try {
       const { data, error } = await supabase
         .from('application_profiles')
         .insert([{
-          ...profileData,
-          user_id: user.id
+          name: profileData.name,
+          user_id: user.id,
+          personal_info: profileData.personal_info || null,
+          experience: profileData.experience || null,
+          education: profileData.education || null,
+          skills: profileData.skills || [],
+          certifications: profileData.certifications || [],
+          completeness: profileData.completeness || 0
         }])
         .select()
         .single();
@@ -66,7 +81,15 @@ export function useProfiles() {
     }
   };
 
-  const updateProfile = async (id: string, profileData: Partial<ApplicationProfile>) => {
+  const updateProfile = async (id: string, profileData: Partial<{
+    name: string;
+    personal_info: Json;
+    experience: Json;
+    education: Json;
+    skills: string[];
+    certifications: string[];
+    completeness: number;
+  }>) => {
     if (!user) return { error: 'Not authenticated' };
 
     try {

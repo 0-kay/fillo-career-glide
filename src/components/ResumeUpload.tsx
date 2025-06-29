@@ -2,15 +2,19 @@
 import React, { useState, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Upload, FileText, X, Loader2 } from 'lucide-react';
+import { useProfiles } from '@/hooks/useProfiles';
+import { useToast } from '@/hooks/use-toast';
 
 interface ResumeUploadProps {
-  onUpload: (file: File, parsedData: any) => void;
+  onComplete?: () => void;
 }
 
-const ResumeUpload = ({ onUpload }: ResumeUploadProps) => {
+const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
   const [dragActive, setDragActive] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const { createProfile } = useProfiles();
+  const { toast } = useToast();
 
   // Mock parsing function (in real app, this would call backend API)
   const mockParseResume = async (file: File) => {
@@ -50,6 +54,19 @@ const ResumeUpload = ({ onUpload }: ResumeUploadProps) => {
     };
   };
 
+  const calculateCompleteness = (data: any) => {
+    let score = 0;
+    const maxScore = 5;
+    
+    if (data.personalInfo?.name) score++;
+    if (data.personalInfo?.email) score++;
+    if (data.experience?.length > 0) score++;
+    if (data.education?.length > 0) score++;
+    if (data.skills?.length > 0) score++;
+    
+    return Math.round((score / maxScore) * 100);
+  };
+
   const handleDrag = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -81,12 +98,20 @@ const ResumeUpload = ({ onUpload }: ResumeUploadProps) => {
     const validTypes = ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
     
     if (!validTypes.includes(file.type)) {
-      alert('Please upload a PDF, DOC, or DOCX file');
+      toast({
+        title: "Invalid file type",
+        description: "Please upload a PDF, DOC, or DOCX file",
+        variant: "destructive"
+      });
       return;
     }
 
     if (file.size > 10 * 1024 * 1024) { // 10MB limit
-      alert('File size must be less than 10MB');
+      toast({
+        title: "File too large",
+        description: "File size must be less than 10MB",
+        variant: "destructive"
+      });
       return;
     }
 
@@ -94,13 +119,50 @@ const ResumeUpload = ({ onUpload }: ResumeUploadProps) => {
     setUploading(true);
 
     try {
+      console.log('Parsing resume:', file.name);
       const parsedData = await mockParseResume(file);
-      onUpload(file, parsedData);
+      console.log('Parsed data:', parsedData);
+      
+      const completeness = calculateCompleteness(parsedData);
+      
+      // Save to database
+      const { error } = await createProfile({
+        name: `${parsedData.personalInfo.name}'s Profile`,
+        personal_info: parsedData.personalInfo,
+        experience: parsedData.experience,
+        education: parsedData.education,
+        skills: parsedData.skills,
+        certifications: parsedData.certifications,
+        completeness
+      });
+
+      if (error) {
+        console.error('Error saving profile:', error);
+        toast({
+          title: "Error saving profile",
+          description: "Please try again later",
+          variant: "destructive"
+        });
+      } else {
+        toast({
+          title: "Profile created successfully",
+          description: `Your resume has been parsed and saved with ${completeness}% completeness`,
+        });
+        
+        if (onComplete) {
+          onComplete();
+        }
+      }
     } catch (error) {
       console.error('Error parsing resume:', error);
-      alert('Error parsing resume. Please try again.');
+      toast({
+        title: "Error parsing resume",
+        description: "Please try again",
+        variant: "destructive"
+      });
     } finally {
       setUploading(false);
+      setSelectedFile(null);
     }
   };
 
@@ -114,7 +176,7 @@ const ResumeUpload = ({ onUpload }: ResumeUploadProps) => {
         <Loader2 className="h-12 w-12 animate-spin text-blue-600 mx-auto mb-4" />
         <h3 className="text-lg font-semibold text-gray-900 mb-2">Parsing Your Resume</h3>
         <p className="text-gray-600">
-          Our AI is extracting your information. This usually takes a few seconds...
+          Our AI is extracting your information and saving it to your profile...
         </p>
       </div>
     );
@@ -125,7 +187,7 @@ const ResumeUpload = ({ onUpload }: ResumeUploadProps) => {
       <div className="text-center mb-8">
         <h3 className="text-xl font-semibold text-gray-900 mb-2">Upload Your Resume</h3>
         <p className="text-gray-600">
-          Upload your resume and we'll automatically extract your information to create your profile.
+          Upload your resume and we'll automatically extract your information and create a profile.
         </p>
       </div>
 
