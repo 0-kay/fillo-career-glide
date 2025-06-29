@@ -161,9 +161,10 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
       
       const completeness = calculateCompleteness(parsedData);
       
-      // Map OpenAI response to database structure
+      // Create comprehensive profile data structure
       const profileData = {
         name: parsedData.personalInfo?.fullName || `${file.name.split('.')[0]}'s Resume`,
+        
         // Legacy fields for backward compatibility
         personal_info: {
           name: parsedData.personalInfo?.fullName || '',
@@ -178,13 +179,17 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
           ...(parsedData.skills?.soft || []),
           ...(parsedData.skills?.tools || [])
         ],
-        certifications: parsedData.certifications?.map((cert: any) => cert.name) || [],
-        // New structured fields
+        certifications: parsedData.certifications?.map((cert: any) => 
+          typeof cert === 'string' ? cert : cert.name || ''
+        ) || [],
+        
+        // New structured fields - properly mapped from OpenAI response
         personal_details: {
           full_name: {
             first: parsedData.personalInfo?.fullName?.split(' ')[0] || '',
-            middle: '',
-            last: parsedData.personalInfo?.fullName?.split(' ').slice(1).join(' ') || ''
+            middle: parsedData.personalInfo?.fullName?.split(' ').length > 2 ? 
+              parsedData.personalInfo.fullName.split(' ').slice(1, -1).join(' ') : '',
+            last: parsedData.personalInfo?.fullName?.split(' ').slice(-1)[0] || ''
           },
           email: parsedData.personalInfo?.email || '',
           phone: parsedData.personalInfo?.phone || '',
@@ -200,6 +205,7 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
           work_authorization: parsedData.personalInfo?.workAuthorization || '',
           preferred_name: parsedData.personalInfo?.preferredName || ''
         },
+        
         education_history: parsedData.education?.map((edu: any) => ({
           institution: edu.institution || '',
           degree: edu.degree || '',
@@ -209,6 +215,7 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
           gpa: edu.gpa || '',
           honors: edu.honors || ''
         })) || [],
+        
         work_experience: parsedData.experience?.map((exp: any) => ({
           title: exp.jobTitle || '',
           company: exp.company || '',
@@ -216,38 +223,87 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
           start_date: exp.startDate || '',
           end_date: exp.endDate || '',
           description: exp.description || '',
-          achievements: exp.achievements || []
+          achievements: Array.isArray(exp.achievements) ? exp.achievements : []
         })) || [],
+        
         technical_skills: parsedData.skills?.technical?.map((skill: string) => ({
           skill: skill,
           category: 'Technical',
           proficiency: 'Intermediate'
         })) || [],
+        
         soft_skills: parsedData.skills?.soft?.map((skill: string) => ({
           skill: skill,
           category: 'Soft',
           proficiency: 'Intermediate'
         })) || [],
+        
         tools_technologies: parsedData.skills?.tools?.map((tool: string) => ({
           name: tool,
           category: 'Tool',
           proficiency: 'Intermediate'
         })) || [],
-        certifications_licenses: parsedData.certifications || [],
+        
+        certifications_licenses: parsedData.certifications?.map((cert: any) => ({
+          name: typeof cert === 'string' ? cert : cert.name || '',
+          issuer: typeof cert === 'object' ? cert.issuer || '' : '',
+          issue_date: typeof cert === 'object' ? cert.issueDate || '' : '',
+          expiration_date: typeof cert === 'object' ? cert.expirationDate || '' : '',
+          credential_id: typeof cert === 'object' ? cert.credentialId || '' : '',
+          credential_url: typeof cert === 'object' ? cert.credentialUrl || '' : ''
+        })) || [],
+        
         awards_honors: [],
-        projects: parsedData.projects || [],
-        languages: parsedData.languages || [],
-        volunteer_experience: parsedData.volunteer || [],
-        job_preferences: parsedData.preferences || {},
+        
+        projects: parsedData.projects?.map((project: any) => ({
+          title: project.title || '',
+          description: project.description || '',
+          technologies: Array.isArray(project.tools) ? project.tools : [],
+          link: project.link || '',
+          start_date: project.startDate || '',
+          end_date: project.endDate || ''
+        })) || [],
+        
+        languages: parsedData.languages?.map((lang: any) => ({
+          language: typeof lang === 'string' ? lang : lang.language || '',
+          proficiency: typeof lang === 'object' ? lang.proficiency || '' : 'Conversational'
+        })) || [],
+        
+        volunteer_experience: parsedData.volunteer?.map((vol: any) => ({
+          organization: vol.organization || '',
+          role: vol.role || '',
+          description: vol.description || '',
+          start_date: vol.startDate || '',
+          end_date: vol.endDate || ''
+        })) || [],
+        
+        job_preferences: {
+          desired_titles: Array.isArray(parsedData.preferences?.desiredTitles) ? 
+            parsedData.preferences.desiredTitles : [],
+          industries: Array.isArray(parsedData.preferences?.industries) ? 
+            parsedData.preferences.industries : [],
+          location_preferences: Array.isArray(parsedData.preferences?.locationPreferences) ? 
+            parsedData.preferences.locationPreferences : [],
+          employment_type: parsedData.preferences?.employmentType || '',
+          relocation_willingness: parsedData.preferences?.relocationWillingness || '',
+          availability: parsedData.preferences?.availability || '',
+          salary_expectation: parsedData.preferences?.salaryExpectation || ''
+        },
+        
         resume_metadata: {
-          name: parsedData.personalInfo?.fullName ? `${parsedData.personalInfo.fullName}'s Resume` : `${file.name.split('.')[0]}'s Resume`,
+          name: parsedData.personalInfo?.fullName ? 
+            `${parsedData.personalInfo.fullName}'s Resume` : 
+            `${file.name.split('.')[0]}'s Resume`,
           file_name: file.name,
           parsing_status: 'Complete',
           version: '1.0',
           upload_date: new Date().toISOString()
         },
+        
         completeness
       };
+      
+      console.log('Saving profile data:', profileData);
       
       // Save to database
       const { error } = await createProfile(profileData);
@@ -262,7 +318,7 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
       } else {
         toast({
           title: "Profile created successfully",
-          description: `Your resume has been parsed with OpenAI and saved with ${completeness}% completeness`,
+          description: `Your resume has been parsed and saved with ${completeness}% completeness`,
         });
         
         if (onComplete) {
@@ -303,7 +359,7 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
       <div className="text-center mb-8">
         <h3 className="text-xl font-semibold text-gray-900 mb-2">Upload Your Resume</h3>
         <p className="text-gray-600">
-          Upload your resume and our OpenAI will intelligently extract comprehensive information including personal details, 
+          Upload your resume and our AI will intelligently extract comprehensive information including personal details, 
           work experience, education, skills, projects, and more to create a complete profile.
         </p>
       </div>
