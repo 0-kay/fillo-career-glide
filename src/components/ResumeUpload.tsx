@@ -5,7 +5,6 @@ import { useProfiles } from '@/hooks/useProfiles';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
 import mammoth from 'mammoth';
-import * as pdfParse from 'pdf-parse';
 
 interface ResumeUploadProps {
   onComplete?: () => void;
@@ -57,17 +56,10 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
   };
 
   const extractTextFromPDF = async (file: File): Promise<string> => {
-    try {
-      console.log('Starting PDF text extraction for:', file.name);
-      const arrayBuffer = await file.arrayBuffer();
-      const pdfData = await pdfParse(arrayBuffer);
-      console.log('PDF text extracted, length:', pdfData.text.length);
-      console.log('PDF text preview:', pdfData.text.substring(0, 500) + '...');
-      return pdfData.text;
-    } catch (error) {
-      console.error('Error extracting PDF text:', error);
-      throw new Error('Failed to extract text from PDF file');
-    }
+    // For PDF files, we'll send the file directly to the edge function
+    // which will handle the text extraction server-side
+    console.log('PDF file will be processed server-side:', file.name);
+    return '[PDF_FILE_CONTENT]'; // Placeholder - actual extraction happens server-side
   };
 
   const extractTextFromDOCX = async (file: File): Promise<string> => {
@@ -90,7 +82,26 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
     console.log('Processing file:', file.name, 'Type:', file.type);
     
     if (file.type === 'application/pdf') {
-      text = await extractTextFromPDF(file);
+      // For PDF files, we'll send the file data directly to the edge function
+      const arrayBuffer = await file.arrayBuffer();
+      const base64Data = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)));
+      
+      console.log('Sending PDF file to edge function for processing...');
+      
+      const { data, error } = await supabase.functions.invoke('azure-resume-parser', {
+        body: {
+          fileData: base64Data,
+          fileName: file.name,
+          fileType: file.type
+        }
+      });
+
+      if (error) {
+        console.error('Edge function error:', error);
+        throw new Error('Failed to parse PDF file');
+      }
+
+      return data;
     } else if (file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
       text = await extractTextFromDOCX(file);
     } else if (file.type === 'application/msword') {
