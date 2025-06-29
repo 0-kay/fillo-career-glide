@@ -126,8 +126,7 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
       console.error('Error details:', {
         message: error instanceof Error ? error.message : String(error),
         name: error instanceof Error ? error.name : 'Unknown',
-        stack: error instanceof Error ? error.stack : undefined,
-        cause: error instanceof Error ? error.cause : undefined
+        stack: error instanceof Error ? error.stack : undefined
       });
       
       // Log additional PDF.js specific error details
