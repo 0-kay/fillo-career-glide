@@ -30,14 +30,85 @@ serve(async (req) => {
 
     console.log('Request data keys:', Object.keys(requestData));
     
-    // Create a simple text prompt
-    let promptText = `Please extract resume information from: ${requestData.fileName || 'unknown file'}`;
+    // Create the detailed resume parsing prompt
+    const systemPrompt = `You are a resume parser. You will be given unstructured resume text from a PDF, DOCX, or DOC file.
+
+Your goal is to extract structured information from this resume text and return a clean, JSON-formatted response with the following keys:
+
+{
+  "personalInfo": {
+    "fullName": "",
+    "email": "",
+    "phone": "",
+    "address": "",
+    "linkedin": "",
+    "github": "",
+    "portfolio": ""
+  },
+  "summary": "",
+  "skills": {
+    "technical": [],
+    "soft": [],
+    "tools": []
+  },
+  "experience": [
+    {
+      "jobTitle": "",
+      "company": "",
+      "location": "",
+      "startDate": "",
+      "endDate": "",
+      "description": ""
+    }
+  ],
+  "education": [
+    {
+      "degree": "",
+      "school": "",
+      "location": "",
+      "startDate": "",
+      "endDate": "",
+      "description": ""
+    }
+  ],
+  "certifications": [
+    {
+      "name": "",
+      "issuingOrganization": "",
+      "dateIssued": ""
+    }
+  ],
+  "languages": [],
+  "projects": [
+    {
+      "name": "",
+      "description": "",
+      "technologies": []
+    }
+  ],
+  "awards": [
+    {
+      "title": "",
+      "issuer": "",
+      "date": "",
+      "description": ""
+    }
+  ]
+}
+
+Only include keys for which data is found. Do not hallucinate or guess. If something isn't in the text, omit that field from the response entirely. Format your final output as clean JSON only.`;
+
+    let userPrompt = `Here is the resume text:\n"""`;
     
     if (requestData.resumeText) {
-      promptText = requestData.resumeText.substring(0, 2000); // Limit text length
+      userPrompt += requestData.resumeText.substring(0, 15000); // Limit text length
+    } else {
+      userPrompt += `Resume file: ${requestData.fileName || 'unknown file'}`;
     }
+    
+    userPrompt += '\n"""';
 
-    console.log('Calling OpenAI with prompt length:', promptText.length);
+    console.log('Calling OpenAI with prompt length:', userPrompt.length);
 
     const openAIResponse = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
@@ -50,19 +121,21 @@ serve(async (req) => {
         messages: [
           {
             role: 'system',
-            content: 'Extract resume info and return JSON with: personalInfo{fullName,email,phone}, experience[], education[], skills{technical:[]}'
+            content: systemPrompt
           },
           {
             role: 'user',
-            content: promptText
+            content: userPrompt
           }
         ],
         temperature: 0,
-        max_tokens: 500
+        max_tokens: 2000
       }),
     });
 
     if (!openAIResponse.ok) {
+      const errorText = await openAIResponse.text();
+      console.error('OpenAI error:', openAIResponse.status, errorText);
       throw new Error(`OpenAI error: ${openAIResponse.status}`);
     }
 
@@ -71,27 +144,27 @@ serve(async (req) => {
     
     console.log('OpenAI response length:', content.length);
 
-    // Simple fallback data
+    // Simple fallback data matching the new structure
     const fallbackData = {
       personalInfo: {
-        fullName: requestData.fileName?.replace(/\.[^/.]+$/, '') || 'Resume',
-        email: '',
-        phone: ''
+        fullName: requestData.fileName?.replace(/\.[^/.]+$/, '') || 'Resume'
       },
+      skills: { technical: [] },
       experience: [],
-      education: [],
-      skills: { technical: [] }
+      education: []
     };
 
     let result = fallbackData;
     
     try {
-      const parsed = JSON.parse(content.replace(/```json|```/g, ''));
+      // Clean the response to extract just the JSON
+      const cleanedContent = content.replace(/```json|```/g, '').trim();
+      const parsed = JSON.parse(cleanedContent);
       if (parsed && typeof parsed === 'object') {
-        result = { ...fallbackData, ...parsed };
+        result = parsed;
       }
     } catch (parseError) {
-      console.log('Using fallback data due to parse error');
+      console.log('Using fallback data due to parse error:', parseError.message);
     }
 
     return new Response(JSON.stringify(result), {
@@ -102,10 +175,10 @@ serve(async (req) => {
     console.error('Function error:', error.message);
     
     const errorResponse = {
-      personalInfo: { fullName: 'Error Processing Resume', email: '', phone: '' },
+      personalInfo: { fullName: 'Error Processing Resume' },
+      skills: { technical: [] },
       experience: [],
       education: [],
-      skills: { technical: [] },
       error: error.message
     };
 
