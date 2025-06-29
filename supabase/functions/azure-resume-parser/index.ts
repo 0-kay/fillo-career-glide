@@ -19,12 +19,10 @@ serve(async (req) => {
       throw new Error('No resume text provided');
     }
 
-    const azureEndpoint = Deno.env.get('AZURE_OPENAI_ENDPOINT');
-    const azureApiKey = Deno.env.get('AZURE_OPENAI_API_KEY');
-    const deploymentName = Deno.env.get('AZURE_OPENAI_DEPLOYMENT_NAME') || 'gpt-4o';
+    const openaiApiKey = Deno.env.get('OPENAI_API_KEY');
 
-    if (!azureEndpoint || !azureApiKey) {
-      throw new Error('Azure OpenAI configuration missing');
+    if (!openaiApiKey) {
+      throw new Error('OpenAI API key not configured');
     }
 
     const systemPrompt = `You are an expert resume parser. Extract comprehensive information from the resume text and return it in the following JSON structure. Be thorough and accurate:
@@ -157,13 +155,14 @@ Important instructions:
 6. Identify and extract project details including technologies used
 7. Return only valid JSON, no additional text or explanations`;
 
-    const response = await fetch(`${azureEndpoint}/openai/deployments/${deploymentName}/chat/completions?api-version=2024-08-01-preview`, {
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${azureApiKey}`,
+        'Authorization': `Bearer ${openaiApiKey}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
+        model: 'gpt-4o-mini',
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: `Parse this resume:\n\n${resumeText}` }
@@ -176,7 +175,7 @@ Important instructions:
 
     if (!response.ok) {
       const errorText = await response.text();
-      throw new Error(`Azure OpenAI API error: ${response.status} - ${errorText}`);
+      throw new Error(`OpenAI API error: ${response.status} - ${errorText}`);
     }
 
     const data = await response.json();

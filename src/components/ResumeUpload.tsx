@@ -71,7 +71,7 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
     }
   };
 
-  const parseResumeWithAzureAI = async (file: File): Promise<any> => {
+  const parseResumeWithOpenAI = async (file: File): Promise<any> => {
     let text = '';
     
     if (file.type === 'application/pdf') {
@@ -92,8 +92,8 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
     });
 
     if (error) {
-      console.error('Azure AI parsing error:', error);
-      throw new Error('Failed to parse resume with Azure AI');
+      console.error('OpenAI parsing error:', error);
+      throw new Error('Failed to parse resume with OpenAI');
     }
 
     return data;
@@ -155,9 +155,9 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
     setUploading(true);
 
     try {
-      console.log('Parsing resume with Azure AI:', file.name);
-      const parsedData = await parseResumeWithAzureAI(file);
-      console.log('Azure AI parsed comprehensive data:', parsedData);
+      console.log('Parsing resume with OpenAI:', file.name);
+      const parsedData = await parseResumeWithOpenAI(file);
+      console.log('OpenAI parsed comprehensive data:', parsedData);
       
       const completeness = calculateCompleteness(parsedData);
       
@@ -195,7 +195,7 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
       } else {
         toast({
           title: "Profile created successfully",
-          description: `Your resume has been parsed with Azure AI and saved with ${completeness}% completeness`,
+          description: `Your resume has been parsed with OpenAI and saved with ${completeness}% completeness`,
         });
         
         if (onComplete) {
@@ -223,7 +223,7 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
     return (
       <div className="text-center py-12">
         <Loader2 className="h-12 w-12 animate-spin text-blue-600 mx-auto mb-4" />
-        <h3 className="text-lg font-semibold text-gray-900 mb-2">Analyzing Your Resume with Azure AI</h3>
+        <h3 className="text-lg font-semibold text-gray-900 mb-2">Analyzing Your Resume with OpenAI</h3>
         <p className="text-gray-600">
           Using advanced AI to extract comprehensive information from your resume...
         </p>
@@ -236,7 +236,7 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
       <div className="text-center mb-8">
         <h3 className="text-xl font-semibold text-gray-900 mb-2">Upload Your Resume</h3>
         <p className="text-gray-600">
-          Upload your resume and our Azure AI will intelligently extract comprehensive information including personal details, 
+          Upload your resume and our OpenAI will intelligently extract comprehensive information including personal details, 
           work experience, education, skills, projects, and more to create a complete profile.
         </p>
       </div>
@@ -293,7 +293,7 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
 
       <div className="mt-6 text-center">
         <p className="text-sm text-gray-500">
-          Your resume data is processed securely with Azure AI and never shared with third parties.
+          Your resume data is processed securely with OpenAI and never shared with third parties.
         </p>
       </div>
     </div>
