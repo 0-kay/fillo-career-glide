@@ -1,4 +1,3 @@
-
 import React, { useState, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Upload, FileText, X, Loader2 } from 'lucide-react';
@@ -6,6 +5,10 @@ import { useProfiles } from '@/hooks/useProfiles';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
 import mammoth from 'mammoth';
+import * as pdfjsLib from 'pdfjs-dist/build/pdf';
+
+// Set up PDF.js worker
+pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
 
 interface ResumeUploadProps {
   onComplete?: () => void;
@@ -18,6 +21,28 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
   const { createProfile } = useProfiles();
   const { toast } = useToast();
 
+  const extractTextFromPDF = async (file: File): Promise<string> => {
+    try {
+      console.log('Extracting text from PDF...');
+      const arrayBuffer = await file.arrayBuffer();
+      const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+
+      let text = '';
+      for (let i = 1; i <= pdf.numPages; i++) {
+        const page = await pdf.getPage(i);
+        const content = await page.getTextContent();
+        const pageText = content.items.map((item: any) => item.str).join(' ');
+        text += pageText + '\n';
+      }
+
+      console.log('PDF text extracted successfully, length:', text.length);
+      return text;
+    } catch (error) {
+      console.error('Error extracting PDF text:', error);
+      throw new Error('Failed to extract text from PDF');
+    }
+  };
+
   const parseResumeWithAI = async (file: File) => {
     console.log('Starting parse for:', file.name);
     
@@ -27,24 +52,31 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
     };
 
     // Handle different file types
-    if (file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+    if (file.type === 'application/pdf') {
+      console.log('Processing PDF file');
+      const resumeText = await extractTextFromPDF(file);
+      requestBody = {
+        resumeText: resumeText.substring(0, 3000), // Limit text length
+        fileName: file.name
+      };
+    } else if (file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
       try {
         const arrayBuffer = await file.arrayBuffer();
         const result = await mammoth.extractRawText({ arrayBuffer });
-        requestBody.resumeText = result.value.substring(0, 3000); // Limit text
+        requestBody.resumeText = result.value.substring(0, 3000);
       } catch (error) {
         console.log('DOCX extraction failed, using filename');
       }
     } else if (file.type === 'text/plain') {
       try {
         const text = await file.text();
-        requestBody.resumeText = text.substring(0, 3000); // Limit text
+        requestBody.resumeText = text.substring(0, 3000);
       } catch (error) {
         console.log('Text extraction failed, using filename');
       }
     }
 
-    console.log('Calling edge function...');
+    console.log('Calling edge function with request body keys:', Object.keys(requestBody));
     
     const { data, error } = await supabase.functions.invoke('azure-resume-parser', {
       body: requestBody
@@ -118,7 +150,6 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
       console.log('Processing file...');
       const parsedData = await parseResumeWithAI(file);
       
-      // Simple profile creation
       const profileData = {
         name: parsedData.personalInfo?.fullName || file.name.replace(/\.[^/.]+$/, ''),
         personal_info: parsedData.personalInfo || {},
