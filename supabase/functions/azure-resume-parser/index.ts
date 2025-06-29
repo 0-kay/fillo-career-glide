@@ -25,135 +25,104 @@ serve(async (req) => {
       throw new Error('OpenAI API key not configured');
     }
 
-    const systemPrompt = `You are an expert resume parser. Extract comprehensive information from the resume text and return it in the following JSON structure. Be thorough and accurate:
+    const systemPrompt = `You are a resume parser. Your job is to extract structured data from resumes, no matter how the text is formatted, and return it in JSON.
+
+The resumes may include multiple sections (e.g., education, experience, skills), in various layouts and tones — bullet points, paragraphs, one-pagers, etc. Some fields may be missing — that's okay.
+
+Return the extracted information in this structured JSON format:
 
 {
-  "personal_details": {
-    "full_name": { "first": "", "middle": "", "last": "" },
-    "preferred_name": "",
-    "date_of_birth": "",
-    "gender": "",
-    "phone": "",
+  "personalInfo": {
+    "fullName": "",
     "email": "",
-    "linkedin_url": "",
-    "github_url": "",
-    "portfolio_url": "",
-    "address": { "street": "", "city": "", "state": "", "zip": "", "country": "" },
-    "work_authorization": ""
+    "phone": "",
+    "linkedin": "",
+    "portfolio": "",
+    "address": "",
+    "workAuthorization": "",
+    "preferredName": ""
   },
-  "education_history": [
+  "education": [
     {
       "institution": "",
       "degree": "",
-      "major": "",
+      "fieldOfStudy": "",
+      "startDate": "",
+      "endDate": "",
       "gpa": "",
-      "start_date": "",
-      "end_date": "",
-      "honors": [],
-      "activities": []
+      "honors": ""
     }
   ],
-  "work_experience": [
+  "experience": [
     {
+      "jobTitle": "",
       "company": "",
-      "title": "",
       "location": "",
-      "start_date": "",
-      "end_date": "",
+      "startDate": "",
+      "endDate": "",
       "description": "",
-      "achievements": [],
-      "reason_for_leaving": ""
+      "achievements": []
     }
   ],
-  "technical_skills": [
-    {
-      "skill": "",
-      "category": "",
-      "proficiency": "Beginner|Intermediate|Advanced|Expert"
-    }
-  ],
-  "soft_skills": [
-    {
-      "skill": "",
-      "proficiency": "Basic|Good|Excellent"
-    }
-  ],
-  "tools_technologies": [
+  "skills": {
+    "technical": [],
+    "soft": [],
+    "tools": []
+  },
+  "certifications": [
     {
       "name": "",
-      "category": "",
-      "proficiency": "Beginner|Intermediate|Advanced|Expert"
-    }
-  ],
-  "certifications_licenses": [
-    {
-      "name": "",
-      "issuing_organization": "",
-      "issue_date": "",
-      "expiration_date": "",
-      "credential_id": "",
-      "credential_url": ""
-    }
-  ],
-  "awards_honors": [
-    {
-      "title": "",
-      "organization": "",
-      "description": "",
-      "date_received": ""
+      "issuer": "",
+      "issueDate": "",
+      "expirationDate": "",
+      "credentialId": "",
+      "credentialUrl": ""
     }
   ],
   "projects": [
     {
       "title": "",
       "description": "",
-      "technologies": [],
+      "tools": [],
       "link": "",
-      "start_date": "",
-      "end_date": ""
+      "startDate": "",
+      "endDate": ""
     }
   ],
   "languages": [
     {
       "language": "",
-      "proficiency": "Basic|Conversational|Fluent|Native"
+      "proficiency": ""
     }
   ],
-  "volunteer_experience": [
+  "volunteer": [
     {
       "organization": "",
       "role": "",
       "description": "",
-      "start_date": "",
-      "end_date": ""
+      "startDate": "",
+      "endDate": ""
     }
   ],
-  "job_preferences": {
-    "desired_titles": [],
+  "preferences": {
+    "desiredTitles": [],
     "industries": [],
-    "employment_type": [],
-    "willing_to_relocate": false,
-    "desired_locations": [],
-    "salary_expectations": "",
-    "availability": ""
-  },
-  "resume_metadata": {
-    "name": "",
-    "file_name": "",
-    "parsing_status": "Complete|Needs Review|Incomplete",
-    "version": "1.0",
-    "upload_date": ""
+    "locationPreferences": [],
+    "employmentType": "",
+    "relocationWillingness": "",
+    "availability": "",
+    "salaryExpectation": ""
   }
 }
 
-Important instructions:
-1. Extract ALL available information, don't leave fields empty if data exists
-2. Infer reasonable proficiency levels for skills based on context
-3. Parse dates into consistent formats (YYYY-MM-DD or YYYY-MM or YYYY)
-4. Categorize skills appropriately (Programming, Framework, Database, etc.)
-5. Extract achievements and accomplishments from job descriptions
-6. Identify and extract project details including technologies used
-7. Return only valid JSON, no additional text or explanations`;
+Rules:
+- Fill in as many fields as possible, even if the section headers are missing.
+- Normalize data (e.g., "Sep 2021 – Present" → "2021-09" and "Present").
+- If a field is not found, use an empty string or empty list (never omit the field).
+- Extract skills from anywhere (bullets, summaries, job descriptions).
+- If education or experience appears multiple times, extract each entry.
+
+Return only the JSON.`;
 
     const response = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
@@ -165,7 +134,7 @@ Important instructions:
         model: 'gpt-4o-mini',
         messages: [
           { role: 'system', content: systemPrompt },
-          { role: 'user', content: `Parse this resume:\n\n${resumeText}` }
+          { role: 'user', content: `Now here is the resume:\n---\n${resumeText}\n---\nReturn only the JSON.` }
         ],
         temperature: 0.1,
         max_tokens: 4000,
@@ -181,10 +150,9 @@ Important instructions:
     const data = await response.json();
     const parsedData = JSON.parse(data.choices[0].message.content);
     
-    // Set metadata
+    // Add metadata for compatibility with existing system
     parsedData.resume_metadata = {
-      ...parsedData.resume_metadata,
-      name: `${parsedData.personal_details.full_name.first} ${parsedData.personal_details.full_name.last}'s Resume`,
+      name: `${parsedData.personalInfo?.fullName || 'Unknown'}'s Resume`,
       file_name: fileName,
       parsing_status: 'Complete',
       version: '1.0',
