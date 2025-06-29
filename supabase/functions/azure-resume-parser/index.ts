@@ -13,19 +13,30 @@ serve(async (req) => {
   }
 
   try {
-    const { resumeText, fileName } = await req.json();
+    console.log('=== EDGE FUNCTION CALLED ===');
+    console.log('Request method:', req.method);
+    console.log('Request headers:', Object.fromEntries(req.headers.entries()));
+    
+    const requestBody = await req.json();
+    console.log('Request body received:', JSON.stringify(requestBody, null, 2));
+    
+    const { resumeText, fileName } = requestBody;
     
     if (!resumeText) {
+      console.error('No resume text provided in request');
       throw new Error('No resume text provided');
     }
 
     const openaiApiKey = Deno.env.get('OPENAI_API_KEY');
 
     if (!openaiApiKey) {
+      console.error('OpenAI API key not found in environment');
       throw new Error('OpenAI API key not configured');
     }
 
-    console.log('Processing resume text:', resumeText.substring(0, 200) + '...');
+    console.log('Processing resume text length:', resumeText.length);
+    console.log('Resume text preview:', resumeText.substring(0, 500) + '...');
+    console.log('File name:', fileName);
 
     const systemPrompt = `You are a resume parser. Your job is to extract structured data from resumes, no matter how the text is formatted, and return it in JSON.
 
@@ -128,38 +139,48 @@ Rules:
 
 Return only the JSON.`;
 
+    const openaiPayload = {
+      model: 'gpt-4o-mini',
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { 
+          role: 'user', 
+          content: `Now here is the resume text (note: this may be unstructured data):\n---\n${resumeText}\n---\nReturn only the JSON.` 
+        }
+      ],
+      temperature: 0.1,
+      max_tokens: 4000,
+      response_format: { type: "json_object" }
+    };
+
+    console.log('=== SENDING TO OPENAI ===');
+    console.log('OpenAI payload:', JSON.stringify(openaiPayload, null, 2));
+
     const response = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${openaiApiKey}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        model: 'gpt-4o-mini',
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { 
-            role: 'user', 
-            content: `Now here is the resume text (note: this may be unstructured data):\n---\n${resumeText}\n---\nReturn only the JSON.` 
-          }
-        ],
-        temperature: 0.1,
-        max_tokens: 4000,
-        response_format: { type: "json_object" }
-      }),
+      body: JSON.stringify(openaiPayload),
     });
+
+    console.log('OpenAI response status:', response.status);
+    console.log('OpenAI response headers:', Object.fromEntries(response.headers.entries()));
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('OpenAI API error:', errorText);
+      console.error('OpenAI API error response:', errorText);
       throw new Error(`OpenAI API error: ${response.status} - ${errorText}`);
     }
 
     const data = await response.json();
-    console.log('OpenAI response:', data);
+    console.log('=== OPENAI RESPONSE ===');
+    console.log('Full OpenAI response:', JSON.stringify(data, null, 2));
     
     const parsedData = JSON.parse(data.choices[0].message.content);
-    console.log('Parsed resume data:', parsedData);
+    console.log('=== PARSED RESUME DATA ===');
+    console.log('Parsed resume data:', JSON.stringify(parsedData, null, 2));
     
     // Add metadata for compatibility with existing system
     parsedData.resume_metadata = {
@@ -170,11 +191,16 @@ Return only the JSON.`;
       upload_date: new Date().toISOString()
     };
 
+    console.log('=== FINAL RESPONSE ===');
+    console.log('Final response data:', JSON.stringify(parsedData, null, 2));
+
     return new Response(JSON.stringify(parsedData), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   } catch (error) {
-    console.error('Error in azure-resume-parser function:', error);
+    console.error('=== ERROR IN EDGE FUNCTION ===');
+    console.error('Error details:', error);
+    console.error('Error stack:', error.stack);
     return new Response(JSON.stringify({ error: error.message }), {
       status: 500,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
