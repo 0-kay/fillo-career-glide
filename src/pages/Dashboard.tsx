@@ -1,53 +1,53 @@
+
 import React, { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Plus, FileText, Settings, Chrome, User, Upload } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Plus, FileText, Settings, Chrome, User, Upload, LogOut } from 'lucide-react';
+import { Link, useNavigate } from 'react-router-dom';
+import { useAuth } from '@/hooks/useAuth';
+import { useProfiles } from '@/hooks/useProfiles';
 import Onboarding from '@/components/Onboarding';
 import ProfileList from '@/components/ProfileList';
 
-// Mock data for profiles (in real app this would come from backend)
-const mockProfiles = [
-  {
-    id: '1',
-    name: 'Software Engineer Profile',
-    lastUsed: '2025-01-15',
-    completeness: 95
-  },
-  {
-    id: '2', 
-    name: 'Product Manager Profile',
-    lastUsed: '2025-01-10',
-    completeness: 87
-  }
-];
-
 const Dashboard = () => {
   const [showOnboarding, setShowOnboarding] = useState(false);
-  const [profiles, setProfiles] = useState(mockProfiles);
-  const [hasCompletedOnboarding, setHasCompletedOnboarding] = useState(false);
+  const { user, signOut } = useAuth();
+  const { profiles, loading } = useProfiles();
+  const navigate = useNavigate();
 
   useEffect(() => {
-    // Check if user has completed onboarding (in real app, check from backend/localStorage)
-    const onboardingComplete = localStorage.getItem('fillo_onboarding_complete');
-    if (!onboardingComplete && profiles.length === 0) {
-      setShowOnboarding(true);
-    } else {
-      setHasCompletedOnboarding(true);
+    // Redirect to auth if not logged in  
+    if (!user) {
+      navigate('/auth');
+      return;
     }
-  }, [profiles.length]);
+
+    // Show onboarding if no profiles exist
+    const onboardingComplete = localStorage.getItem('fillo_onboarding_complete');
+    if (!onboardingComplete && profiles.length === 0 && !loading) {
+      setShowOnboarding(true);
+    }
+  }, [user, profiles.length, loading, navigate]);
 
   const handleOnboardingComplete = () => {
     setShowOnboarding(false);
-    setHasCompletedOnboarding(true);
     localStorage.setItem('fillo_onboarding_complete', 'true');
   };
 
-  const handleDeleteProfile = (profileId: string) => {
-    setProfiles(prev => prev.filter(profile => profile.id !== profileId));
+  const handleDeleteProfile = async (profileId: string) => {
+    // This will be handled by the ProfileList component
     console.log('Profile deleted:', profileId);
   };
+
+  const handleSignOut = async () => {
+    await signOut();
+    navigate('/');
+  };
+
+  if (!user) {
+    return null; // Will redirect to auth
+  }
 
   if (showOnboarding) {
     return <Onboarding onComplete={handleOnboardingComplete} />;
@@ -74,7 +74,11 @@ const Dashboard = () => {
               </Link>
               <Button variant="ghost" size="sm">
                 <User className="h-4 w-4 mr-2" />
-                Profile
+                {user.email}
+              </Button>
+              <Button variant="ghost" size="sm" onClick={handleSignOut}>
+                <LogOut className="h-4 w-4 mr-2" />
+                Sign Out
               </Button>
             </div>
           </div>
@@ -104,7 +108,7 @@ const Dashboard = () => {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-gray-600">Applications This Week</p>
-                <p className="text-2xl font-bold text-gray-900">12</p>
+                <p className="text-2xl font-bold text-gray-900">0</p>
               </div>
               <Upload className="h-8 w-8 text-green-600" />
             </div>
@@ -114,7 +118,7 @@ const Dashboard = () => {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-gray-600">Extension Status</p>
-                <Badge className="mt-1 bg-green-100 text-green-800">Installed</Badge>
+                <Badge className="mt-1 bg-yellow-100 text-yellow-800">Not Installed</Badge>
               </div>
               <Chrome className="h-8 w-8 text-purple-600" />
             </div>
@@ -133,7 +137,12 @@ const Dashboard = () => {
               </Button>
             </div>
             
-            <ProfileList profiles={profiles} onDeleteProfile={handleDeleteProfile} />
+            <ProfileList profiles={profiles.map(p => ({
+              id: p.id,
+              name: p.name,
+              lastUsed: p.updated_at,
+              completeness: p.completeness
+            }))} onDeleteProfile={handleDeleteProfile} />
           </div>
 
           {/* Sidebar */}

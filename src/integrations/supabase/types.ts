@@ -9,7 +9,116 @@ export type Json =
 export type Database = {
   public: {
     Tables: {
-      [_ in never]: never
+      application_profiles: {
+        Row: {
+          certifications: string[] | null
+          completeness: number | null
+          created_at: string | null
+          education: Json | null
+          experience: Json | null
+          id: string
+          name: string
+          personal_info: Json | null
+          skills: string[] | null
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          certifications?: string[] | null
+          completeness?: number | null
+          created_at?: string | null
+          education?: Json | null
+          experience?: Json | null
+          id?: string
+          name: string
+          personal_info?: Json | null
+          skills?: string[] | null
+          updated_at?: string | null
+          user_id: string
+        }
+        Update: {
+          certifications?: string[] | null
+          completeness?: number | null
+          created_at?: string | null
+          education?: Json | null
+          experience?: Json | null
+          id?: string
+          name?: string
+          personal_info?: Json | null
+          skills?: string[] | null
+          updated_at?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
+      applications: {
+        Row: {
+          application_url: string | null
+          applied_at: string | null
+          company_name: string
+          id: string
+          notes: string | null
+          position_title: string
+          profile_id: string | null
+          status: string | null
+          user_id: string
+        }
+        Insert: {
+          application_url?: string | null
+          applied_at?: string | null
+          company_name: string
+          id?: string
+          notes?: string | null
+          position_title: string
+          profile_id?: string | null
+          status?: string | null
+          user_id: string
+        }
+        Update: {
+          application_url?: string | null
+          applied_at?: string | null
+          company_name?: string
+          id?: string
+          notes?: string | null
+          position_title?: string
+          profile_id?: string | null
+          status?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "applications_profile_id_fkey"
+            columns: ["profile_id"]
+            isOneToOne: false
+            referencedRelation: "application_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      profiles: {
+        Row: {
+          created_at: string | null
+          email: string | null
+          full_name: string | null
+          id: string
+          updated_at: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          email?: string | null
+          full_name?: string | null
+          id: string
+          updated_at?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          email?: string | null
+          full_name?: string | null
+          id?: string
+          updated_at?: string | null
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never

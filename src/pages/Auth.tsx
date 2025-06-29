@@ -1,22 +1,36 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
 import { ArrowLeft, Mail, Lock, User, Eye, EyeOff } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
+import { useAuth } from '@/hooks/useAuth';
+import { useToast } from '@/hooks/use-toast';
 
 const Auth = () => {
   const [isSignUp, setIsSignUp] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
     name: '',
     email: '',
     password: '',
     confirmPassword: ''
   });
+
+  const { signIn, signUp, user } = useAuth();
+  const { toast } = useToast();
+  const navigate = useNavigate();
+
+  // Redirect if already authenticated
+  useEffect(() => {
+    if (user) {
+      navigate('/dashboard');
+    }
+  }, [user, navigate]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setFormData(prev => ({
@@ -25,15 +39,62 @@ const Auth = () => {
     }));
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    // TODO: Implement authentication logic
-    console.log('Form submitted:', formData);
+    setLoading(true);
+
+    try {
+      if (isSignUp) {
+        if (formData.password !== formData.confirmPassword) {
+          toast({
+            title: "Password Mismatch",
+            description: "Passwords do not match.",
+            variant: "destructive"
+          });
+          return;
+        }
+
+        const { error } = await signUp(formData.email, formData.password, formData.name);
+        
+        if (error) {
+          toast({
+            title: "Sign Up Error",
+            description: error.message,
+            variant: "destructive"
+          });
+        } else {
+          toast({
+            title: "Success!",
+            description: "Please check your email to confirm your account.",
+          });
+        }
+      } else {
+        const { error } = await signIn(formData.email, formData.password);
+        
+        if (error) {
+          toast({
+            title: "Sign In Error",
+            description: error.message,
+            variant: "destructive"
+          });
+        } else {
+          navigate('/dashboard');
+        }
+      }
+    } catch (error) {
+      console.error('Auth error:', error);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleOAuthLogin = (provider: string) => {
     // TODO: Implement OAuth login
     console.log(`${provider} login clicked`);
+    toast({
+      title: "Coming Soon",
+      description: `${provider} login will be available soon!`,
+    });
   };
 
   return (
@@ -76,6 +137,7 @@ const Auth = () => {
               variant="outline" 
               className="w-full h-12"
               onClick={() => handleOAuthLogin('google')}
+              disabled={loading}
             >
               <svg className="w-5 h-5 mr-2" viewBox="0 0 24 24">
                 <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
@@ -90,6 +152,7 @@ const Auth = () => {
               variant="outline" 
               className="w-full h-12"
               onClick={() => handleOAuthLogin('apple')}
+              disabled={loading}
             >
               <svg className="w-5 h-5 mr-2" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/>
@@ -122,6 +185,7 @@ const Auth = () => {
                     onChange={handleInputChange}
                     className="pl-10"
                     required
+                    disabled={loading}
                   />
                 </div>
               </div>
@@ -140,6 +204,7 @@ const Auth = () => {
                   onChange={handleInputChange}
                   className="pl-10"
                   required
+                  disabled={loading}
                 />
               </div>
             </div>
@@ -157,11 +222,13 @@ const Auth = () => {
                   onChange={handleInputChange}
                   className="pl-10 pr-10"
                   required
+                  disabled={loading}
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
                   className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                  disabled={loading}
                 >
                   {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </button>
@@ -182,6 +249,7 @@ const Auth = () => {
                     onChange={handleInputChange}
                     className="pl-10"
                     required
+                    disabled={loading}
                   />
                 </div>
               </div>
@@ -193,6 +261,7 @@ const Auth = () => {
                 <button
                   type="button"
                   className="text-sm text-blue-600 hover:text-blue-700 hover:underline"
+                  disabled={loading}
                 >
                   Forgot password?
                 </button>
@@ -200,8 +269,12 @@ const Auth = () => {
             )}
 
             {/* Submit Button */}
-            <Button type="submit" className="w-full h-12 bg-blue-600 hover:bg-blue-700">
-              {isSignUp ? 'Create Account' : 'Sign In'}
+            <Button 
+              type="submit" 
+              className="w-full h-12 bg-blue-600 hover:bg-blue-700"
+              disabled={loading}
+            >
+              {loading ? 'Loading...' : (isSignUp ? 'Create Account' : 'Sign In')}
             </Button>
           </form>
 
@@ -212,6 +285,7 @@ const Auth = () => {
               <button
                 onClick={() => setIsSignUp(!isSignUp)}
                 className="text-blue-600 hover:text-blue-700 hover:underline font-medium"
+                disabled={loading}
               >
                 {isSignUp ? 'Sign in' : 'Sign up'}
               </button>

@@ -5,6 +5,8 @@ import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { FileText, Edit, Trash2, Clock } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { useProfiles } from '@/hooks/useProfiles';
+import { useToast } from '@/hooks/use-toast';
 import DeleteProfileDialog from './DeleteProfileDialog';
 
 interface Profile {
@@ -19,8 +21,10 @@ interface ProfileListProps {
   onDeleteProfile?: (profileId: string) => void;
 }
 
-const ProfileList = ({ profiles, onDeleteProfile }: ProfileListProps) => {
+const ProfileList = ({ profiles }: ProfileListProps) => {
   const navigate = useNavigate();
+  const { deleteProfile } = useProfiles();
+  const { toast } = useToast();
   const [deleteDialog, setDeleteDialog] = useState<{ isOpen: boolean; profileId: string; profileName: string }>({
     isOpen: false,
     profileId: '',
@@ -41,9 +45,28 @@ const ProfileList = ({ profiles, onDeleteProfile }: ProfileListProps) => {
     });
   };
 
-  const confirmDelete = () => {
-    if (onDeleteProfile) {
-      onDeleteProfile(deleteDialog.profileId);
+  const confirmDelete = async () => {
+    try {
+      const { error } = await deleteProfile(deleteDialog.profileId);
+      if (error) {
+        toast({
+          title: "Error",
+          description: "Failed to delete profile. Please try again.",
+          variant: "destructive"
+        });
+      } else {
+        toast({
+          title: "Success",
+          description: "Profile deleted successfully.",
+        });
+      }
+    } catch (error) {
+      console.error('Error deleting profile:', error);
+      toast({
+        title: "Error",
+        description: "Failed to delete profile. Please try again.",
+        variant: "destructive"
+      });
     }
     setDeleteDialog({ isOpen: false, profileId: '', profileName: '' });
   };
