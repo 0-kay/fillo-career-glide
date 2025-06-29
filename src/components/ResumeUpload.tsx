@@ -22,62 +22,121 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
   const { toast } = useToast();
 
   const extractTextFromPDF = async (file: File): Promise<string> => {
+    console.log('=== PDF EXTRACTION START ===');
+    console.log('PDF.js version:', pdfjsLib.version);
+    console.log('Worker source:', pdfjsLib.GlobalWorkerOptions.workerSrc);
+    console.log('File details:', {
+      name: file.name,
+      size: file.size,
+      type: file.type,
+      lastModified: file.lastModified
+    });
+    
     try {
-      console.log('=== PDF EXTRACTION START ===');
-      console.log('File name:', file.name);
-      console.log('File size:', file.size);
-      console.log('File type:', file.type);
-      
       const arrayBuffer = await file.arrayBuffer();
-      console.log('ArrayBuffer length:', arrayBuffer.byteLength);
+      console.log('ArrayBuffer created successfully, length:', arrayBuffer.byteLength);
       
-      // Use a more compatible approach for PDF loading
+      // Check if arrayBuffer is valid
+      if (arrayBuffer.byteLength === 0) {
+        throw new Error('File appears to be empty');
+      }
+      
+      // Try to create a Uint8Array to ensure data is readable
+      const uint8Array = new Uint8Array(arrayBuffer);
+      console.log('Uint8Array created, first few bytes:', Array.from(uint8Array.slice(0, 10)));
+      
+      // Check for PDF signature
+      const pdfSignature = uint8Array.slice(0, 4);
+      const isPDF = String.fromCharCode(...pdfSignature) === '%PDF';
+      console.log('PDF signature check:', isPDF, 'First 10 bytes as string:', String.fromCharCode(...uint8Array.slice(0, 10)));
+      
+      if (!isPDF) {
+        throw new Error('File does not appear to be a valid PDF (missing PDF signature)');
+      }
+      
+      console.log('Creating PDF loading task...');
       const loadingTask = pdfjsLib.getDocument({
         data: arrayBuffer,
         cMapUrl: `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/cmaps/`,
         cMapPacked: true,
+        verbosity: 1, // Enable some logging
       });
       
-      console.log('Loading task created, waiting for PDF...');
+      console.log('Waiting for PDF to load...');
       const pdf = await loadingTask.promise;
-      console.log('PDF loaded successfully, pages:', pdf.numPages);
+      console.log('PDF loaded successfully! Number of pages:', pdf.numPages);
 
-      let text = '';
-      for (let i = 1; i <= pdf.numPages; i++) {
+      let fullText = '';
+      
+      for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
         try {
-          console.log(`Processing page ${i}/${pdf.numPages}`);
-          const page = await pdf.getPage(i);
-          const content = await page.getTextContent();
-          console.log(`Page ${i} content items:`, content.items.length);
+          console.log(`--- Processing page ${pageNum}/${pdf.numPages} ---`);
+          const page = await pdf.getPage(pageNum);
+          console.log(`Page ${pageNum} loaded successfully`);
           
-          const pageText = content.items
-            .filter((item: any) => item.str && typeof item.str === 'string')
-            .map((item: any) => item.str)
+          const textContent = await page.getTextContent();
+          console.log(`Page ${pageNum} text content retrieved, items:`, textContent.items.length);
+          
+          const pageText = textContent.items
+            .map((item: any) => {
+              // More robust text extraction
+              if (item && typeof item === 'object') {
+                return item.str || item.text || '';
+              }
+              return String(item || '');
+            })
+            .filter(text => text.trim().length > 0)
             .join(' ');
           
-          console.log(`Page ${i} text length:`, pageText.length);
-          console.log(`Page ${i} first 100 chars:`, pageText.substring(0, 100));
+          console.log(`Page ${pageNum} extracted text length:`, pageText.length);
+          if (pageText.length > 0) {
+            console.log(`Page ${pageNum} first 100 chars:`, pageText.substring(0, 100));
+            fullText += pageText + '\n\n';
+          } else {
+            console.warn(`Page ${pageNum} produced no text`);
+          }
           
-          text += pageText + '\n';
         } catch (pageError) {
-          console.warn(`Error processing page ${i}:`, pageError);
-          // Continue with other pages
+          console.error(`Error processing page ${pageNum}:`, {
+            error: pageError,
+            message: pageError instanceof Error ? pageError.message : String(pageError),
+            stack: pageError instanceof Error ? pageError.stack : undefined
+          });
+          // Continue with other pages instead of failing completely
         }
       }
 
       console.log('=== PDF EXTRACTION COMPLETE ===');
-      console.log('Total extracted text length:', text.length);
-      console.log('First 200 characters:', text.substring(0, 200));
-      console.log('Last 200 characters:', text.substring(Math.max(0, text.length - 200)));
+      console.log('Total extracted text length:', fullText.length);
       
-      return text.trim();
+      if (fullText.length === 0) {
+        throw new Error('No text could be extracted from any pages');
+      }
+      
+      console.log('Sample extracted text (first 500 chars):');
+      console.log(fullText.substring(0, 500));
+      console.log('Sample extracted text (last 500 chars):');
+      console.log(fullText.substring(Math.max(0, fullText.length - 500)));
+      
+      return fullText.trim();
+      
     } catch (error) {
       console.error('=== PDF EXTRACTION ERROR ===');
-      console.error('Error details:', error);
-      console.error('Error stack:', error instanceof Error ? error.stack : 'No stack trace');
+      console.error('Error type:', typeof error);
+      console.error('Error details:', {
+        message: error instanceof Error ? error.message : String(error),
+        name: error instanceof Error ? error.name : 'Unknown',
+        stack: error instanceof Error ? error.stack : undefined,
+        cause: error instanceof Error ? error.cause : undefined
+      });
       
-      // Instead of throwing, return a fallback message
-      const fallbackText = `PDF file: ${file.name} (text extraction failed)`;
+      // Log additional PDF.js specific error details
+      if (error && typeof error === 'object' && 'name' in error) {
+        console.error('PDF.js error name:', error.name);
+      }
+      
+      // Return a more descriptive fallback
+      const fallbackText = `Error extracting text from PDF: ${file.name}. Error: ${error instanceof Error ? error.message : String(error)}`;
       console.log('Using fallback text:', fallbackText);
       return fallbackText;
     }
@@ -100,6 +159,8 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
       
       console.log('Original text length:', resumeText.length);
       console.log('Truncated text length:', truncatedText.length);
+      console.log('Text being sent to AI (first 300 chars):');
+      console.log(truncatedText.substring(0, 300));
       
       requestBody = {
         resumeText: truncatedText,
@@ -137,15 +198,18 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
     }
 
     console.log('=== SENDING TO OPENAI ===');
-    console.log('Request body keys:', Object.keys(requestBody));
-    console.log('Request body fileName:', requestBody.fileName);
-    console.log('Request body resumeText length:', requestBody.resumeText?.length || 0);
+    console.log('Request body structure:', {
+      hasFileName: !!requestBody.fileName,
+      hasResumeText: !!requestBody.resumeText,
+      resumeTextLength: requestBody.resumeText?.length || 0,
+      fileType: requestBody.fileType
+    });
     
     if (requestBody.resumeText) {
-      console.log('First 300 chars being sent to OpenAI:');
-      console.log(requestBody.resumeText.substring(0, 300));
-      console.log('Last 300 chars being sent to OpenAI:');
-      console.log(requestBody.resumeText.substring(Math.max(0, requestBody.resumeText.length - 300)));
+      console.log('First 200 chars being sent to OpenAI:');
+      console.log(requestBody.resumeText.substring(0, 200));
+    } else {
+      console.log('No resume text extracted, sending only filename');
     }
     
     const { data, error } = await supabase.functions.invoke('azure-resume-parser', {
@@ -158,8 +222,11 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
       throw new Error('Failed to parse resume');
     }
     
-    console.log('OpenAI response data:', data);
-    console.log('Response data keys:', Object.keys(data || {}));
+    console.log('OpenAI response received:', {
+      hasData: !!data,
+      dataKeys: data ? Object.keys(data) : [],
+      dataStructure: data
+    });
 
     return data;
   };
