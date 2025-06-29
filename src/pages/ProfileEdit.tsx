@@ -38,18 +38,26 @@ const ProfileEdit = () => {
           });
           navigate('/dashboard');
         } else if (data) {
+          // Safely initialize form data with fallbacks
           setFormData({
-            profileName: data.name,
-            personalDetails: data.personal_details || {},
-            workExperience: data.work_experience || [],
-            educationHistory: data.education_history || [],
-            technicalSkills: data.technical_skills || [],
-            softSkills: data.soft_skills || [],
-            toolsTechnologies: data.tools_technologies || [],
-            projects: data.projects || [],
-            certifications: data.certifications_licenses || [],
-            languages: data.languages || [],
-            volunteerExperience: data.volunteer_experience || [],
+            profileName: data.name || 'Untitled Profile',
+            personalDetails: data.personal_details || {
+              full_name: { first: '', middle: '', last: '' },
+              email: '',
+              phone: '',
+              linkedin_url: '',
+              github_url: '',
+              address: { street: '', city: '', state: '', zip: '', country: '' }
+            },
+            workExperience: Array.isArray(data.work_experience) ? data.work_experience : [],
+            educationHistory: Array.isArray(data.education_history) ? data.education_history : [],
+            technicalSkills: Array.isArray(data.technical_skills) ? data.technical_skills : [],
+            softSkills: Array.isArray(data.soft_skills) ? data.soft_skills : [],
+            toolsTechnologies: Array.isArray(data.tools_technologies) ? data.tools_technologies : [],
+            projects: Array.isArray(data.projects) ? data.projects : [],
+            certifications: Array.isArray(data.certifications_licenses) ? data.certifications_licenses : [],
+            languages: Array.isArray(data.languages) ? data.languages : [],
+            volunteerExperience: Array.isArray(data.volunteer_experience) ? data.volunteer_experience : [],
             jobPreferences: data.job_preferences || {}
           });
         }
@@ -100,7 +108,7 @@ const ProfileEdit = () => {
       };
       setFormData((prev: any) => ({
         ...prev,
-        technicalSkills: [...prev.technicalSkills, newSkillObj]
+        technicalSkills: [...(prev.technicalSkills || []), newSkillObj]
       }));
       setNewSkill('');
     }
@@ -109,7 +117,7 @@ const ProfileEdit = () => {
   const removeTechnicalSkill = (index: number) => {
     setFormData((prev: any) => ({
       ...prev,
-      technicalSkills: prev.technicalSkills.filter((_: any, i: number) => i !== index)
+      technicalSkills: (prev.technicalSkills || []).filter((_: any, i: number) => i !== index)
     }));
   };
 
@@ -284,9 +292,9 @@ const ProfileEdit = () => {
           <Card className="p-6">
             <h4 className="font-semibold text-gray-900 mb-4">Technical Skills</h4>
             <div className="flex flex-wrap gap-2 mb-4">
-              {formData.technicalSkills?.map((skillObj: any, index: number) => (
+              {(formData.technicalSkills || []).map((skillObj: any, index: number) => (
                 <Badge key={index} variant="secondary" className="flex items-center gap-1">
-                  {skillObj.skill || skillObj}
+                  {skillObj?.skill || skillObj}
                   <button
                     onClick={() => removeTechnicalSkill(index)}
                     className="text-gray-500 hover:text-gray-700"
@@ -314,27 +322,27 @@ const ProfileEdit = () => {
           <Card className="p-6">
             <h4 className="font-semibold text-gray-900 mb-4">Work Experience</h4>
             <div className="space-y-4">
-              {formData.workExperience?.map((exp: any, index: number) => (
+              {(formData.workExperience || []).map((exp: any, index: number) => (
                 <div key={index} className="border rounded-lg p-4">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
                       <Label>Job Title</Label>
-                      <Input value={exp.title || ''} readOnly />
+                      <Input value={exp?.title || ''} readOnly />
                     </div>
                     <div>
                       <Label>Company</Label>
-                      <Input value={exp.company || ''} readOnly />
+                      <Input value={exp?.company || ''} readOnly />
                     </div>
                     <div>
                       <Label>Start Date</Label>
-                      <Input value={exp.start_date || ''} readOnly />
+                      <Input value={exp?.start_date || ''} readOnly />
                     </div>
                     <div>
                       <Label>End Date</Label>
-                      <Input value={exp.end_date || ''} readOnly />
+                      <Input value={exp?.end_date || ''} readOnly />
                     </div>
                   </div>
-                  {exp.achievements && exp.achievements.length > 0 && (
+                  {exp?.achievements && Array.isArray(exp.achievements) && exp.achievements.length > 0 && (
                     <div className="mt-4">
                       <Label>Achievements</Label>
                       <div className="mt-2 space-y-1">
@@ -356,27 +364,27 @@ const ProfileEdit = () => {
           <Card className="p-6">
             <h4 className="font-semibold text-gray-900 mb-4">Education</h4>
             <div className="space-y-4">
-              {formData.educationHistory?.map((edu: any, index: number) => (
+              {(formData.educationHistory || []).map((edu: any, index: number) => (
                 <div key={index} className="border rounded-lg p-4">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
                       <Label>Degree</Label>
-                      <Input value={edu.degree || ''} readOnly />
+                      <Input value={edu?.degree || ''} readOnly />
                     </div>
                     <div>
                       <Label>Institution</Label>
-                      <Input value={edu.institution || ''} readOnly />
+                      <Input value={edu?.institution || ''} readOnly />
                     </div>
                     <div>
                       <Label>Start Date</Label>
-                      <Input value={edu.start_date || ''} readOnly />
+                      <Input value={edu?.start_date || ''} readOnly />
                     </div>
                     <div>
                       <Label>End Date</Label>
-                      <Input value={edu.end_date || ''} readOnly />
+                      <Input value={edu?.end_date || ''} readOnly />
                     </div>
                   </div>
-                  {edu.gpa && (
+                  {edu?.gpa && (
                     <div className="mt-4">
                       <Label>GPA</Label>
                       <Input value={edu.gpa} readOnly className="max-w-xs" />
@@ -400,20 +408,20 @@ const ProfileEdit = () => {
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div>
                         <Label>Project Title</Label>
-                        <Input value={project.title || ''} readOnly />
+                        <Input value={project?.title || ''} readOnly />
                       </div>
                       <div>
                         <Label>Link</Label>
-                        <Input value={project.link || ''} readOnly />
+                        <Input value={project?.link || ''} readOnly />
                       </div>
                     </div>
-                    {project.description && (
+                    {project?.description && (
                       <div className="mt-4">
                         <Label>Description</Label>
                         <Textarea value={project.description} readOnly />
                       </div>
                     )}
-                    {project.technologies && project.technologies.length > 0 && (
+                    {project?.technologies && Array.isArray(project.technologies) && project.technologies.length > 0 && (
                       <div className="mt-4">
                         <Label>Technologies</Label>
                         <div className="flex flex-wrap gap-2 mt-2">

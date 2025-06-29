@@ -1,4 +1,3 @@
-
 import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from './useAuth';
@@ -46,12 +45,17 @@ export function useProfiles() {
       const { data, error } = await supabase
         .from('application_profiles')
         .select('*')
+        .eq('user_id', user.id)
         .order('updated_at', { ascending: false });
 
-      if (error) throw error;
+      if (error) {
+        console.error('Error fetching profiles:', error);
+        throw error;
+      }
       setProfiles(data || []);
     } catch (error) {
       console.error('Error fetching profiles:', error);
+      setProfiles([]);
     } finally {
       setLoading(false);
     }
@@ -65,13 +69,17 @@ export function useProfiles() {
         .from('application_profiles')
         .select('*')
         .eq('id', id)
+        .eq('user_id', user.id)
         .single();
 
-      if (error) throw error;
+      if (error) {
+        console.error('Error fetching profile:', error);
+        throw error;
+      }
       return { data, error: null };
     } catch (error) {
       console.error('Error fetching profile:', error);
-      return { error };
+      return { error, data: null };
     }
   };
 
