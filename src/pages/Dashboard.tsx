@@ -40,6 +40,32 @@ const Dashboard = () => {
     navigate('/');
   };
 
+  // Get user's first name from email or profile
+  const getUserName = () => {
+    if (user?.email) {
+      const emailName = user.email.split('@')[0];
+      return emailName.charAt(0).toUpperCase() + emailName.slice(1);
+    }
+    return 'User';
+  };
+
+  // Calculate stats from profiles
+  const getStats = () => {
+    const totalProfiles = profiles.length;
+    const completeProfiles = profiles.filter(p => p.completeness >= 90).length;
+    const averageCompleteness = profiles.length > 0 
+      ? Math.round(profiles.reduce((sum, p) => sum + p.completeness, 0) / profiles.length)
+      : 0;
+
+    return {
+      totalProfiles,
+      completeProfiles,
+      averageCompleteness
+    };
+  };
+
+  const stats = getStats();
+
   if (!user) {
     return null; // Will redirect to auth
   }
@@ -83,8 +109,15 @@ const Dashboard = () => {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Welcome Section */}
         <div className="mb-8">
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">Welcome back!</h1>
-          <p className="text-gray-600">Manage your application profiles and streamline your job search.</p>
+          <h1 className="text-3xl font-bold text-gray-900 mb-2">
+            Welcome back, {getUserName()}!
+          </h1>
+          <p className="text-gray-600">
+            {profiles.length === 0 
+              ? "Let's create your first application profile to get started."
+              : `You have ${profiles.length} profile${profiles.length === 1 ? '' : 's'} ready for job applications.`
+            }
+          </p>
         </div>
 
         {/* Quick Stats */}
@@ -93,7 +126,10 @@ const Dashboard = () => {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-gray-600">Active Profiles</p>
-                <p className="text-2xl font-bold text-gray-900">{profiles.length}</p>
+                <p className="text-2xl font-bold text-gray-900">{stats.totalProfiles}</p>
+                <p className="text-xs text-gray-500 mt-1">
+                  {stats.completeProfiles} fully complete
+                </p>
               </div>
               <FileText className="h-8 w-8 text-blue-600" />
             </div>
@@ -102,8 +138,11 @@ const Dashboard = () => {
           <Card className="p-6">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-gray-600">Applications This Week</p>
-                <p className="text-2xl font-bold text-gray-900">0</p>
+                <p className="text-sm text-gray-600">Average Completeness</p>
+                <p className="text-2xl font-bold text-gray-900">{stats.averageCompleteness}%</p>
+                <p className="text-xs text-gray-500 mt-1">
+                  {stats.averageCompleteness >= 90 ? 'Excellent!' : 'Room for improvement'}
+                </p>
               </div>
               <Upload className="h-8 w-8 text-green-600" />
             </div>
@@ -114,6 +153,7 @@ const Dashboard = () => {
               <div>
                 <p className="text-sm text-gray-600">Extension Status</p>
                 <Badge className="mt-1 bg-yellow-100 text-yellow-800">Not Installed</Badge>
+                <p className="text-xs text-gray-500 mt-1">Install to auto-fill</p>
               </div>
               <Chrome className="h-8 w-8 text-purple-600" />
             </div>
@@ -133,7 +173,7 @@ const Dashboard = () => {
             <Card className="p-6">
               <h3 className="font-semibold text-gray-900 mb-3">Browser Extension</h3>
               <p className="text-sm text-gray-600 mb-4">
-                Install our Chrome extension to start auto-filling job applications.
+                Install our Chrome extension to start auto-filling job applications using your profiles.
               </p>
               <Button variant="outline" className="w-full">
                 <Chrome className="h-4 w-4 mr-2" />
@@ -141,15 +181,48 @@ const Dashboard = () => {
               </Button>
             </Card>
 
-            {/* Tips Card */}
+            {/* Personalized Tips Card */}
             <Card className="p-6">
-              <h3 className="font-semibold text-gray-900 mb-3">Quick Tips</h3>
+              <h3 className="font-semibold text-gray-900 mb-3">Tips for {getUserName()}</h3>
               <ul className="space-y-2 text-sm text-gray-600">
-                <li>• Create different profiles for different job types</li>
-                <li>• Keep your profiles updated with latest experience</li>
-                <li>• Use the extension on Workday and ICIMS sites</li>
+                {profiles.length === 0 ? (
+                  <>
+                    <li>• Upload your resume to create your first profile</li>
+                    <li>• Review and edit parsed information for accuracy</li>
+                    <li>• Install the browser extension once ready</li>
+                  </>
+                ) : (
+                  <>
+                    <li>• Create different profiles for different job types</li>
+                    <li>• Keep your profiles updated with latest experience</li>
+                    <li>• Use the extension on Workday and ICIMS sites</li>
+                    {stats.averageCompleteness < 90 && (
+                      <li>• Complete your profiles for better auto-fill accuracy</li>
+                    )}
+                  </>
+                )}
               </ul>
             </Card>
+
+            {/* Recent Activity Card */}
+            {profiles.length > 0 && (
+              <Card className="p-6">
+                <h3 className="font-semibold text-gray-900 mb-3">Recent Activity</h3>
+                <div className="space-y-3">
+                  {profiles.slice(0, 3).map((profile) => (
+                    <div key={profile.id} className="flex items-center space-x-3">
+                      <div className="w-2 h-2 bg-blue-600 rounded-full"></div>
+                      <div className="flex-1">
+                        <p className="text-sm font-medium text-gray-900">{profile.name}</p>
+                        <p className="text-xs text-gray-500">
+                          Updated {new Date(profile.updated_at).toLocaleDateString()}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </Card>
+            )}
           </div>
         </div>
       </div>

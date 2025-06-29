@@ -1,79 +1,186 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { ArrowLeft, Plus, X, Save } from 'lucide-react';
+import { Textarea } from '@/components/ui/textarea';
+import { ArrowLeft, Plus, X, Save, Loader2 } from 'lucide-react';
 import { Link, useParams, useNavigate } from 'react-router-dom';
+import { useProfiles } from '@/hooks/useProfiles';
+import { useToast } from '@/hooks/use-toast';
 
 const ProfileEdit = () => {
   const { id } = useParams();
   const navigate = useNavigate();
-
-  // Mock data - in real app this would come from backend based on ID
-  const [formData, setFormData] = useState({
-    profileName: 'Software Engineer Profile',
-    personalInfo: {
-      name: 'John Doe',
-      email: 'john.doe@email.com',
-      phone: '+1 (555) 123-4567',
-      address: 'San Francisco, CA'
-    },
-    experience: [
-      {
-        title: 'Senior Software Engineer',
-        company: 'Tech Corp',
-        duration: '2022 - Present',
-        description: 'Led development of web applications using React and Node.js'
-      }
-    ],
-    education: [
-      {
-        degree: 'Bachelor of Science in Computer Science',
-        school: 'University of California',
-        year: '2020'
-      }
-    ],
-    skills: ['JavaScript', 'React', 'Node.js', 'Python', 'SQL', 'AWS'],
-    certifications: ['AWS Certified Developer']
-  });
-
+  const { getProfile, updateProfile } = useProfiles();
+  const { toast } = useToast();
+  
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [formData, setFormData] = useState<any>(null);
   const [newSkill, setNewSkill] = useState('');
 
-  const handlePersonalInfoChange = (field: string, value: string) => {
-    setFormData(prev => ({
+  useEffect(() => {
+    const fetchProfile = async () => {
+      if (!id) return;
+      
+      setLoading(true);
+      try {
+        const { data, error } = await getProfile(id);
+        if (error) {
+          console.error('Error fetching profile:', error);
+          toast({
+            title: "Error",
+            description: "Failed to load profile data",
+            variant: "destructive"
+          });
+          navigate('/dashboard');
+        } else if (data) {
+          setFormData({
+            profileName: data.name,
+            personalDetails: data.personal_details || {},
+            workExperience: data.work_experience || [],
+            educationHistory: data.education_history || [],
+            technicalSkills: data.technical_skills || [],
+            softSkills: data.soft_skills || [],
+            toolsTechnologies: data.tools_technologies || [],
+            projects: data.projects || [],
+            certifications: data.certifications_licenses || [],
+            languages: data.languages || [],
+            volunteerExperience: data.volunteer_experience || [],
+            jobPreferences: data.job_preferences || {}
+          });
+        }
+      } catch (error) {
+        console.error('Error:', error);
+        toast({
+          title: "Error",
+          description: "Failed to load profile data",
+          variant: "destructive"
+        });
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchProfile();
+  }, [id, getProfile, navigate, toast]);
+
+  const handlePersonalDetailsChange = (field: string, value: string) => {
+    setFormData((prev: any) => ({
       ...prev,
-      personalInfo: {
-        ...prev.personalInfo,
+      personalDetails: {
+        ...prev.personalDetails,
         [field]: value
       }
     }));
   };
 
-  const addSkill = () => {
-    if (newSkill.trim() && !formData.skills.includes(newSkill.trim())) {
-      setFormData(prev => ({
+  const handleNestedPersonalDetailsChange = (section: string, field: string, value: string) => {
+    setFormData((prev: any) => ({
+      ...prev,
+      personalDetails: {
+        ...prev.personalDetails,
+        [section]: {
+          ...prev.personalDetails[section],
+          [field]: value
+        }
+      }
+    }));
+  };
+
+  const addTechnicalSkill = () => {
+    if (newSkill.trim()) {
+      const newSkillObj = {
+        skill: newSkill.trim(),
+        category: 'Technical',
+        proficiency: 'Intermediate'
+      };
+      setFormData((prev: any) => ({
         ...prev,
-        skills: [...prev.skills, newSkill.trim()]
+        technicalSkills: [...prev.technicalSkills, newSkillObj]
       }));
       setNewSkill('');
     }
   };
 
-  const removeSkill = (skillToRemove: string) => {
-    setFormData(prev => ({
+  const removeTechnicalSkill = (index: number) => {
+    setFormData((prev: any) => ({
       ...prev,
-      skills: prev.skills.filter(skill => skill !== skillToRemove)
+      technicalSkills: prev.technicalSkills.filter((_: any, i: number) => i !== index)
     }));
   };
 
-  const handleSave = () => {
-    console.log('Saving profile:', formData);
-    // In real app, this would save to backend
-    navigate('/dashboard');
+  const handleSave = async () => {
+    if (!id || !formData) return;
+    
+    setSaving(true);
+    try {
+      const { error } = await updateProfile(id, {
+        name: formData.profileName,
+        personal_details: formData.personalDetails,
+        work_experience: formData.workExperience,
+        education_history: formData.educationHistory,
+        technical_skills: formData.technicalSkills,
+        soft_skills: formData.softSkills,
+        tools_technologies: formData.toolsTechnologies,
+        projects: formData.projects,
+        certifications_licenses: formData.certifications,
+        languages: formData.languages,
+        volunteer_experience: formData.volunteerExperience,
+        job_preferences: formData.jobPreferences
+      });
+
+      if (error) {
+        toast({
+          title: "Error",
+          description: "Failed to save profile changes",
+          variant: "destructive"
+        });
+      } else {
+        toast({
+          title: "Success",
+          description: "Profile updated successfully",
+        });
+        navigate('/dashboard');
+      }
+    } catch (error) {
+      console.error('Error saving profile:', error);
+      toast({
+        title: "Error",
+        description: "Failed to save profile changes",
+        variant: "destructive"
+      });
+    } finally {
+      setSaving(false);
+    }
   };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 flex items-center justify-center">
+        <div className="text-center">
+          <Loader2 className="h-12 w-12 animate-spin text-blue-600 mx-auto mb-4" />
+          <p className="text-gray-600">Loading profile data...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!formData) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 flex items-center justify-center">
+        <div className="text-center">
+          <p className="text-gray-600">Profile not found</p>
+          <Link to="/dashboard">
+            <Button className="mt-4">Back to Dashboard</Button>
+          </Link>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50">
@@ -110,8 +217,8 @@ const ProfileEdit = () => {
           <Card className="p-6">
             <h4 className="font-semibold text-gray-900 mb-4">Profile Name</h4>
             <Input
-              value={formData.profileName}
-              onChange={(e) => setFormData(prev => ({ ...prev, profileName: e.target.value }))}
+              value={formData.profileName || ''}
+              onChange={(e) => setFormData((prev: any) => ({ ...prev, profileName: e.target.value }))}
               placeholder="e.g., Software Engineer Profile"
               className="max-w-md"
             />
@@ -122,11 +229,19 @@ const ProfileEdit = () => {
             <h4 className="font-semibold text-gray-900 mb-4">Personal Information</h4>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <Label htmlFor="name">Full Name</Label>
+                <Label htmlFor="firstName">First Name</Label>
                 <Input
-                  id="name"
-                  value={formData.personalInfo.name}
-                  onChange={(e) => handlePersonalInfoChange('name', e.target.value)}
+                  id="firstName"
+                  value={formData.personalDetails?.full_name?.first || ''}
+                  onChange={(e) => handleNestedPersonalDetailsChange('full_name', 'first', e.target.value)}
+                />
+              </div>
+              <div>
+                <Label htmlFor="lastName">Last Name</Label>
+                <Input
+                  id="lastName"
+                  value={formData.personalDetails?.full_name?.last || ''}
+                  onChange={(e) => handleNestedPersonalDetailsChange('full_name', 'last', e.target.value)}
                 />
               </div>
               <div>
@@ -134,38 +249,46 @@ const ProfileEdit = () => {
                 <Input
                   id="email"
                   type="email"
-                  value={formData.personalInfo.email}
-                  onChange={(e) => handlePersonalInfoChange('email', e.target.value)}
+                  value={formData.personalDetails?.email || ''}
+                  onChange={(e) => handlePersonalDetailsChange('email', e.target.value)}
                 />
               </div>
               <div>
                 <Label htmlFor="phone">Phone</Label>
                 <Input
                   id="phone"
-                  value={formData.personalInfo.phone}
-                  onChange={(e) => handlePersonalInfoChange('phone', e.target.value)}
+                  value={formData.personalDetails?.phone || ''}
+                  onChange={(e) => handlePersonalDetailsChange('phone', e.target.value)}
                 />
               </div>
               <div>
-                <Label htmlFor="address">Address</Label>
+                <Label htmlFor="linkedin">LinkedIn URL</Label>
                 <Input
-                  id="address"
-                  value={formData.personalInfo.address}
-                  onChange={(e) => handlePersonalInfoChange('address', e.target.value)}
+                  id="linkedin"
+                  value={formData.personalDetails?.linkedin_url || ''}
+                  onChange={(e) => handlePersonalDetailsChange('linkedin_url', e.target.value)}
+                />
+              </div>
+              <div>
+                <Label htmlFor="github">GitHub URL</Label>
+                <Input
+                  id="github"
+                  value={formData.personalDetails?.github_url || ''}
+                  onChange={(e) => handlePersonalDetailsChange('github_url', e.target.value)}
                 />
               </div>
             </div>
           </Card>
 
-          {/* Skills */}
+          {/* Technical Skills */}
           <Card className="p-6">
-            <h4 className="font-semibold text-gray-900 mb-4">Skills</h4>
+            <h4 className="font-semibold text-gray-900 mb-4">Technical Skills</h4>
             <div className="flex flex-wrap gap-2 mb-4">
-              {formData.skills.map((skill, index) => (
+              {formData.technicalSkills?.map((skillObj: any, index: number) => (
                 <Badge key={index} variant="secondary" className="flex items-center gap-1">
-                  {skill}
+                  {skillObj.skill || skillObj}
                   <button
-                    onClick={() => removeSkill(skill)}
+                    onClick={() => removeTechnicalSkill(index)}
                     className="text-gray-500 hover:text-gray-700"
                   >
                     <X className="h-3 w-3" />
@@ -177,24 +300,152 @@ const ProfileEdit = () => {
               <Input
                 value={newSkill}
                 onChange={(e) => setNewSkill(e.target.value)}
-                placeholder="Add a skill"
-                onKeyPress={(e) => e.key === 'Enter' && addSkill()}
+                placeholder="Add a technical skill"
+                onKeyPress={(e) => e.key === 'Enter' && addTechnicalSkill()}
                 className="max-w-xs"
               />
-              <Button onClick={addSkill} variant="outline" size="sm">
+              <Button onClick={addTechnicalSkill} variant="outline" size="sm">
                 <Plus className="h-4 w-4" />
               </Button>
             </div>
           </Card>
+
+          {/* Work Experience */}
+          <Card className="p-6">
+            <h4 className="font-semibold text-gray-900 mb-4">Work Experience</h4>
+            <div className="space-y-4">
+              {formData.workExperience?.map((exp: any, index: number) => (
+                <div key={index} className="border rounded-lg p-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <Label>Job Title</Label>
+                      <Input value={exp.title || ''} readOnly />
+                    </div>
+                    <div>
+                      <Label>Company</Label>
+                      <Input value={exp.company || ''} readOnly />
+                    </div>
+                    <div>
+                      <Label>Start Date</Label>
+                      <Input value={exp.start_date || ''} readOnly />
+                    </div>
+                    <div>
+                      <Label>End Date</Label>
+                      <Input value={exp.end_date || ''} readOnly />
+                    </div>
+                  </div>
+                  {exp.achievements && exp.achievements.length > 0 && (
+                    <div className="mt-4">
+                      <Label>Achievements</Label>
+                      <div className="mt-2 space-y-1">
+                        {exp.achievements.map((achievement: string, achIndex: number) => (
+                          <p key={achIndex} className="text-sm text-gray-600">• {achievement}</p>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ))}
+              {(!formData.workExperience || formData.workExperience.length === 0) && (
+                <p className="text-gray-500 text-center py-4">No work experience data found</p>
+              )}
+            </div>
+          </Card>
+
+          {/* Education */}
+          <Card className="p-6">
+            <h4 className="font-semibold text-gray-900 mb-4">Education</h4>
+            <div className="space-y-4">
+              {formData.educationHistory?.map((edu: any, index: number) => (
+                <div key={index} className="border rounded-lg p-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <Label>Degree</Label>
+                      <Input value={edu.degree || ''} readOnly />
+                    </div>
+                    <div>
+                      <Label>Institution</Label>
+                      <Input value={edu.institution || ''} readOnly />
+                    </div>
+                    <div>
+                      <Label>Start Date</Label>
+                      <Input value={edu.start_date || ''} readOnly />
+                    </div>
+                    <div>
+                      <Label>End Date</Label>
+                      <Input value={edu.end_date || ''} readOnly />
+                    </div>
+                  </div>
+                  {edu.gpa && (
+                    <div className="mt-4">
+                      <Label>GPA</Label>
+                      <Input value={edu.gpa} readOnly className="max-w-xs" />
+                    </div>
+                  )}
+                </div>
+              ))}
+              {(!formData.educationHistory || formData.educationHistory.length === 0) && (
+                <p className="text-gray-500 text-center py-4">No education data found</p>
+              )}
+            </div>
+          </Card>
+
+          {/* Projects */}
+          {formData.projects && formData.projects.length > 0 && (
+            <Card className="p-6">
+              <h4 className="font-semibold text-gray-900 mb-4">Projects</h4>
+              <div className="space-y-4">
+                {formData.projects.map((project: any, index: number) => (
+                  <div key={index} className="border rounded-lg p-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <Label>Project Title</Label>
+                        <Input value={project.title || ''} readOnly />
+                      </div>
+                      <div>
+                        <Label>Link</Label>
+                        <Input value={project.link || ''} readOnly />
+                      </div>
+                    </div>
+                    {project.description && (
+                      <div className="mt-4">
+                        <Label>Description</Label>
+                        <Textarea value={project.description} readOnly />
+                      </div>
+                    )}
+                    {project.technologies && project.technologies.length > 0 && (
+                      <div className="mt-4">
+                        <Label>Technologies</Label>
+                        <div className="flex flex-wrap gap-2 mt-2">
+                          {project.technologies.map((tech: string, techIndex: number) => (
+                            <Badge key={techIndex} variant="outline">{tech}</Badge>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </Card>
+          )}
 
           {/* Actions */}
           <div className="flex justify-end space-x-4">
             <Link to="/dashboard">
               <Button variant="outline">Cancel</Button>
             </Link>
-            <Button onClick={handleSave} className="bg-blue-600 hover:bg-blue-700">
-              <Save className="mr-2 h-4 w-4" />
-              Save Changes
+            <Button onClick={handleSave} disabled={saving} className="bg-blue-600 hover:bg-blue-700">
+              {saving ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Saving...
+                </>
+              ) : (
+                <>
+                  <Save className="mr-2 h-4 w-4" />
+                  Save Changes
+                </>
+              )}
             </Button>
           </div>
         </div>

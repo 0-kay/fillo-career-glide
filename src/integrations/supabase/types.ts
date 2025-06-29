@@ -11,43 +11,82 @@ export type Database = {
     Tables: {
       application_profiles: {
         Row: {
+          awards_honors: Json | null
           certifications: string[] | null
+          certifications_licenses: Json | null
           completeness: number | null
           created_at: string | null
           education: Json | null
+          education_history: Json | null
           experience: Json | null
           id: string
+          job_preferences: Json | null
+          languages: Json | null
           name: string
+          personal_details: Json | null
           personal_info: Json | null
+          projects: Json | null
+          resume_metadata: Json | null
           skills: string[] | null
+          soft_skills: Json | null
+          technical_skills: Json | null
+          tools_technologies: Json | null
           updated_at: string | null
           user_id: string
+          volunteer_experience: Json | null
+          work_experience: Json | null
         }
         Insert: {
+          awards_honors?: Json | null
           certifications?: string[] | null
+          certifications_licenses?: Json | null
           completeness?: number | null
           created_at?: string | null
           education?: Json | null
+          education_history?: Json | null
           experience?: Json | null
           id?: string
+          job_preferences?: Json | null
+          languages?: Json | null
           name: string
+          personal_details?: Json | null
           personal_info?: Json | null
+          projects?: Json | null
+          resume_metadata?: Json | null
           skills?: string[] | null
+          soft_skills?: Json | null
+          technical_skills?: Json | null
+          tools_technologies?: Json | null
           updated_at?: string | null
           user_id: string
+          volunteer_experience?: Json | null
+          work_experience?: Json | null
         }
         Update: {
+          awards_honors?: Json | null
           certifications?: string[] | null
+          certifications_licenses?: Json | null
           completeness?: number | null
           created_at?: string | null
           education?: Json | null
+          education_history?: Json | null
           experience?: Json | null
           id?: string
+          job_preferences?: Json | null
+          languages?: Json | null
           name?: string
+          personal_details?: Json | null
           personal_info?: Json | null
+          projects?: Json | null
+          resume_metadata?: Json | null
           skills?: string[] | null
+          soft_skills?: Json | null
+          technical_skills?: Json | null
+          tools_technologies?: Json | null
           updated_at?: string | null
           user_id?: string
+          volunteer_experience?: Json | null
+          work_experience?: Json | null
         }
         Relationships: []
       }

@@ -19,13 +19,38 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
 
   const calculateCompleteness = (data: any) => {
     let score = 0;
-    const maxScore = 5;
+    let maxScore = 0;
     
-    if (data.personalInfo?.name) score++;
-    if (data.personalInfo?.email) score++;
-    if (data.experience?.length > 0) score++;
-    if (data.education?.length > 0) score++;
-    if (data.skills?.length > 0) score++;
+    // Personal details (20 points)
+    maxScore += 20;
+    if (data.personal_details?.full_name?.first) score += 5;
+    if (data.personal_details?.email) score += 5;
+    if (data.personal_details?.phone) score += 5;
+    if (data.personal_details?.address?.city) score += 5;
+    
+    // Work experience (25 points)
+    maxScore += 25;
+    if (data.work_experience?.length > 0) score += 25;
+    
+    // Education (20 points)
+    maxScore += 20;
+    if (data.education_history?.length > 0) score += 20;
+    
+    // Skills (15 points)
+    maxScore += 15;
+    if (data.technical_skills?.length > 0) score += 10;
+    if (data.soft_skills?.length > 0) score += 5;
+    
+    // Projects (10 points)
+    maxScore += 10;
+    if (data.projects?.length > 0) score += 10;
+    
+    // Additional sections (10 points)
+    maxScore += 10;
+    if (data.certifications_licenses?.length > 0) score += 3;
+    if (data.languages?.length > 0) score += 3;
+    if (data.volunteer_experience?.length > 0) score += 2;
+    if (data.awards_honors?.length > 0) score += 2;
     
     return Math.round((score / maxScore) * 100);
   };
@@ -88,18 +113,31 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
     try {
       console.log('Parsing resume:', file.name);
       const parsedData = await parseResumeFile(file);
-      console.log('Parsed data:', parsedData);
+      console.log('Parsed comprehensive data:', parsedData);
       
       const completeness = calculateCompleteness(parsedData);
       
-      // Save to database
+      // Save comprehensive data to database
       const { error } = await createProfile({
-        name: `${parsedData.personalInfo.name || 'Unnamed'}'s Profile`,
-        personal_info: parsedData.personalInfo,
-        experience: parsedData.experience,
-        education: parsedData.education,
-        skills: parsedData.skills,
-        certifications: parsedData.certifications,
+        name: parsedData.resume_metadata.name,
+        personal_info: parsedData.personal_details, // Keep for backward compatibility
+        personal_details: parsedData.personal_details,
+        education: parsedData.education_history, // Keep for backward compatibility
+        education_history: parsedData.education_history,
+        experience: parsedData.work_experience, // Keep for backward compatibility
+        work_experience: parsedData.work_experience,
+        skills: parsedData.technical_skills.map(skill => skill.skill), // Keep for backward compatibility
+        technical_skills: parsedData.technical_skills,
+        soft_skills: parsedData.soft_skills,
+        tools_technologies: parsedData.tools_technologies,
+        certifications: parsedData.certifications_licenses.map(cert => cert.name), // Keep for backward compatibility
+        certifications_licenses: parsedData.certifications_licenses,
+        awards_honors: parsedData.awards_honors,
+        projects: parsedData.projects,
+        languages: parsedData.languages,
+        volunteer_experience: parsedData.volunteer_experience,
+        job_preferences: parsedData.job_preferences,
+        resume_metadata: parsedData.resume_metadata,
         completeness
       });
 
@@ -143,7 +181,7 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
         <Loader2 className="h-12 w-12 animate-spin text-blue-600 mx-auto mb-4" />
         <h3 className="text-lg font-semibold text-gray-900 mb-2">Parsing Your Resume</h3>
         <p className="text-gray-600">
-          Extracting your information and saving it to your profile...
+          Extracting comprehensive information from your resume and saving it to your profile...
         </p>
       </div>
     );
@@ -154,7 +192,8 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
       <div className="text-center mb-8">
         <h3 className="text-xl font-semibold text-gray-900 mb-2">Upload Your Resume</h3>
         <p className="text-gray-600">
-          Upload your resume and we'll automatically extract your information and create a profile.
+          Upload your resume and we'll automatically extract comprehensive information including personal details, 
+          work experience, education, skills, projects, and more to create a complete profile.
         </p>
       </div>
 
