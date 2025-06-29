@@ -23,8 +23,13 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
 
   const extractTextFromPDF = async (file: File): Promise<string> => {
     try {
-      console.log('Extracting text from PDF...');
+      console.log('=== PDF EXTRACTION START ===');
+      console.log('File name:', file.name);
+      console.log('File size:', file.size);
+      console.log('File type:', file.type);
+      
       const arrayBuffer = await file.arrayBuffer();
+      console.log('ArrayBuffer length:', arrayBuffer.byteLength);
       
       // Use a more compatible approach for PDF loading
       const loadingTask = pdfjsLib.getDocument({
@@ -33,17 +38,26 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
         cMapPacked: true,
       });
       
+      console.log('Loading task created, waiting for PDF...');
       const pdf = await loadingTask.promise;
+      console.log('PDF loaded successfully, pages:', pdf.numPages);
 
       let text = '';
       for (let i = 1; i <= pdf.numPages; i++) {
         try {
+          console.log(`Processing page ${i}/${pdf.numPages}`);
           const page = await pdf.getPage(i);
           const content = await page.getTextContent();
+          console.log(`Page ${i} content items:`, content.items.length);
+          
           const pageText = content.items
             .filter((item: any) => item.str && typeof item.str === 'string')
             .map((item: any) => item.str)
             .join(' ');
+          
+          console.log(`Page ${i} text length:`, pageText.length);
+          console.log(`Page ${i} first 100 chars:`, pageText.substring(0, 100));
+          
           text += pageText + '\n';
         } catch (pageError) {
           console.warn(`Error processing page ${i}:`, pageError);
@@ -51,16 +65,26 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
         }
       }
 
-      console.log('PDF text extracted successfully, length:', text.length);
+      console.log('=== PDF EXTRACTION COMPLETE ===');
+      console.log('Total extracted text length:', text.length);
+      console.log('First 200 characters:', text.substring(0, 200));
+      console.log('Last 200 characters:', text.substring(Math.max(0, text.length - 200)));
+      
       return text.trim();
     } catch (error) {
-      console.error('Error extracting PDF text:', error);
+      console.error('=== PDF EXTRACTION ERROR ===');
+      console.error('Error details:', error);
+      console.error('Error stack:', error instanceof Error ? error.stack : 'No stack trace');
+      
       // Instead of throwing, return a fallback message
-      return `PDF file: ${file.name} (text extraction failed)`;
+      const fallbackText = `PDF file: ${file.name} (text extraction failed)`;
+      console.log('Using fallback text:', fallbackText);
+      return fallbackText;
     }
   };
 
   const parseResumeWithAI = async (file: File) => {
+    console.log('=== AI PARSING START ===');
     console.log('Starting parse for:', file.name);
     
     let requestBody: any = {
@@ -70,39 +94,72 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
 
     // Handle different file types
     if (file.type === 'application/pdf') {
-      console.log('Processing PDF file');
+      console.log('Processing PDF file for AI parsing...');
       const resumeText = await extractTextFromPDF(file);
+      const truncatedText = resumeText.substring(0, 15000);
+      
+      console.log('Original text length:', resumeText.length);
+      console.log('Truncated text length:', truncatedText.length);
+      
       requestBody = {
-        resumeText: resumeText.substring(0, 15000), // Limit text length
+        resumeText: truncatedText,
         fileName: file.name
       };
     } else if (file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
       try {
+        console.log('Processing DOCX file...');
         const arrayBuffer = await file.arrayBuffer();
         const result = await mammoth.extractRawText({ arrayBuffer });
-        requestBody.resumeText = result.value.substring(0, 15000);
+        const truncatedText = result.value.substring(0, 15000);
+        
+        console.log('DOCX text length:', result.value.length);
+        console.log('DOCX truncated length:', truncatedText.length);
+        
+        requestBody.resumeText = truncatedText;
       } catch (error) {
         console.log('DOCX extraction failed, using filename');
+        console.error('DOCX error:', error);
       }
     } else if (file.type === 'text/plain') {
       try {
+        console.log('Processing TXT file...');
         const text = await file.text();
-        requestBody.resumeText = text.substring(0, 15000);
+        const truncatedText = text.substring(0, 15000);
+        
+        console.log('TXT text length:', text.length);
+        console.log('TXT truncated length:', truncatedText.length);
+        
+        requestBody.resumeText = truncatedText;
       } catch (error) {
         console.log('Text extraction failed, using filename');
+        console.error('TXT error:', error);
       }
     }
 
-    console.log('Calling edge function with request body keys:', Object.keys(requestBody));
+    console.log('=== SENDING TO OPENAI ===');
+    console.log('Request body keys:', Object.keys(requestBody));
+    console.log('Request body fileName:', requestBody.fileName);
+    console.log('Request body resumeText length:', requestBody.resumeText?.length || 0);
+    
+    if (requestBody.resumeText) {
+      console.log('First 300 chars being sent to OpenAI:');
+      console.log(requestBody.resumeText.substring(0, 300));
+      console.log('Last 300 chars being sent to OpenAI:');
+      console.log(requestBody.resumeText.substring(Math.max(0, requestBody.resumeText.length - 300)));
+    }
     
     const { data, error } = await supabase.functions.invoke('azure-resume-parser', {
       body: requestBody
     });
 
+    console.log('=== OPENAI RESPONSE ===');
     if (error) {
       console.error('Edge function error:', error);
       throw new Error('Failed to parse resume');
     }
+    
+    console.log('OpenAI response data:', data);
+    console.log('Response data keys:', Object.keys(data || {}));
 
     return data;
   };
@@ -164,9 +221,11 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
     setUploading(true);
 
     try {
+      console.log('=== FILE PROCESSING START ===');
       console.log('Processing file...');
       const parsedData = await parseResumeWithAI(file);
       
+      console.log('=== PROFILE CREATION ===');
       const profileData = {
         name: parsedData.personalInfo?.fullName || file.name.replace(/\.[^/.]+$/, ''),
         personal_info: parsedData.personalInfo || {},
@@ -177,11 +236,16 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
         completeness: 50
       };
       
+      console.log('Profile data to be created:', profileData);
+      
       const result = await createProfile(profileData);
       
       if (result.error) {
+        console.error('Profile creation error:', result.error);
         throw new Error('Failed to save profile');
       }
+
+      console.log('Profile created successfully:', result);
 
       toast({
         title: "Success!",
@@ -191,6 +255,7 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
       onComplete?.();
       
     } catch (error) {
+      console.error('=== PROCESSING ERROR ===');
       console.error('Error:', error);
       toast({
         title: "Processing failed",
