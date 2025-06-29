@@ -18,78 +18,57 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
   const { createProfile } = useProfiles();
   const { toast } = useToast();
 
-  const calculateCompleteness = (data: any) => {
-    let score = 0;
-    let maxScore = 100;
+  const parseResumeWithAI = async (file: File) => {
+    console.log('Starting parsing for:', file.name, file.type);
     
-    // Personal details (30 points)
-    if (data.personalInfo?.fullName) score += 10;
-    if (data.personalInfo?.email) score += 10;
-    if (data.personalInfo?.phone) score += 10;
+    let requestBody = {};
     
-    // Work experience (30 points)
-    if (data.experience?.length > 0) score += 30;
-    
-    // Education (20 points)
-    if (data.education?.length > 0) score += 20;
-    
-    // Skills (20 points)
-    if (data.skills?.technical?.length > 0 || data.skills?.soft?.length > 0) score += 20;
-    
-    return Math.min(score, maxScore);
+    if (file.type === 'application/pdf') {
+      console.log('Processing PDF file');
+      // For PDF, we'll send the file info but not the binary data to avoid stack overflow
+      requestBody = {
+        fileName: file.name,
+        fileType: file.type,
+        fileSize: file.size
+      };
+    } else if (file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+      console.log('Processing DOCX file');
+      const arrayBuffer = await file.arrayBuffer();
+      const result = await mammoth.extractRawText({ arrayBuffer });
+      requestBody = {
+        resumeText: result.value,
+        fileName: file.name
+      };
+    } else {
+      console.log('Processing text file');
+      const text = await file.text();
+      requestBody = {
+        resumeText: text,
+        fileName: file.name
+      };
+    }
+
+    console.log('Sending request to edge function');
+    const { data, error } = await supabase.functions.invoke('azure-resume-parser', {
+      body: requestBody
+    });
+
+    if (error) {
+      console.error('Edge function error:', error);
+      throw new Error(`Failed to parse resume: ${error.message}`);
+    }
+
+    return data;
   };
 
-  const parseResumeWithAI = async (file: File): Promise<any> => {
-    console.log('Starting resume parsing for:', file.name, 'Type:', file.type);
-    
-    let requestBody;
-    
-    try {
-      if (file.type === 'application/pdf') {
-        console.log('Processing PDF file');
-        const arrayBuffer = await file.arrayBuffer();
-        const base64Data = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)));
-        
-        requestBody = {
-          fileData: base64Data,
-          fileName: file.name,
-          fileType: file.type
-        };
-      } else if (file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
-        console.log('Processing DOCX file');
-        const arrayBuffer = await file.arrayBuffer();
-        const result = await mammoth.extractRawText({ arrayBuffer });
-        
-        requestBody = {
-          resumeText: result.value,
-          fileName: file.name
-        };
-      } else {
-        console.log('Processing text file');
-        const text = await file.text();
-        
-        requestBody = {
-          resumeText: text,
-          fileName: file.name
-        };
-      }
-
-      console.log('Sending request to edge function...');
-      const { data, error } = await supabase.functions.invoke('azure-resume-parser', {
-        body: requestBody
-      });
-
-      if (error) {
-        console.error('Edge function error:', error);
-        throw new Error(`Failed to parse resume: ${error.message}`);
-      }
-
-      console.log('Successfully parsed resume');
-      return data;
-    } catch (error) {
-      console.error('Error in parseResumeWithAI:', error);
-      throw error;
-    }
+  const calculateCompleteness = (data: any) => {
+    let score = 0;
+    if (data.personalInfo?.fullName) score += 20;
+    if (data.personalInfo?.email) score += 20;
+    if (data.experience?.length > 0) score += 30;
+    if (data.education?.length > 0) score += 20;
+    if (data.skills?.technical?.length > 0) score += 10;
+    return Math.min(score, 100);
   };
 
   const handleDrag = useCallback((e: React.DragEvent) => {
@@ -135,7 +114,7 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
       return;
     }
 
-    if (file.size > 10 * 1024 * 1024) { // 10MB limit
+    if (file.size > 10 * 1024 * 1024) {
       toast({
         title: "File too large",
         description: "File size must be less than 10MB",
@@ -150,15 +129,13 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
     try {
       console.log('Starting resume parsing...');
       const parsedData = await parseResumeWithAI(file);
-      console.log('Parsed data:', parsedData);
+      console.log('Parsed data received:', parsedData);
       
       const completeness = calculateCompleteness(parsedData);
       
-      // Create profile data structure
+      // Create simplified profile data
       const profileData = {
         name: parsedData.personalInfo?.fullName || `${file.name.split('.')[0]}'s Resume`,
-        
-        // Legacy fields for backward compatibility
         personal_info: {
           name: parsedData.personalInfo?.fullName || '',
           email: parsedData.personalInfo?.email || '',
@@ -172,148 +149,30 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
           ...(parsedData.skills?.soft || []),
           ...(parsedData.skills?.tools || [])
         ],
-        certifications: parsedData.certifications?.map((cert: any) => 
-          typeof cert === 'string' ? cert : cert.name || ''
-        ) || [],
-        
-        // New structured fields
-        personal_details: {
-          full_name: {
-            first: parsedData.personalInfo?.fullName?.split(' ')[0] || '',
-            middle: parsedData.personalInfo?.fullName?.split(' ').length > 2 ? 
-              parsedData.personalInfo.fullName.split(' ').slice(1, -1).join(' ') : '',
-            last: parsedData.personalInfo?.fullName?.split(' ').slice(-1)[0] || ''
-          },
-          email: parsedData.personalInfo?.email || '',
-          phone: parsedData.personalInfo?.phone || '',
-          linkedin_url: parsedData.personalInfo?.linkedin || '',
-          github_url: parsedData.personalInfo?.portfolio || '',
-          address: {
-            street: '',
-            city: '',
-            state: '',
-            zip: '',
-            country: parsedData.personalInfo?.address || ''
-          },
-          work_authorization: '',
-          preferred_name: ''
-        },
-        
-        education_history: parsedData.education?.map((edu: any) => ({
-          institution: edu.institution || '',
-          degree: edu.degree || '',
-          field_of_study: edu.fieldOfStudy || '',
-          start_date: edu.startDate || '',
-          end_date: edu.endDate || '',
-          gpa: edu.gpa || '',
-          honors: ''
-        })) || [],
-        
-        work_experience: parsedData.experience?.map((exp: any) => ({
-          title: exp.jobTitle || '',
-          company: exp.company || '',
-          location: exp.location || '',
-          start_date: exp.startDate || '',
-          end_date: exp.endDate || '',
-          description: exp.description || '',
-          achievements: Array.isArray(exp.achievements) ? exp.achievements : []
-        })) || [],
-        
-        technical_skills: parsedData.skills?.technical?.map((skill: string) => ({
-          skill: skill,
-          category: 'Technical',
-          proficiency: 'Intermediate'
-        })) || [],
-        
-        soft_skills: parsedData.skills?.soft?.map((skill: string) => ({
-          skill: skill,
-          category: 'Soft',
-          proficiency: 'Intermediate'
-        })) || [],
-        
-        tools_technologies: parsedData.skills?.tools?.map((tool: string) => ({
-          name: tool,
-          category: 'Tool',
-          proficiency: 'Intermediate'
-        })) || [],
-        
-        certifications_licenses: parsedData.certifications?.map((cert: any) => ({
-          name: typeof cert === 'string' ? cert : cert.name || '',
-          issuer: typeof cert === 'object' ? cert.issuer || '' : '',
-          issue_date: typeof cert === 'object' ? cert.issueDate || '' : '',
-          expiration_date: '',
-          credential_id: '',
-          credential_url: ''
-        })) || [],
-        
-        awards_honors: [],
-        
-        projects: parsedData.projects?.map((project: any) => ({
-          title: project.title || '',
-          description: project.description || '',
-          technologies: Array.isArray(project.tools) ? project.tools : [],
-          link: project.link || '',
-          start_date: '',
-          end_date: ''
-        })) || [],
-        
-        languages: parsedData.languages?.map((lang: any) => ({
-          language: typeof lang === 'string' ? lang : lang.language || '',
-          proficiency: typeof lang === 'object' ? lang.proficiency || '' : 'Conversational'
-        })) || [],
-        
-        volunteer_experience: [],
-        
-        job_preferences: {
-          desired_titles: [],
-          industries: [],
-          location_preferences: [],
-          employment_type: '',
-          relocation_willingness: '',
-          availability: '',
-          salary_expectation: ''
-        },
-        
-        resume_metadata: {
-          name: parsedData.personalInfo?.fullName ? 
-            `${parsedData.personalInfo.fullName}'s Resume` : 
-            `${file.name.split('.')[0]}'s Resume`,
-          file_name: file.name,
-          parsing_status: 'Complete',
-          version: '1.0',
-          upload_date: new Date().toISOString()
-        },
-        
+        certifications: parsedData.certifications || [],
         completeness
       };
       
-      console.log('Creating profile with data:', profileData);
-      
-      // Save to database
+      console.log('Creating profile...');
       const { error } = await createProfile(profileData);
 
       if (error) {
-        console.error('Error saving profile:', error);
-        toast({
-          title: "Error saving profile",
-          description: "Please try again later",
-          variant: "destructive"
-        });
-      } else {
-        toast({
-          title: "Profile created successfully",
-          description: `Your resume has been parsed and saved with ${completeness}% completeness`,
-        });
-        
-        if (onComplete) {
-          onComplete();
-        }
+        throw new Error('Failed to save profile');
+      }
+
+      toast({
+        title: "Profile created successfully",
+        description: `Resume parsed with ${completeness}% completeness`,
+      });
+      
+      if (onComplete) {
+        onComplete();
       }
     } catch (error) {
-      console.error('Error parsing resume:', error);
+      console.error('Error processing resume:', error);
       toast({
-        title: "Error parsing resume",
-        description: error instanceof Error ? error.message : "Please try again or check if your file format is supported",
+        title: "Error processing resume",
+        description: error instanceof Error ? error.message : "Please try again",
         variant: "destructive"
       });
     } finally {
@@ -330,9 +189,9 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
     return (
       <div className="text-center py-12">
         <Loader2 className="h-12 w-12 animate-spin text-blue-600 mx-auto mb-4" />
-        <h3 className="text-lg font-semibold text-gray-900 mb-2">Analyzing Your Resume with AI</h3>
+        <h3 className="text-lg font-semibold text-gray-900 mb-2">Processing Your Resume</h3>
         <p className="text-gray-600">
-          Using advanced AI to extract comprehensive information from your resume...
+          Analyzing your resume with AI...
         </p>
       </div>
     );
@@ -343,8 +202,7 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
       <div className="text-center mb-8">
         <h3 className="text-xl font-semibold text-gray-900 mb-2">Upload Your Resume</h3>
         <p className="text-gray-600">
-          Upload your resume and our AI will intelligently extract comprehensive information including personal details, 
-          work experience, education, skills, projects, and more to create a complete profile.
+          Upload your resume and our AI will extract information to create your profile.
         </p>
       </div>
 
@@ -400,7 +258,7 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
 
       <div className="mt-6 text-center">
         <p className="text-sm text-gray-500">
-          Your resume data is processed securely with OpenAI and never shared with third parties.
+          Your resume is processed securely and never shared with third parties.
         </p>
       </div>
     </div>

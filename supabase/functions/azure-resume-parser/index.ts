@@ -12,56 +12,36 @@ const corsHeaders = {
 serve(async (req) => {
   console.log('Edge function called with method:', req.method);
   
-  // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
     const requestBody = await req.json();
-    console.log('Request body received:', {
+    console.log('Request received:', {
       hasFileData: !!requestBody.fileData,
       hasResumeText: !!requestBody.resumeText,
-      fileName: requestBody.fileName,
-      fileType: requestBody.fileType
+      fileName: requestBody.fileName
     });
     
-    let textToProcess = '';
+    let textContent = '';
     
-    // Handle different input types
-    if (requestBody.fileData && requestBody.fileType === 'application/pdf') {
-      console.log('Processing PDF file data for:', requestBody.fileName);
-      // For now, we'll use a simple approach for PDF processing
-      // In production, you'd want to use a proper PDF parsing library
-      textToProcess = `This is a PDF resume file named ${requestBody.fileName}. 
-      
-Please extract the following information and return it as structured JSON:
-- Personal Information (name, email, phone, address)
-- Work Experience (company, position, dates, responsibilities)
-- Education (institution, degree, dates)
-- Skills (technical and soft skills)
-- Projects (if any)
-- Certifications (if any)
-- Languages (if any)
-
-Since this is a PDF file, please provide reasonable default values for the structure even if specific details aren't available.`;
-      
-    } else if (requestBody.resumeText) {
-      console.log('Processing extracted text, length:', requestBody.resumeText.length);
-      textToProcess = requestBody.resumeText;
+    if (requestBody.resumeText) {
+      textContent = requestBody.resumeText;
+    } else if (requestBody.fileData) {
+      // For PDF files, we'll use a simple approach
+      textContent = `Resume file: ${requestBody.fileName}. Please extract comprehensive information and structure it as JSON.`;
     } else {
-      throw new Error('No text or file data provided');
+      throw new Error('No content provided');
     }
 
-    console.log('Text to process length:', textToProcess.length);
+    console.log('Processing text of length:', textContent.length);
 
-    const systemPrompt = `You are an expert resume parser. Extract information from the provided resume and return it as valid JSON.
-
-Return ONLY valid JSON in this exact structure (no additional text or formatting):
+    const systemPrompt = `Extract resume information and return ONLY valid JSON in this structure:
 {
   "personalInfo": {
     "fullName": "",
-    "email": "", 
+    "email": "",
     "phone": "",
     "address": "",
     "linkedin": "",
@@ -70,7 +50,7 @@ Return ONLY valid JSON in this exact structure (no additional text or formatting
   "experience": [
     {
       "jobTitle": "",
-      "company": "", 
+      "company": "",
       "location": "",
       "startDate": "",
       "endDate": "",
@@ -82,7 +62,7 @@ Return ONLY valid JSON in this exact structure (no additional text or formatting
     {
       "institution": "",
       "degree": "",
-      "fieldOfStudy": "", 
+      "fieldOfStudy": "",
       "startDate": "",
       "endDate": "",
       "gpa": ""
@@ -93,32 +73,12 @@ Return ONLY valid JSON in this exact structure (no additional text or formatting
     "soft": [],
     "tools": []
   },
-  "projects": [
-    {
-      "title": "",
-      "description": "",
-      "tools": [],
-      "link": ""
-    }
-  ],
-  "certifications": [
-    {
-      "name": "",
-      "issuer": "",
-      "issueDate": ""
-    }
-  ],
-  "languages": [
-    {
-      "language": "",
-      "proficiency": ""
-    }
-  ]
-}
+  "projects": [],
+  "certifications": [],
+  "languages": []
+}`;
 
-Extract only factual information. Use empty strings or empty arrays for missing data.`;
-
-    console.log('Making OpenAI API request...');
+    console.log('Calling OpenAI API...');
     
     const response = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
@@ -130,46 +90,33 @@ Extract only factual information. Use empty strings or empty arrays for missing 
         model: 'gpt-4o-mini',
         messages: [
           { role: 'system', content: systemPrompt },
-          { role: 'user', content: textToProcess }
+          { role: 'user', content: textContent }
         ],
         temperature: 0.1,
-        max_tokens: 1500
+        max_tokens: 1000
       }),
     });
 
-    console.log('OpenAI response status:', response.status);
-    
     if (!response.ok) {
-      const errorText = await response.text();
-      console.error('OpenAI API error:', errorText);
-      throw new Error(`OpenAI API error: ${response.status} - ${errorText}`);
+      throw new Error(`OpenAI API error: ${response.status}`);
     }
 
     const data = await response.json();
-    console.log('OpenAI response received');
+    const content = data.choices[0]?.message?.content || '{}';
     
-    if (!data.choices || data.choices.length === 0) {
-      throw new Error('No response from OpenAI');
-    }
-
-    const content = data.choices[0].message.content.trim();
-    console.log('OpenAI content length:', content.length);
+    console.log('OpenAI response received, parsing JSON...');
     
-    // Parse the JSON response
     let parsedData;
     try {
-      // Remove any markdown formatting if present
-      const cleanContent = content.replace(/```json\n?/g, '').replace(/```\n?/g, '');
+      // Clean the content and parse
+      const cleanContent = content.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
       parsedData = JSON.parse(cleanContent);
-      console.log('Successfully parsed JSON response');
     } catch (parseError) {
-      console.error('Error parsing OpenAI JSON response:', parseError);
-      console.log('Raw content:', content);
-      
-      // Return a default structure if parsing fails
+      console.error('JSON parse error:', parseError);
+      // Return minimal valid structure
       parsedData = {
         personalInfo: {
-          fullName: requestBody.fileName?.replace('.pdf', '').replace(/[_-]/g, ' ') || 'Unknown',
+          fullName: requestBody.fileName?.replace(/\.[^/.]+$/, '') || 'Unknown',
           email: '',
           phone: '',
           address: '',
@@ -191,12 +138,11 @@ Extract only factual information. Use empty strings or empty arrays for missing 
     });
 
   } catch (error) {
-    console.error('Error in azure-resume-parser function:', error.message);
-    console.error('Stack trace:', error.stack);
+    console.error('Error in function:', error);
     
     return new Response(JSON.stringify({ 
-      error: error.message,
-      details: 'Check the function logs for more information'
+      error: 'Failed to process resume',
+      message: error.message
     }), {
       status: 500,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
