@@ -5,6 +5,7 @@ import { useProfiles } from '@/hooks/useProfiles';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
 import mammoth from 'mammoth';
+import * as pdfParse from 'pdf-parse';
 
 interface ResumeUploadProps {
   onComplete?: () => void;
@@ -56,14 +57,26 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
   };
 
   const extractTextFromPDF = async (file: File): Promise<string> => {
-    // For now, return a placeholder. In production, use a proper PDF parser
-    return "This is a placeholder for PDF text extraction. Please implement a proper PDF parser.";
+    try {
+      console.log('Starting PDF text extraction for:', file.name);
+      const arrayBuffer = await file.arrayBuffer();
+      const pdfData = await pdfParse(arrayBuffer);
+      console.log('PDF text extracted, length:', pdfData.text.length);
+      console.log('PDF text preview:', pdfData.text.substring(0, 500) + '...');
+      return pdfData.text;
+    } catch (error) {
+      console.error('Error extracting PDF text:', error);
+      throw new Error('Failed to extract text from PDF file');
+    }
   };
 
   const extractTextFromDOCX = async (file: File): Promise<string> => {
     try {
+      console.log('Starting DOCX text extraction for:', file.name);
       const arrayBuffer = await file.arrayBuffer();
       const result = await mammoth.extractRawText({ arrayBuffer });
+      console.log('DOCX text extracted, length:', result.value.length);
+      console.log('DOCX text preview:', result.value.substring(0, 500) + '...');
       return result.value;
     } catch (error) {
       console.error('Error extracting DOCX:', error);
@@ -73,6 +86,8 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
 
   const parseResumeWithOpenAI = async (file: File): Promise<any> => {
     let text = '';
+    
+    console.log('Processing file:', file.name, 'Type:', file.type);
     
     if (file.type === 'application/pdf') {
       text = await extractTextFromPDF(file);
@@ -84,7 +99,12 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
       throw new Error('Unsupported file format');
     }
 
-    console.log('Extracted text for OpenAI:', text.substring(0, 500) + '...');
+    if (!text || text.trim().length === 0) {
+      throw new Error('No text could be extracted from the file');
+    }
+
+    console.log('Final extracted text length:', text.length);
+    console.log('Sending text to OpenAI via edge function...');
 
     const { data, error } = await supabase.functions.invoke('azure-resume-parser', {
       body: {
