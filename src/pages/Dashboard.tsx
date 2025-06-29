@@ -35,11 +35,6 @@ const Dashboard = () => {
     localStorage.setItem('fillo_onboarding_complete', 'true');
   };
 
-  const handleDeleteProfile = async (profileId: string) => {
-    // This will be handled by the ProfileList component
-    console.log('Profile deleted:', profileId);
-  };
-
   const handleSignOut = async () => {
     await signOut();
     navigate('/');
@@ -129,20 +124,7 @@ const Dashboard = () => {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           {/* Profiles Section */}
           <div className="lg:col-span-2">
-            <div className="flex justify-between items-center mb-6">
-              <h2 className="text-xl font-semibold text-gray-900">Your Profiles</h2>
-              <Button onClick={() => setShowOnboarding(true)} className="bg-blue-600 hover:bg-blue-700">
-                <Plus className="h-4 w-4 mr-2" />
-                Create Profile
-              </Button>
-            </div>
-            
-            <ProfileList profiles={profiles.map(p => ({
-              id: p.id,
-              name: p.name,
-              lastUsed: p.updated_at,
-              completeness: p.completeness
-            }))} onDeleteProfile={handleDeleteProfile} />
+            <ProfileList />
           </div>
 
           {/* Sidebar */}
