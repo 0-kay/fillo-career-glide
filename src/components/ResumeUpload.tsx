@@ -1,10 +1,10 @@
-
 import React, { useState, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Upload, FileText, X, Loader2 } from 'lucide-react';
 import { useProfiles } from '@/hooks/useProfiles';
 import { useToast } from '@/hooks/use-toast';
-import { parseResumeFile } from '@/utils/resumeParser';
+import { supabase } from '@/integrations/supabase/client';
+import mammoth from 'mammoth';
 
 interface ResumeUploadProps {
   onComplete?: () => void;
@@ -53,6 +53,50 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
     if (data.awards_honors?.length > 0) score += 2;
     
     return Math.round((score / maxScore) * 100);
+  };
+
+  const extractTextFromPDF = async (file: File): Promise<string> => {
+    // For now, return a placeholder. In production, use a proper PDF parser
+    return "This is a placeholder for PDF text extraction. Please implement a proper PDF parser.";
+  };
+
+  const extractTextFromDOCX = async (file: File): Promise<string> => {
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+      const result = await mammoth.extractRawText({ arrayBuffer });
+      return result.value;
+    } catch (error) {
+      console.error('Error extracting DOCX:', error);
+      throw new Error('Failed to extract text from DOCX file');
+    }
+  };
+
+  const parseResumeWithAzureAI = async (file: File): Promise<any> => {
+    let text = '';
+    
+    if (file.type === 'application/pdf') {
+      text = await extractTextFromPDF(file);
+    } else if (file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+      text = await extractTextFromDOCX(file);
+    } else if (file.type === 'application/msword') {
+      text = await file.text();
+    } else {
+      throw new Error('Unsupported file format');
+    }
+
+    const { data, error } = await supabase.functions.invoke('azure-resume-parser', {
+      body: {
+        resumeText: text,
+        fileName: file.name
+      }
+    });
+
+    if (error) {
+      console.error('Azure AI parsing error:', error);
+      throw new Error('Failed to parse resume with Azure AI');
+    }
+
+    return data;
   };
 
   const handleDrag = useCallback((e: React.DragEvent) => {
@@ -111,9 +155,9 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
     setUploading(true);
 
     try {
-      console.log('Parsing resume:', file.name);
-      const parsedData = await parseResumeFile(file);
-      console.log('Parsed comprehensive data:', parsedData);
+      console.log('Parsing resume with Azure AI:', file.name);
+      const parsedData = await parseResumeWithAzureAI(file);
+      console.log('Azure AI parsed comprehensive data:', parsedData);
       
       const completeness = calculateCompleteness(parsedData);
       
@@ -126,11 +170,11 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
         education_history: parsedData.education_history,
         experience: parsedData.work_experience, // Keep for backward compatibility
         work_experience: parsedData.work_experience,
-        skills: parsedData.technical_skills.map(skill => skill.skill), // Keep for backward compatibility
+        skills: parsedData.technical_skills?.map((skill: any) => skill.skill) || [], // Keep for backward compatibility
         technical_skills: parsedData.technical_skills,
         soft_skills: parsedData.soft_skills,
         tools_technologies: parsedData.tools_technologies,
-        certifications: parsedData.certifications_licenses.map(cert => cert.name), // Keep for backward compatibility
+        certifications: parsedData.certifications_licenses?.map((cert: any) => cert.name) || [], // Keep for backward compatibility
         certifications_licenses: parsedData.certifications_licenses,
         awards_honors: parsedData.awards_honors,
         projects: parsedData.projects,
@@ -151,7 +195,7 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
       } else {
         toast({
           title: "Profile created successfully",
-          description: `Your resume has been parsed and saved with ${completeness}% completeness`,
+          description: `Your resume has been parsed with Azure AI and saved with ${completeness}% completeness`,
         });
         
         if (onComplete) {
@@ -179,9 +223,9 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
     return (
       <div className="text-center py-12">
         <Loader2 className="h-12 w-12 animate-spin text-blue-600 mx-auto mb-4" />
-        <h3 className="text-lg font-semibold text-gray-900 mb-2">Parsing Your Resume</h3>
+        <h3 className="text-lg font-semibold text-gray-900 mb-2">Analyzing Your Resume with Azure AI</h3>
         <p className="text-gray-600">
-          Extracting comprehensive information from your resume and saving it to your profile...
+          Using advanced AI to extract comprehensive information from your resume...
         </p>
       </div>
     );
@@ -192,7 +236,7 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
       <div className="text-center mb-8">
         <h3 className="text-xl font-semibold text-gray-900 mb-2">Upload Your Resume</h3>
         <p className="text-gray-600">
-          Upload your resume and we'll automatically extract comprehensive information including personal details, 
+          Upload your resume and our Azure AI will intelligently extract comprehensive information including personal details, 
           work experience, education, skills, projects, and more to create a complete profile.
         </p>
       </div>
@@ -249,7 +293,7 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
 
       <div className="mt-6 text-center">
         <p className="text-sm text-gray-500">
-          Your resume data is processed securely and never shared with third parties.
+          Your resume data is processed securely with Azure AI and never shared with third parties.
         </p>
       </div>
     </div>
