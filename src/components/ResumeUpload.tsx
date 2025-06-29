@@ -176,7 +176,7 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
       return;
     }
 
-    if (file.size > 10 * 1024 * 1024) { // 10MB limit
+    if (file.size > 25 * 1024 * 1024) { // 10MB limit
       toast({
         title: "File too large",
         description: "File size must be less than 10MB",
