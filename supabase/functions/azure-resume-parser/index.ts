@@ -25,9 +25,11 @@ serve(async (req) => {
       throw new Error('OpenAI API key not configured');
     }
 
+    console.log('Processing resume text:', resumeText.substring(0, 200) + '...');
+
     const systemPrompt = `You are a resume parser. Your job is to extract structured data from resumes, no matter how the text is formatted, and return it in JSON.
 
-The resumes may include multiple sections (e.g., education, experience, skills), in various layouts and tones — bullet points, paragraphs, one-pagers, etc. Some fields may be missing — that's okay.
+The resumes may include multiple sections (e.g., education, experience, skills), in various layouts and tones — bullet points, paragraphs, one-pagers, etc. Some fields may be missing — that's okay. The data you receive may be unstructured, with inconsistent formatting, missing sections, or mixed content.
 
 Return the extracted information in this structured JSON format:
 
@@ -121,6 +123,8 @@ Rules:
 - If a field is not found, use an empty string or empty list (never omit the field).
 - Extract skills from anywhere (bullets, summaries, job descriptions).
 - If education or experience appears multiple times, extract each entry.
+- Handle unstructured data gracefully - the text may not have clear sections or formatting.
+- Look for patterns and context clues to identify information even if it's not clearly labeled.
 
 Return only the JSON.`;
 
@@ -134,7 +138,10 @@ Return only the JSON.`;
         model: 'gpt-4o-mini',
         messages: [
           { role: 'system', content: systemPrompt },
-          { role: 'user', content: `Now here is the resume:\n---\n${resumeText}\n---\nReturn only the JSON.` }
+          { 
+            role: 'user', 
+            content: `Now here is the resume text (note: this may be unstructured data):\n---\n${resumeText}\n---\nReturn only the JSON.` 
+          }
         ],
         temperature: 0.1,
         max_tokens: 4000,
@@ -144,11 +151,15 @@ Return only the JSON.`;
 
     if (!response.ok) {
       const errorText = await response.text();
+      console.error('OpenAI API error:', errorText);
       throw new Error(`OpenAI API error: ${response.status} - ${errorText}`);
     }
 
     const data = await response.json();
+    console.log('OpenAI response:', data);
+    
     const parsedData = JSON.parse(data.choices[0].message.content);
+    console.log('Parsed resume data:', parsedData);
     
     // Add metadata for compatibility with existing system
     parsedData.resume_metadata = {

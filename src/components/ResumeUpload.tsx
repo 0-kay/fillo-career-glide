@@ -84,6 +84,8 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
       throw new Error('Unsupported file format');
     }
 
+    console.log('Extracted text for OpenAI:', text.substring(0, 500) + '...');
+
     const { data, error } = await supabase.functions.invoke('azure-resume-parser', {
       body: {
         resumeText: text,
@@ -96,6 +98,7 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
       throw new Error('Failed to parse resume with OpenAI');
     }
 
+    console.log('OpenAI response data:', data);
     return data;
   };
 
@@ -155,9 +158,9 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
     setUploading(true);
 
     try {
-      console.log('Parsing resume with OpenAI:', file.name);
+      console.log('Starting resume parsing with OpenAI:', file.name);
       const parsedData = await parseResumeWithOpenAI(file);
-      console.log('OpenAI parsed data:', parsedData);
+      console.log('Parsed data from OpenAI:', parsedData);
       
       const completeness = calculateCompleteness(parsedData);
       
@@ -183,7 +186,7 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
           typeof cert === 'string' ? cert : cert.name || ''
         ) || [],
         
-        // New structured fields - properly mapped from OpenAI response
+        // New structured fields
         personal_details: {
           full_name: {
             first: parsedData.personalInfo?.fullName?.split(' ')[0] || '',
@@ -303,7 +306,7 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
         completeness
       };
       
-      console.log('Saving profile data:', profileData);
+      console.log('Final profile data to save:', profileData);
       
       // Save to database
       const { error } = await createProfile(profileData);
@@ -329,7 +332,7 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
       console.error('Error parsing resume:', error);
       toast({
         title: "Error parsing resume",
-        description: "Please try again or check if your file format is supported",
+        description: error instanceof Error ? error.message : "Please try again or check if your file format is supported",
         variant: "destructive"
       });
     } finally {
