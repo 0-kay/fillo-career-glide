@@ -1,7 +1,22 @@
-
 import { useState, useEffect, createContext, useContext } from 'react';
 import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
+
+// Type declaration for Chrome extension API
+declare global {
+  interface Window {
+    chrome?: {
+      storage?: {
+        local?: {
+          set: (items: Record<string, any>) => Promise<void>;
+          remove: (keys: string[]) => Promise<void>;
+        };
+      };
+    };
+  }
+}
+
+console.log('Supabase client initialized for authentication');
 
 interface AuthContextType {
   user: User | null;
@@ -20,20 +35,51 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Set up auth state listener
+    // Simple function to save auth token to Chrome storage
+    const saveTokenToChrome = (session: Session | null) => {
+      if (typeof window !== 'undefined' && window.chrome?.storage?.local) {
+        if (session?.access_token) {
+          console.log('💾 Saving token to Chrome storage...');
+          window.chrome.storage.local.set({
+            FILLO_AUTH_TOKEN: session.access_token
+          }).then(() => {
+            console.log('✅ Token saved to Chrome storage');
+          }).catch((error) => {
+            console.log('❌ Failed to save token:', error);
+          });
+        } else {
+          console.log('🗑️ Clearing token from Chrome storage...');
+          window.chrome.storage.local.remove(['FILLO_AUTH_TOKEN']).then(() => {
+            console.log('✅ Token cleared from Chrome storage');
+          }).catch((error) => {
+            console.log('❌ Failed to clear token:', error);
+          });
+        }
+      }
+    };
+
+    // Auth state listener
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (event, session) => {
+        console.log('🔐 Auth state changed:', event);
         setSession(session);
         setUser(session?.user ?? null);
         setLoading(false);
+        
+        // Always save token to Chrome storage on any auth change
+        saveTokenToChrome(session);
       }
     );
 
     // Get initial session
     supabase.auth.getSession().then(({ data: { session } }) => {
+      console.log('🔐 Initial session loaded');
       setSession(session);
       setUser(session?.user ?? null);
       setLoading(false);
+      
+      // Save initial token to Chrome storage
+      saveTokenToChrome(session);
     });
 
     return () => subscription.unsubscribe();
@@ -52,6 +98,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
       }
     });
+    if (error) {
+      console.error('Sign up error:', error);
+    } else {
+      console.log('User signed up successfully');
+    }
     return { error };
   };
 
@@ -60,11 +111,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       email,
       password
     });
+    if (error) {
+      console.error('Sign in error:', error);
+    } else {
+      console.log('User signed in successfully');
+    }
     return { error };
   };
 
   const signOut = async () => {
     await supabase.auth.signOut();
+    console.log('User signed out');
   };
 
   const value = {

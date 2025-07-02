@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body class="popup">
+  <div class="popup-container">
+    <!-- Header -->
+    <div class="popup-header">
+      <div class="logo">
+        <div class="logo-icon">F</div>
+        <span class="logo-text">Fillo</span>
+      </div>
+      <div class="subtitle">Auto-Fill Assistant</div>
+    </div>
+
+    <!-- Auth Section -->
+    <div id="auth-section" class="section hidden">
+      <h3>🔐 Authentication</h3>
+      <p id="auth-message">Please sign in to access your resume profiles</p>
+      <button id="signin-btn" class="btn btn-primary">
+        Open Fillo Web App
+      </button>
+      <p class="help-text">After signing in, click refresh below</p>
+      
+      <button id="refresh-btn" class="btn btn-secondary" style="margin-top: 10px;">
+        🔄 Refresh Authentication
+      </button>
+    </div>
+
+    <!-- Main Section -->
+    <div id="main-section" class="section">
+      <!-- Profile Selection -->
+      <div class="form-group">
+        <label for="profile-select">Select Profile:</label>
+        <select id="profile-select" class="select">
+          <option value="">Loading profiles...</option>
+        </select>
+      </div>
+
+      <!-- Profile Preview -->
+      <div id="profile-preview" class="profile-preview hidden">
+        <div class="preview-row">
+          <span class="label">Name:</span>
+          <span id="preview-name" class="value"></span>
+        </div>
+        <div class="preview-row">
+          <span class="label">Email:</span>
+          <span id="preview-email" class="value"></span>
+        </div>
+        <div class="preview-row">
+          <span class="label">Completeness:</span>
+          <span id="preview-completeness" class="badge"></span>
+        </div>
+      </div>
+
+      <!-- Actions -->
+      <div class="actions">
+        <button id="fill-btn" class="btn btn-primary" disabled>
+          ⚡ Fill Application Form
+        </button>
+        <button id="detect-btn" class="btn btn-secondary">
+          🔍 Detect Form Fields
+        </button>
+      </div>
+
+      <!-- Status -->
+      <div id="status" class="status hidden"></div>
+    </div>
+
+    <!-- Footer -->
+    <div class="popup-footer">
+      <button id="footer-refresh-btn" class="btn-link">🔄 Refresh</button>
+      <span class="divider">•</span>
+      <button id="help-btn" class="btn-link">❓ Help</button>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html> 

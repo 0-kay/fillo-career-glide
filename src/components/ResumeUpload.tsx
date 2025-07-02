@@ -7,14 +7,18 @@ import { supabase } from '@/integrations/supabase/client';
 import mammoth from 'mammoth';
 import * as pdfjsLib from 'pdfjs-dist';
 
-// Set up PDF.js worker
-pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
+// Use legacy build for better compatibility
+pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
+  'pdfjs-dist/legacy/build/pdf.worker.min.js',
+  import.meta.url
+).toString();
 
 interface ResumeUploadProps {
   onComplete?: () => void;
 }
 
 const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
+  console.log('🚀 ResumeUpload component rendered');
   const [dragActive, setDragActive] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -23,8 +27,6 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
 
   const extractTextFromPDF = async (file: File): Promise<string> => {
     console.log('=== PDF EXTRACTION START ===');
-    console.log('PDF.js version:', pdfjsLib.version);
-    console.log('Worker source:', pdfjsLib.GlobalWorkerOptions.workerSrc);
     console.log('File details:', {
       name: file.name,
       size: file.size,
@@ -41,28 +43,12 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
         throw new Error('File appears to be empty');
       }
       
-      // Try to create a Uint8Array to ensure data is readable
-      const uint8Array = new Uint8Array(arrayBuffer);
-      console.log('Uint8Array created, first few bytes:', Array.from(uint8Array.slice(0, 10)));
-      
-      // Check for PDF signature
-      const pdfSignature = uint8Array.slice(0, 4);
-      const isPDF = String.fromCharCode(...pdfSignature) === '%PDF';
-      console.log('PDF signature check:', isPDF, 'First 10 bytes as string:', String.fromCharCode(...uint8Array.slice(0, 10)));
-      
-      if (!isPDF) {
-        throw new Error('File does not appear to be a valid PDF (missing PDF signature)');
-      }
-      
-      console.log('Creating PDF loading task...');
+      console.log('Loading PDF document...');
       const loadingTask = pdfjsLib.getDocument({
         data: arrayBuffer,
-        cMapUrl: `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/cmaps/`,
-        cMapPacked: true,
-        verbosity: 1, // Enable some logging
+        verbosity: 0 // Reduce logging
       });
       
-      console.log('Waiting for PDF to load...');
       const pdf = await loadingTask.promise;
       console.log('PDF loaded successfully! Number of pages:', pdf.numPages);
 
@@ -70,53 +56,60 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
       
       for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
         try {
-          console.log(`--- Processing page ${pageNum}/${pdf.numPages} ---`);
+          console.log(`Processing page ${pageNum}/${pdf.numPages}`);
           const page = await pdf.getPage(pageNum);
-          console.log(`Page ${pageNum} loaded successfully`);
-          
           const textContent = await page.getTextContent();
-          console.log(`Page ${pageNum} text content retrieved, items:`, textContent.items.length);
           
+          // Enhanced text extraction with better formatting
           const pageText = textContent.items
-            .map((item: any) => {
-              // More robust text extraction
-              if (item && typeof item === 'object') {
-                return item.str || item.text || '';
+            .map((item: any, index: number) => {
+              if (item && typeof item === 'object' && item.str) {
+                let text = item.str.trim();
+                
+                // Add line breaks for proper formatting
+                const nextItem = textContent.items[index + 1];
+                if (nextItem && (item as any).transform && (nextItem as any).transform) {
+                  const currentY = (item as any).transform[5];
+                  const nextY = (nextItem as any).transform[5];
+                  
+                  // If next item is significantly lower, add line break
+                  if (Math.abs(currentY - nextY) > 3) {
+                    text += '\n';
+                  } else {
+                    text += ' ';
+                  }
+                }
+                
+                return text;
               }
-              return String(item || '');
+              return '';
             })
-            .filter(text => text.trim().length > 0)
-            .join(' ');
+            .join('')
+            .replace(/\s+/g, ' ') // Clean up multiple spaces
+            .replace(/\n\s*\n/g, '\n') // Clean up multiple line breaks
+            .trim();
           
-          console.log(`Page ${pageNum} extracted text length:`, pageText.length);
           if (pageText.length > 0) {
-            console.log(`Page ${pageNum} first 100 chars:`, pageText.substring(0, 100));
             fullText += pageText + '\n\n';
-          } else {
-            console.warn(`Page ${pageNum} produced no text`);
+            console.log(`Page ${pageNum} extracted ${pageText.length} characters`);
           }
           
         } catch (pageError) {
-          console.error(`Error processing page ${pageNum}:`, {
-            error: pageError,
-            message: pageError instanceof Error ? pageError.message : String(pageError),
-            stack: pageError instanceof Error ? pageError.stack : undefined
-          });
-          // Continue with other pages instead of failing completely
+          console.warn(`Error processing page ${pageNum}:`, pageError);
+          // Continue with other pages
         }
       }
 
       console.log('=== PDF EXTRACTION COMPLETE ===');
       console.log('Total extracted text length:', fullText.length);
+      console.log('Number of pages:', pdf.numPages);
       
       if (fullText.length === 0) {
-        throw new Error('No text could be extracted from any pages');
+        throw new Error('No text could be extracted from the PDF');
       }
       
       console.log('Sample extracted text (first 500 chars):');
       console.log(fullText.substring(0, 500));
-      console.log('Sample extracted text (last 500 chars):');
-      console.log(fullText.substring(Math.max(0, fullText.length - 500)));
       
       return fullText.trim();
       
@@ -128,11 +121,6 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
         name: error instanceof Error ? error.name : 'Unknown',
         stack: error instanceof Error ? error.stack : undefined
       });
-      
-      // Log additional PDF.js specific error details
-      if (error && typeof error === 'object' && 'name' in error) {
-        console.error('PDF.js error name:', error.name);
-      }
       
       // Return a more descriptive fallback
       const fallbackText = `Error extracting text from PDF: ${file.name}. Error: ${error instanceof Error ? error.message : String(error)}`;
@@ -241,23 +229,44 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
   }, []);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
+    console.log('=== DROP EVENT ===');
     e.preventDefault();
     e.stopPropagation();
     setDragActive(false);
     
+    console.log('Files in drop:', e.dataTransfer.files.length);
     if (e.dataTransfer.files?.[0]) {
+      console.log('Calling handleFile from drop');
       handleFile(e.dataTransfer.files[0]);
+    } else {
+      console.log('No files in drop event');
     }
   }, []);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    console.log('=== FILE INPUT CHANGE ===');
     e.preventDefault();
+    console.log('Files in input:', e.target.files?.length || 0);
     if (e.target.files?.[0]) {
+      console.log('Calling handleFile from input change');
       handleFile(e.target.files[0]);
+    } else {
+      console.log('No files in input change event');
     }
   };
 
   const handleFile = async (file: File) => {
+    // Force console logs to appear
+    console.clear();
+    console.log('🔥🔥🔥 HANDLE FILE CALLED 🔥🔥🔥');
+    console.log('=== HANDLE FILE CALLED ===');
+    console.warn('⚠️ HANDLE FILE WARNING LOG');
+    console.error('🚨 HANDLE FILE ERROR LOG (this is intentional for visibility)');
+    console.log('File object:', file);
+    console.log('File name:', file.name);
+    console.log('File type:', file.type);
+    console.log('File size:', file.size);
+    
     const validTypes = [
       'application/pdf', 
       'application/msword', 
@@ -265,7 +274,11 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
       'text/plain'
     ];
     
+    console.log('Valid types:', validTypes);
+    console.log('File type valid?', validTypes.includes(file.type));
+    
     if (!validTypes.includes(file.type)) {
+      console.log('Invalid file type detected');
       toast({
         title: "Invalid file type",
         description: "Please upload a PDF, DOC, DOCX, or TXT file",
@@ -292,17 +305,196 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
       const parsedData = await parseResumeWithAI(file);
       
       console.log('=== PROFILE CREATION ===');
+      console.log('Raw OpenAI response data:', parsedData);
+      console.log('OpenAI data keys:', Object.keys(parsedData));
+      console.log('Personal info from OpenAI:', parsedData.personalInfo);
+      console.log('Skills from OpenAI:', parsedData.skills);
+      console.log('Experience from OpenAI:', parsedData.experience);
+      console.log('Education from OpenAI:', parsedData.education);
+      
       const profileData = {
         name: parsedData.personalInfo?.fullName || file.name.replace(/\.[^/.]+$/, ''),
-        personal_info: parsedData.personalInfo || {},
-        education: parsedData.education || [],
-        experience: parsedData.experience || [],
-        skills: parsedData.skills?.technical || [],
-        certifications: [],
-        completeness: 50
+        
+        // Enhanced personal details structure
+        personal_details: {
+          ...parsedData.personalInfo,
+          summary: parsedData.summary || "",
+          fullName: parsedData.personalInfo?.fullName || "",
+          email: parsedData.personalInfo?.email || "",
+          phone: parsedData.personalInfo?.phone || "",
+          address: parsedData.personalInfo?.address || "",
+          linkedin: parsedData.personalInfo?.linkedin || "",
+          github: parsedData.personalInfo?.github || "",
+          portfolio: parsedData.personalInfo?.portfolio || ""
+        },
+        
+        // Enhanced education history with all details
+        education_history: Array.isArray(parsedData.education) ? parsedData.education.map(edu => ({
+          degree: edu.degree || "",
+          school: edu.school || "",
+          location: edu.location || "",
+          startDate: edu.startDate || "",
+          endDate: edu.endDate || "",
+          description: edu.description || "",
+          gpa: edu.gpa || "",
+          honors: edu.honors || "",
+          coursework: edu.coursework || ""
+        })) : [],
+        
+        // Enhanced work experience with complete details
+        work_experience: Array.isArray(parsedData.experience) ? parsedData.experience.map(exp => ({
+          jobTitle: exp.jobTitle || "",
+          company: exp.company || "",
+          location: exp.location || "",
+          startDate: exp.startDate || "",
+          endDate: exp.endDate || "",
+          description: exp.description || "",
+          achievements: exp.achievements || [],
+          technologies: exp.technologies || [],
+          metrics: exp.metrics || []
+        })) : [],
+        
+        // Enhanced technical skills structure
+        technical_skills: {
+          programming: parsedData.skills?.technical?.filter(skill => 
+            ['java', 'javascript', 'python', 'react', 'node', 'typescript', 'c++', 'c#'].some(lang => 
+              skill.toLowerCase().includes(lang)
+            )) || [],
+          frameworks: parsedData.skills?.technical?.filter(skill => 
+            ['react', 'angular', 'vue', 'express', 'spring', 'django', 'flask'].some(framework => 
+              skill.toLowerCase().includes(framework)
+            )) || [],
+          databases: parsedData.skills?.technical?.filter(skill => 
+            ['postgresql', 'mysql', 'mongodb', 'redis', 'sql'].some(db => 
+              skill.toLowerCase().includes(db)
+            )) || [],
+          cloud: parsedData.skills?.technical?.filter(skill => 
+            ['aws', 'azure', 'gcp', 'docker', 'kubernetes', 'devops'].some(cloud => 
+              skill.toLowerCase().includes(cloud)
+            )) || [],
+          all: parsedData.skills?.technical || []
+        },
+        
+        // Enhanced soft skills
+        soft_skills: {
+          leadership: parsedData.skills?.soft?.filter(skill => 
+            ['leadership', 'management', 'team'].some(lead => 
+              skill.toLowerCase().includes(lead)
+            )) || [],
+          communication: parsedData.skills?.soft?.filter(skill => 
+            ['communication', 'presentation', 'writing'].some(comm => 
+              skill.toLowerCase().includes(comm)
+            )) || [],
+          all: parsedData.skills?.soft || []
+        },
+        
+        // Enhanced tools and technologies
+        tools_technologies: {
+          development: parsedData.skills?.tools?.filter(tool => 
+            ['vscode', 'intellij', 'eclipse', 'git', 'github', 'gitlab'].some(dev => 
+              tool.toLowerCase().includes(dev)
+            )) || [],
+          design: parsedData.skills?.tools?.filter(tool => 
+            ['adobe', 'photoshop', 'illustrator', 'figma', 'canva'].some(design => 
+              tool.toLowerCase().includes(design)
+            )) || [],
+          productivity: parsedData.skills?.tools?.filter(tool => 
+            ['jira', 'confluence', 'trello', 'slack', 'teams'].some(prod => 
+              tool.toLowerCase().includes(prod)
+            )) || [],
+          all: parsedData.skills?.tools || []
+        },
+        
+        // Enhanced certifications with credential details
+        certifications_licenses: Array.isArray(parsedData.certifications) ? parsedData.certifications.map(cert => ({
+          name: cert.name || "",
+          issuingOrganization: cert.issuingOrganization || "",
+          dateIssued: cert.dateIssued || "",
+          expirationDate: cert.expirationDate || "",
+          credentialId: cert.credentialId || "",
+          credentialUrl: cert.credentialUrl || ""
+        })) : [],
+        
+        // Enhanced awards and honors
+        awards_honors: Array.isArray(parsedData.awards) ? parsedData.awards.map(award => ({
+          title: award.title || "",
+          issuer: award.issuer || "",
+          date: award.date || "",
+          description: award.description || "",
+          significance: award.significance || ""
+        })) : [],
+        
+        // Enhanced projects with complete details
+        projects: Array.isArray(parsedData.projects) ? parsedData.projects.map(project => ({
+          name: project.name || "",
+          description: project.description || "",
+          technologies: Array.isArray(project.technologies) ? project.technologies : [],
+          role: project.role || "",
+          duration: project.duration || "",
+          url: project.url || "",
+          repository: project.repository || "",
+          impact: project.impact || "",
+          metrics: project.metrics || []
+        })) : [],
+        
+        // Enhanced languages with proficiency
+        languages: Array.isArray(parsedData.languages) ? parsedData.languages.map(lang => {
+          if (typeof lang === 'string') {
+            return { language: lang, proficiency: "" };
+          }
+          return {
+            language: lang.language || lang.name || "",
+            proficiency: lang.proficiency || lang.level || ""
+          };
+        }) : [],
+        
+        // Enhanced volunteer experience
+        volunteer_experience: Array.isArray(parsedData.volunteer) ? parsedData.volunteer.map(vol => ({
+          organization: vol.organization || "",
+          role: vol.role || "",
+          location: vol.location || "",
+          startDate: vol.startDate || "",
+          endDate: vol.endDate || "",
+          description: vol.description || "",
+          impact: vol.impact || ""
+        })) : [],
+        
+        // Comprehensive resume metadata
+        resume_metadata: {
+          fileName: file.name,
+          fileSize: file.size,
+          uploadDate: new Date().toISOString(),
+          openAIResponse: parsedData,
+          extractionQuality: {
+            hasPersonalInfo: !!parsedData.personalInfo,
+            hasWorkExperience: Array.isArray(parsedData.experience) && parsedData.experience.length > 0,
+            hasEducation: Array.isArray(parsedData.education) && parsedData.education.length > 0,
+            hasSkills: !!parsedData.skills,
+            hasProjects: Array.isArray(parsedData.projects) && parsedData.projects.length > 0,
+            dataCompleteness: calculateDataCompleteness(parsedData)
+          }
+        },
+        
+        completeness: calculateDataCompleteness(parsedData)
       };
       
-      console.log('Profile data to be created:', profileData);
+      // Helper function to calculate data completeness
+      function calculateDataCompleteness(data: any): number {
+        let score = 0;
+        if (data.personalInfo?.fullName) score += 10;
+        if (data.personalInfo?.email) score += 10;
+        if (data.personalInfo?.phone) score += 10;
+        if (data.summary) score += 10;
+        if (data.experience?.length > 0) score += 20;
+        if (data.education?.length > 0) score += 15;
+        if (data.skills?.technical?.length > 0) score += 10;
+        if (data.projects?.length > 0) score += 10;
+        if (data.certifications?.length > 0) score += 5;
+        return Math.min(score, 100);
+      }
+      
+      console.log('Mapped profile data to be created:', profileData);
+      console.log('Profile data keys:', Object.keys(profileData));
       
       const result = await createProfile(profileData);
       

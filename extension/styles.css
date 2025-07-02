@@ -1,0 +1,378 @@
+/* Popup Styles - Clean White Design */
+.popup {
+  width: 380px;
+  min-height: 420px;
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: white;
+  color: #1a1a1a;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
+}
+
+.popup-container {
+  padding: 0;
+}
+
+.popup-header {
+  text-align: center;
+  padding: 24px 20px 20px 20px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border-radius: 0;
+}
+
+.logo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 8px;
+}
+
+.logo-icon {
+  width: 36px;
+  height: 36px;
+  background: rgba(255, 255, 255, 0.25);
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+  margin-right: 10px;
+  font-size: 20px;
+  color: white;
+}
+
+.logo-text {
+  font-size: 26px;
+  font-weight: 700;
+  color: white;
+}
+
+.subtitle {
+  font-size: 14px;
+  opacity: 0.9;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.section {
+  background: white;
+  padding: 20px;
+  margin: 0;
+  border-radius: 0;
+}
+
+.section h3 {
+  margin: 0 0 16px 0;
+  font-size: 18px;
+  color: #2d3748;
+}
+
+.form-group {
+  margin-bottom: 16px;
+}
+
+.form-group label {
+  display: block;
+  margin-bottom: 6px;
+  font-weight: 600;
+  font-size: 13px;
+  color: #4a5568;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.select {
+  width: 100%;
+  padding: 12px 16px;
+  border: 2px solid #e2e8f0;
+  border-radius: 8px;
+  background: white;
+  color: #2d3748;
+  font-size: 14px;
+  transition: all 0.2s ease;
+  outline: none;
+}
+
+.select:focus {
+  border-color: #667eea;
+  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
+.select option {
+  background: white;
+  color: #2d3748;
+  padding: 8px;
+}
+
+.profile-preview {
+  background: #f7fafc;
+  border: 2px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 16px;
+  margin-bottom: 20px;
+}
+
+.preview-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.preview-row:last-child {
+  margin-bottom: 0;
+}
+
+.label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #718096;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.value {
+  font-size: 14px;
+  font-weight: 500;
+  color: #2d3748;
+}
+
+.badge {
+  background: linear-gradient(135deg, #48bb78 0%, #38a169 100%);
+  color: white;
+  padding: 4px 10px;
+  border-radius: 16px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+
+.actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 14px 18px;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  letter-spacing: 0.3px;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none !important;
+}
+
+.btn-primary {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border: none;
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+}
+
+.btn-primary:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(102, 126, 234, 0.4);
+}
+
+.btn-secondary {
+  background: white;
+  color: #4a5568;
+  border: 2px solid #e2e8f0;
+}
+
+.btn-secondary:hover {
+  background: #f7fafc;
+  border-color: #cbd5e0;
+  transform: translateY(-1px);
+}
+
+.status {
+  margin: 16px 20px 0 20px;
+  padding: 12px 16px;
+  border-radius: 8px;
+  font-size: 13px;
+  text-align: center;
+  font-weight: 500;
+}
+
+.status.success {
+  background: #f0fff4;
+  color: #22543d;
+  border: 2px solid #9ae6b4;
+}
+
+.status.error {
+  background: #fed7d7;
+  color: #742a2a;
+  border: 2px solid #fc8181;
+}
+
+.status.info {
+  background: #ebf8ff;
+  color: #2a4365;
+  border: 2px solid #90cdf4;
+}
+
+.popup-footer {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 16px 20px 20px 20px;
+  background: #f7fafc;
+  border-top: 1px solid #e2e8f0;
+}
+
+.btn-link {
+  background: none;
+  border: none;
+  color: #667eea;
+  font-size: 12px;
+  cursor: pointer;
+  text-decoration: none;
+  font-weight: 500;
+  padding: 4px 8px;
+  border-radius: 4px;
+  transition: all 0.2s ease;
+}
+
+.btn-link:hover {
+  background: rgba(102, 126, 234, 0.1);
+  color: #553c9a;
+}
+
+.divider {
+  color: #cbd5e0;
+  font-size: 12px;
+}
+
+.hidden {
+  display: none !important;
+}
+
+.help-text {
+  font-size: 12px;
+  color: #718096;
+  text-align: center;
+  margin-top: 12px;
+  line-height: 1.4;
+}
+
+/* Auth Section Specific Styles */
+#auth-section {
+  text-align: center;
+  padding: 20px;
+}
+
+#auth-section h3 {
+  color: #2d3748;
+  margin-bottom: 12px;
+}
+
+#auth-section p {
+  color: #718096;
+  margin-bottom: 20px;
+  line-height: 1.5;
+}
+
+/* Content Script Styles */
+#fillo-indicator {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  z-index: 10000;
+  opacity: 0;
+  transition: all 0.3s ease;
+  pointer-events: none;
+}
+
+#fillo-indicator.show {
+  opacity: 1;
+}
+
+#fillo-indicator.fade-out {
+  opacity: 0;
+  transform: translateX(100px);
+}
+
+.fillo-badge {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  padding: 10px 16px;
+  border-radius: 25px;
+  font-size: 12px;
+  font-weight: 600;
+  box-shadow: 0 6px 20px rgba(102, 126, 234, 0.3);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  backdrop-filter: blur(10px);
+}
+
+.fillo-icon {
+  width: 18px;
+  height: 18px;
+  background: rgba(255, 255, 255, 0.25);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: bold;
+}
+
+.fillo-text {
+  font-size: 11px;
+  letter-spacing: 0.3px;
+}
+
+/* Form field highlighting */
+.fillo-highlight {
+  outline: 2px solid #667eea !important;
+  outline-offset: 2px !important;
+  background-color: rgba(102, 126, 234, 0.1) !important;
+}
+
+/* Success animation */
+@keyframes filloSuccess {
+  0% { transform: scale(0.9); opacity: 0; }
+  50% { transform: scale(1.05); }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+.fillo-success {
+  animation: filloSuccess 0.4s ease-out;
+}
+
+/* Improved scrollbar for popup */
+.popup::-webkit-scrollbar {
+  width: 6px;
+}
+
+.popup::-webkit-scrollbar-track {
+  background: #f1f1f1;
+}
+
+.popup::-webkit-scrollbar-thumb {
+  background: #c1c1c1;
+  border-radius: 3px;
+}
+
+.popup::-webkit-scrollbar-thumb:hover {
+  background: #a8a8a8;
+} 

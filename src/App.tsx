@@ -1,10 +1,10 @@
-
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "@/hooks/useAuth";
+import { useFilloExtension } from "@/hooks/useFilloExtension";
 import Index from "./pages/Index";
 import Auth from "./pages/Auth";
 import Dashboard from "./pages/Dashboard";
@@ -14,9 +14,22 @@ import ProfileEdit from "./pages/ProfileEdit";
 
 const queryClient = new QueryClient();
 
+// Component to handle extension integration (must be inside AuthProvider)
+function ExtensionIntegration() {
+  const { extensionAvailable } = useFilloExtension();
+  
+  // Log extension status for debugging
+  if (extensionAvailable) {
+    console.log('🤖 Fillo Chrome Extension detected and connected');
+  }
+  
+  return null; // This component doesn't render anything
+}
+
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <AuthProvider>
+      <ExtensionIntegration />
       <TooltipProvider>
         <Toaster />
         <Sonner />
