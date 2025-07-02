@@ -8,27 +8,36 @@ import { useAuth } from './useAuth';
 export function useFilloExtension() {
   const { user, session } = useAuth();
 
+    window.postMessage({
+    source: "web-app",
+    type: "SEND_TOKEN",
+    token: session?.access_token
+  }, "*")
+
+
   useEffect(() => {
+
+    window.filloExtensionNotifyAuth = (token: string | null) => {
+      console.log("Token received from extension:", token);
+    };
     // Function to notify the extension of auth changes
     const notifyExtension = () => {
-      try {
-        // Check if the extension's content script is available
-        if (typeof window.filloExtensionNotifyAuth === 'function') {
-          const accessToken = session?.access_token;
-          
-          if (user && accessToken) {
-            console.log('🔔 Notifying Fillo extension: User authenticated');
-            window.filloExtensionNotifyAuth(accessToken);
-          } else {
-            console.log('🔔 Notifying Fillo extension: User logged out');
-            window.filloExtensionNotifyAuth(null);
-          }
+
+      console.log("Fillo: ", typeof window.filloExtensionNotifyAuth)
+      // Check if the extension's content script is available
+      if (typeof window.filloExtensionNotifyAuth === 'function') {
+        const accessToken = session?.access_token;
+
+        if (user && accessToken) {
+          console.log('🔔 Notifying Fillo extension: User authenticated');
+          window.filloExtensionNotifyAuth(accessToken);
         } else {
-          // Extension not installed or content script not loaded
-          console.log('🤖 Fillo extension not detected');
+          console.log('🔔 Notifying Fillo extension: User logged out');
+          window.filloExtensionNotifyAuth(null);
         }
-      } catch (error) {
-        console.log('❌ Error communicating with extension:', error);
+      } else {
+        // Extension not installed or content script not loaded
+        console.log('🤖 Fillo extension not detected');
       }
     };
 
@@ -43,12 +52,11 @@ export function useFilloExtension() {
     };
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
-    
+
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, [user, session]);
-
   return {
     extensionAvailable: typeof window.filloExtensionNotifyAuth === 'function'
   };

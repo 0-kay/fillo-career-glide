@@ -34,11 +34,20 @@
         "https://*.smartrecruiters.com/*",
         "http://localhost:8080/*"
       ],
-      "js": ["content.js"],
-      "css": ["styles.css"],
+      "js": [
+        "content.js"
+      ],
+      "css": [
+        "styles.css"
+      ],
       "run_at": "document_start"
     }
   ],
+  "externally_connectable": {
+    "matches": [
+      "http://localhost:8080/*"
+    ]
+  },
   "action": {
     "default_popup": "popup.html",
     "default_title": "Fillo Auto-Fill",
@@ -53,4 +62,4 @@
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"
   }
-} 
+}

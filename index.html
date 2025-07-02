@@ -1,63 +1,76 @@
 <!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Fillo - Fill the gap between effort and opportunity</title>
-    <meta name="description" content="Smart autofill assistant that makes job applications effortless. Stop wasting hours on Workday, ICIMS, and other platforms." />
-    <meta name="author" content="Fillo" />
 
-    <meta property="og:title" content="Fillo - Smart Job Application Assistant" />
-    <meta property="og:description" content="Fill the gap between effort and opportunity with our intelligent autofill assistant for job applications." />
-    <meta property="og:type" content="website" />
-    <meta property="og:image" content="https://lovable.dev/opengraph-image-p98pqg.png" />
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Fillo - Fill the gap between effort and opportunity</title>
+  <meta name="description"
+    content="Smart autofill assistant that makes job applications effortless. Stop wasting hours on Workday, ICIMS, and other platforms." />
+  <meta name="author" content="Fillo" />
 
-    <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:site" content="@fillo_app" />
-    <meta name="twitter:image" content="https://lovable.dev/opengraph-image-p98pqg.png" />
-  </head>
+  <meta property="og:title" content="Fillo - Smart Job Application Assistant" />
+  <meta property="og:description"
+    content="Fill the gap between effort and opportunity with our intelligent autofill assistant for job applications." />
+  <meta property="og:type" content="website" />
+  <meta property="og:image" content="https://lovable.dev/opengraph-image-p98pqg.png" />
 
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
-    <script>
-      // Check if content script is loaded and working
-      console.log('Extension communication available:', typeof window.filloExtensionNotifyAuth === 'function');
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:site" content="@fillo_app" />
+  <meta name="twitter:image" content="https://lovable.dev/opengraph-image-p98pqg.png" />
+</head>
 
-      // Check if token exists
-      const authData = localStorage.getItem('sb-yuojrygcrcpajiglbekd-auth-token');
-      console.log('Auth token exists:', !!authData);
+<body>
+  <div id="root"></div>
+  <script type="module" src="/src/main.tsx"></script>
+  <script>
+    // Check if content script is loaded and working
+    console.log('Extension communication available:', typeof window.filloExtensionNotifyAuth === 'function');
 
-      // Test token extraction
-      if (authData) {
-        const parsed = JSON.parse(authData);
-        console.log('Access token found:', !!parsed.access_token);
+    // Check if token exists
+    const authData = localStorage.getItem('sb-yuojrygcrcpajiglbekd-auth-token');
+    console.log('Auth token exists:', !!authData);
+
+    const extensionId = 'onjnkheoimgbaacfojkhamcldacfinlg';
+    const auth_data = JSON.parse(authData)
+    const message = { accessToken: auth_data.access_token };
+    chrome.runtime.sendMessage(extensionId, message, (response) => {
+      if (response) {
+        console.log('Response from extension:', response);
       }
+    });
 
-      // Check what the popup sees
-      console.log('=== POPUP DEBUG ===');
+    // Test token extraction
+    if (authData) {
+      const parsed = JSON.parse(authData);
+      console.log('Access token found:', !!parsed.access_token);
+    }
 
-      // Check if popup script loaded
-      console.log('Popup object:', typeof window.filloPopup);
+    // Check what the popup sees
+    console.log('=== POPUP DEBUG ===');
 
-      // Check storage directly from popup
-      chrome.storage.local.get().then(data => {
-        console.log('All storage from popup:', data);
-        console.log('Auth token exists:', !!data.authToken);
-        console.log('Pending update exists:', !!data.pendingAuthUpdate);
-        
-        if (data.pendingAuthUpdate) {
-          console.log('Pending update details:', data.pendingAuthUpdate);
-        }
-      });
+    // Check if popup script loaded
+    console.log('Popup object:', typeof window.filloPopup);
 
-      // Check if elements exist
-      console.log('Auth section element:', !!document.getElementById('auth-section'));
-      console.log('Main section element:', !!document.getElementById('main-section'));
+    // Check storage directly from popup
+    chrome.storage.local.get().then(data => {
+      console.log('All storage from popup:', data);
+      console.log('Auth token exists:', !!data.authToken);
+      console.log('Pending update exists:', !!data.pendingAuthUpdate);
 
-      // Check if DOM is ready in popup
-      console.log('DOM ready state:', document.readyState);
-      console.log('DOMContentLoaded fired:', document.readyState === 'complete');
-    </script>
-  </body>
+      if (data.pendingAuthUpdate) {
+        console.log('Pending update details:', data.pendingAuthUpdate);
+      }
+    });
+
+    // Check if elements exist
+    console.log('Auth section element:', !!document.getElementById('auth-section'));
+    console.log('Main section element:', !!document.getElementById('main-section'));
+
+    // Check if DOM is ready in popup
+    console.log('DOM ready state:', document.readyState);
+    console.log('DOMContentLoaded fired:', document.readyState === 'complete');
+  </script>
+</body>
+
 </html>

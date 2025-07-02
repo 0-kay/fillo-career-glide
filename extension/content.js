@@ -147,11 +147,13 @@ function fillFormWithData(profileData) {
   let fieldsFilled = 0;
   
   const personalDetails = profileData.personal_details || {};
+
+  console.log(personalDetails)
   
   // Map profile data to form fields
   const fieldMappings = {
-    firstName: personalDetails.first_name,
-    lastName: personalDetails.last_name,
+    firstName: personalDetails.fullName.split(" ")[personalDetails.fullName.split(" ").length - 1],
+    lastName: personalDetails.fullName.split(" ")[personalDetails.fullName.length - 1],
     email: personalDetails.email || personalDetails.contact_email,
     phone: personalDetails.phone,
     address: personalDetails.address,
@@ -239,5 +241,6 @@ function showNotification(message, type = 'info') {
     }
   }, 4000);
 }
+
 
 console.log('✅ Fillo Auto-Fill content script ready for form filling'); 
