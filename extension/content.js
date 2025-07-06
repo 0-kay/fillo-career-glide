@@ -69,27 +69,82 @@ async function loadAIConfig() {
   }
 }
 
-// AI-powered field analysis via Supabase Edge Function
+// Add manual flag reset function for debugging
+function resetProcessingFlag() {
+  console.log('🔄 Manually resetting processing flag');
+  isProcessing = false;
+  return { success: true, message: 'Processing flag reset' };
+}
+
+// Make it available for debugging in browser console
+window.resetFilloProcessing = resetProcessingFlag;
+
+// Helper function for fetch with timeout
+async function fetchWithTimeout(url, options = {}, timeout = 10000) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeout);
+  
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal
+    });
+    clearTimeout(timeoutId);
+    return response;
+  } catch (error) {
+    clearTimeout(timeoutId);
+    if (error.name === 'AbortError') {
+      throw new Error(`Request timed out after ${timeout}ms`);
+    }
+    throw error;
+  }
+}
+
+// AI-powered field analysis via Supabase Edge Function (with 10s timeout)
 async function analyzeFieldWithAI(fieldInfo, profileData) {
   if (!AI_CONFIG.enabled) {
+    console.log('🧠 AI not enabled, skipping analysis');
     return null;
   }
 
+  const startTime = Date.now();
+  console.log('🧠 Starting enhanced AI analysis for field:', fieldInfo.name);
+  console.log('🔍 Field context:', fieldInfo);
+  console.log('📊 Profile data keys:', Object.keys(profileData || {}));
+
   try {
-    const response = await fetch(`${AI_CONFIG.supabaseUrl}/functions/v1/ai-field-analysis`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${AI_CONFIG.supabaseKey}`,
-        'Content-Type': 'application/json'
+    // Get mapping configuration for AI context
+    let mappingConfig = [];
+    try {
+      mappingConfig = await loadMapping();
+      console.log('🧠 Including mapping config with', mappingConfig.length, 'field mappings for AI context');
+    } catch (error) {
+      console.warn('⚠️ Could not load mapping config for AI context:', error.message);
+    }
+
+    const response = await fetchWithTimeout(
+      `${AI_CONFIG.supabaseUrl}/functions/v1/ai-field-analysis`,
+      {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${AI_CONFIG.supabaseKey}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          fieldInfo: fieldInfo,
+          profileData: profileData,
+          mappingConfig: mappingConfig, // Include mapping config for AI context
+          fieldVariations: await getRawMappingConfig() // Include raw field variations
+        })
       },
-      body: JSON.stringify({
-        fieldInfo: fieldInfo,
-        profileData: profileData
-      })
-    });
+      10000 // 10 second timeout
+    );
+
+    const duration = Date.now() - startTime;
+    console.log(`🧠 AI response received in ${duration}ms`);
 
     if (!response.ok) {
-      throw new Error(`Supabase AI function error: ${response.status}`);
+      throw new Error(`Supabase AI function error: ${response.status} ${response.statusText}`);
     }
 
     const data = await response.json();
@@ -97,20 +152,40 @@ async function analyzeFieldWithAI(fieldInfo, profileData) {
     if (data.success && data.analysis) {
       const aiResponse = data.analysis;
       
-      if (aiResponse.shouldFill && aiResponse.confidence > 70) {
-        console.log(`🧠 Intelligent Match: ${fieldInfo.name} → ${aiResponse.value} (${aiResponse.confidence}% confidence)`);
+      if (aiResponse.shouldFill && aiResponse.confidence > 60) {
+        console.log(`🧠 ✅ Enhanced AI Match: ${fieldInfo.name} → "${aiResponse.value}" (${aiResponse.confidence}% confidence)`);
+        console.log(`🧠 📝 AI Reasoning: ${aiResponse.reasoning}`);
+        console.log(`🧠 📍 Data Path: ${aiResponse.dataPath || 'not specified'}`);
+        console.log(`🧠 🏷️ Field Type: ${aiResponse.fieldType || 'auto-detected'}`);
+        
         return {
           value: aiResponse.value,
           confidence: aiResponse.confidence,
           reasoning: aiResponse.reasoning,
-          source: 'intelligent'
+          source: 'enhanced_ai',
+          dataPath: aiResponse.dataPath,
+          fieldType: aiResponse.fieldType
         };
+      } else {
+        console.log(`🧠 ❌ AI suggested no fill: confidence ${aiResponse.confidence || 0}% (threshold: 60%)`);
+        if (aiResponse.reasoning) {
+          console.log(`🧠 💭 AI reasoning: ${aiResponse.reasoning}`);
+        }
       }
+    } else {
+      console.log('🧠 AI analysis returned no valid response');
     }
     
     return null;
   } catch (error) {
-    console.error('❌ Intelligent field analysis failed:', error);
+    const duration = Date.now() - startTime;
+    console.error(`❌ AI analysis failed after ${duration}ms:`, error.message);
+    
+    // Reset processing flag if AI is hanging the process
+    if (error.message.includes('timed out')) {
+      console.warn('⚠️ AI timeout detected - this was likely causing the hanging issue');
+    }
+    
     return null;
   }
 }
@@ -140,6 +215,23 @@ function getEnhancedFieldContext(element) {
     required: element.required || element.hasAttribute('required'),
     maxLength: element.maxLength > 0 ? element.maxLength : null
   };
+}
+
+// Load the raw mapping configuration (for AI context)
+async function getRawMappingConfig() {
+  try {
+    const response = await fetch(chrome.runtime.getURL('matching_fields.json'));
+    
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+    
+    const config = await response.json();
+    return config;
+  } catch (error) {
+    console.warn('⚠️ Failed to load raw mapping configuration for AI:', error);
+    return {};
+  }
 }
 
 // Load the mapping configuration
@@ -225,7 +317,7 @@ chrome.runtime.onMessage.addListener(async (request, sender, sendResponse) => {
     
     if (request.action === 'fillForm') {
       console.log('🔄 Filling form with profile data:', request.profileData);
-      const result = await handleFillForm(request.profileData);
+      const result = await handleFillForm(request.profileData, request.useAI);
       sendResponse({ success: true, ...result });
     } else if (request.action === 'detectFields') {
       const result = await handleDetectFields();
@@ -250,35 +342,29 @@ chrome.runtime.onMessage.addListener(async (request, sender, sendResponse) => {
 
 // Handle form filling
 async function handleFillForm(profileData, useAI = false) {
-  if (isProcessing) {
-    console.log('⏳ Already processing a fill request');
-    return { filled: 0, message: 'Already processing' };
-  }
+  // if (isProcessing) {
+  //   console.log('⏳ Already processing a fill request');
+  //   return { filled: 0, message: 'Already processing' };
+  // }
   
-  isProcessing = true;
+  // isProcessing = true;
   
   try {
     console.log('🚀 Starting advanced form filling with intelligent field matching');
     console.log('📋 Profile data keys:', Object.keys(profileData || {}));
-    console.log('🧠 AI enabled:', useAI);
+    console.log('🧠 AI enabled for this request:', useAI);
     
     // Load mapping configuration
-    let mappingConfig;
+    console.log('🔄 Loading mapping configuration for form filling...');
+    let mappingConfig = [];
     try {
       mappingConfig = await loadMapping();
-      console.log('🗺️ Loaded mapping configuration:', mappingConfig.length, 'field mappings');
-      
-      if (!mappingConfig || mappingConfig.length === 0) {
-        console.warn('⚠️ No field mappings available, using fallback only');
-        mappingConfig = []; // Use empty array for fallback-only mode
-      }
+      console.log('✅ Mapping configuration loaded:', mappingConfig.length, 'field mappings');
     } catch (error) {
-      console.error('⚠️ Mapping load failed, using fallback mode:', error.message);
-      mappingConfig = []; // Continue with fallback matching only
+      console.warn('⚠️ Failed to load mapping configuration:', error.message);
+      console.log('🔄 Falling back to enhanced pattern matching only');
+      mappingConfig = [];
     }
-    
-    // Update AI config based on useAI flag
-    AI_CONFIG.enabled = useAI;
     
     // Stop any existing observer
     if (currentObserver) {
@@ -290,53 +376,73 @@ async function handleFillForm(profileData, useAI = false) {
     let totalFilled = 0;
     let totalAttempted = 0;
     
-    for (const { path, variants, isArray } of mappingConfig) {
-      totalAttempted++;
-      console.log('🔄 Processing: ', path);
+    if (mappingConfig.length > 0) {
+      console.log('📋 Processing configured field mappings...');
       
-      try {
-        const keys = path.replace('[]', '').split('.');
-        const value = getValue(profileData, keys);
-        console.log('🔄 Processing: ', path, 'with value:', value);
+      for (const { path, variants, isArray } of mappingConfig) {
+        totalAttempted++;
+        console.log(`🔄 Processing mapping ${totalAttempted}/${mappingConfig.length}: ${path}`);
         
-        if (value == null) {
-          console.log(`⏭️ Skipping ${path} - no data`);
-          continue;
+        try {
+          const keys = path.replace('[]', '').split('.');
+          const value = getValue(profileData, keys);
+          console.log(`🔍 Looking for profile data at path "${path}":`, value);
+          
+          if (value == null) {
+            console.log(`⏭️ Skipping ${path} - no data available`);
+            continue;
+          }
+          
+          console.log(`🎯 Found data for ${path}:`, { isArray, hasData: !!value, variants: variants.slice(0, 3) });
+          
+          if (isArray && Array.isArray(value)) {
+            console.log(`📝 Processing array field: ${path} with ${value.length} items`);
+            const success = await processArrayField(path, variants, value);
+            if (success) {
+              totalFilled++;
+              console.log(`✅ Successfully filled array field: ${path}`);
+            }
+          } else if (!isArray) {
+            console.log(`📝 Processing single field: ${path} with value:`, String(value).substring(0, 50));
+            const success = await processSingleField(path, variants, value);
+            if (success) {
+              totalFilled++;
+              console.log(`✅ Successfully filled single field: ${path}`);
+            }
+          }
+          
+          // Small delay between fields
+          await new Promise(resolve => setTimeout(resolve, 100));
+          
+        } catch (error) {
+          console.error(`❌ Error processing mapping ${path}:`, error);
         }
-        
-        console.log(`🔄 Processing: ${path}`, { isArray, hasData: !!value });
-        
-        if (isArray && Array.isArray(value)) {
-          const success = await processArrayField(path, variants, value);
-          if (success) totalFilled++;
-        } else if (!isArray) {
-          const success = await processSingleField(path, variants, value);
-          if (success) totalFilled++;
-        }
-        
-        // Small delay between fields
-        await new Promise(resolve => setTimeout(resolve, 100));
-        
-      } catch (error) {
-        console.error(`❌ Error processing ${path}:`, error);
       }
+      
+      console.log(`📋 Mapping processing complete: ${totalFilled}/${totalAttempted} mappings filled`);
+    } else {
+      console.log('📋 No field mappings available, skipping mapping phase');
     }
     
-    // Run enhanced fallback matching
-    const fallbackFilled = await enhancedFallbackMatch(profileData, mappingConfig, useAI);
+    // Run enhanced fallback matching with AI preference
+    const fallbackResult = await enhancedFallbackMatch(profileData, mappingConfig, useAI);
+    const fallbackFilled = fallbackResult.filled || 0;
+    const aiMatches = fallbackResult.aiMatches || 0;
     
     // Set up dynamic observation
-    currentObserver = observeDynamic(profileData, mappingConfig);
+    currentObserver = observeDynamic(profileData, mappingConfig, useAI);
     
-    console.log(`✅ Form filling complete: ${totalFilled}/${totalAttempted} fields + ${fallbackFilled} smart fallback`);
+    console.log(`✅ Form filling complete: ${totalFilled}/${totalAttempted} mappings + ${fallbackFilled} fallback (${aiMatches} AI matches)`);
     
     // Show notification
-    showNotification(`⚡ Filled ${totalFilled + fallbackFilled} fields`, 'success');
+    const aiStatus = useAI ? ` with AI (${aiMatches} AI matches)` : '';
+    showNotification(`⚡ Filled ${totalFilled + fallbackFilled} fields${aiStatus}`, 'success');
     
     return {
       filled: totalFilled + fallbackFilled,
       attempted: totalAttempted,
-      message: 'Form filling completed with intelligent field matching and dynamic observation'
+      aiMatches: aiMatches,
+      message: `Form filling completed: ${totalFilled} mappings + ${fallbackFilled} fallback${aiStatus}`
     };
     
   } catch (error) {
@@ -348,86 +454,333 @@ async function handleFillForm(profileData, useAI = false) {
   }
 }
 
-// Enhanced fallback matching with intelligent analysis
+// Enhanced fallback matching with batch AI processing
 async function enhancedFallbackMatch(profileData, mappingConfig, useAI = false) {
-  console.log('🧠 Running enhanced fallback matching with intelligent analysis');
-  console.log('🧠 AI enabled for fallback:', useAI);
+  const startTime = Date.now();
+  console.log('🔍 Starting enhanced fallback matching...');
   
-  let filled = 0;
-  const processedElements = new Set();
+  // Get all form elements
+  const formElements = document.querySelectorAll('input, select, textarea');
+  console.log(`📋 Found ${formElements.length} form elements to process`);
   
-  // Safety check for DOM access
-  if (!document || !document.querySelectorAll) {
-    console.warn('⚠️ DOM not available for fallback matching');
-    return 0;
-  }
+  let filledCount = 0;
+  let totalMatches = 0;
+  let aiFilledCount = 0;
+  let batchAIFields = [];
   
-  const formElements = document.querySelectorAll('input, textarea, select');
-  console.log(`🔍 Found ${formElements.length} form elements to process`);
-  
+  // First pass: try standard mapping for all fields
   for (const element of formElements) {
-    if (processedElements.has(element)) {
-      console.log('⏭️ Element already processed, skipping');
-      continue;
-    }
+    if (!isElementVisible(element)) continue;
     
-    if (element.value?.trim()) {
-      console.log('⏭️ Element already has value, skipping:', element.value);
-      continue;
-    }
+    const fieldInfo = {
+      element: element,
+      name: element.name || '',
+      id: element.id || '',
+      type: element.type || 'text',
+      placeholder: element.placeholder || '',
+      label: getFieldLabel(element) || '',
+      className: element.className || '',
+      context: getElementContext(element),
+      required: element.required || element.hasAttribute('required'),
+      maxLength: element.maxLength > 0 ? element.maxLength : null
+    };
     
-    if (!isElementVisible(element)) {
-      console.log('⏭️ Element not visible, skipping');
-      continue;
-    }
+    let matched = false;
     
-    console.log('🔄 Processing element:', element.name || element.id || element.type);
-    
-    const fieldInfo = getEnhancedFieldContext(element);
-    console.log('🔍 Field info:', fieldInfo);
-    
-    // First try intelligent matching if available
-    if (useAI && AI_CONFIG.enabled) {
-      console.log('🧠 Trying AI matching for field:', fieldInfo.name);
-      try {
-        const intelligentMatch = await analyzeFieldWithAI(fieldInfo, profileData);
-        if (intelligentMatch) {
-          console.log('🧠 AI suggested match:', intelligentMatch);
-          if (fillElement(element, intelligentMatch.value)) {
-            filled++;
-            processedElements.add(element);
-            console.log(`🧠 Intelligent match: ${fieldInfo.name} with confidence ${intelligentMatch.confidence}%`);
-            continue;
-          }
-        } else {
-          console.log('🧠 AI did not suggest a match for:', fieldInfo.name);
+    // Try standard mapping first
+    for (const mapping of mappingConfig) {
+      // Debug: Log mapping structure for first few mappings
+      if (filledCount < 3) {
+        console.log('🔍 Debug mapping structure:', {
+          path: mapping.path,
+          variants: mapping.variants,
+          variantsType: typeof mapping.variants,
+          variantsLength: mapping.variants?.length
+        });
+      }
+      
+      // Check each variant in the mapping and get the highest score
+      let bestScore = 0;
+      const variants = mapping.variants || [];
+      
+      // Safety check: ensure variants is an array
+      if (!Array.isArray(variants)) {
+        console.warn('⚠️ mapping.variants is not an array:', typeof variants, variants);
+        continue;
+      }
+      
+      for (const variant of variants) {
+        // Safety check: ensure variant is a string
+        if (typeof variant !== 'string') {
+          console.warn('⚠️ variant is not a string:', typeof variant, variant);
+          continue;
         }
-      } catch (error) {
-        console.error('❌ Intelligent matching failed for field:', fieldInfo.name, error);
+        
+        const score = computeScore(element, variant);
+        if (score > bestScore) {
+          bestScore = score;
+        }
       }
-    } else {
-      console.log('🧠 AI matching disabled');
+      
+      if (bestScore > 0.6) {
+        const value = getValue(profileData, mapping.path.replace('[]', '').split('.'));
+        if (value !== undefined && value !== null && value !== '') {
+          await processSingleField(mapping.path, mapping.variants, value);
+          filledCount++;
+          totalMatches++;
+          matched = true;
+          console.log(`✅ Standard mapping: ${fieldInfo.name || fieldInfo.id} → "${value}" (score: ${bestScore.toFixed(2)})`);
+          break;
+        }
+      }
     }
     
-    // Fallback to semantic pattern matching
-    console.log('📋 Trying semantic pattern matching for field:', fieldInfo.name);
-    const semanticMatch = findSemanticMatch(fieldInfo, profileData);
-    if (semanticMatch) {
-      console.log('📋 Pattern match found:', semanticMatch);
-      if (fillElement(element, semanticMatch.value)) {
-        filled++;
-        processedElements.add(element);
-        console.log(`📋 Pattern filled: ${fieldInfo.name}`);
-      } else {
-        console.log('❌ Failed to fill element with value:', semanticMatch.value);
+    // If no standard mapping found, add to batch AI queue
+    if (!matched && useAI && AI_CONFIG.enabled) {
+      batchAIFields.push({
+        ...fieldInfo,
+        context: getEnhancedFieldContext(element)
+      });
+      console.log(`🧠 Added to AI batch queue: ${fieldInfo.name || fieldInfo.id || 'unnamed'}`);
+    }
+    
+    // If no mapping and no AI, try semantic pattern matching
+    if (!matched && !useAI) {
+      const semanticMatch = findSemanticMatch(getElementContext(element), profileData);
+      if (semanticMatch) {
+        fillElement(element, semanticMatch.value);
+        filledCount++;
+        totalMatches++;
+        console.log(`🎯 Semantic match: ${fieldInfo.name || fieldInfo.id} → "${semanticMatch.value}" (${semanticMatch.confidence}%)`);
       }
-    } else {
-      console.log('📋 No semantic match found for field:', fieldInfo.name);
     }
   }
   
-  console.log(`✅ Enhanced fallback filled ${filled} additional fields`);
-  return filled;
+  // Process batch AI if we have fields to analyze
+  if (batchAIFields.length > 0 && useAI && AI_CONFIG.enabled) {
+    console.log(`🧠 Processing ${batchAIFields.length} fields with batch AI...`);
+    
+    try {
+      const batchResults = await analyzeBatchFieldsWithAI(batchAIFields, profileData, mappingConfig);
+      console.log('🧠 Batch AI Results:', batchResults);
+      
+      if (batchResults && batchResults.length > 0) {
+        for (const result of batchResults) {
+          if (result && result.shouldFill && result.fieldIndex < batchAIFields.length) {
+            const fieldInfo = batchAIFields[result.fieldIndex];
+            const element = fieldInfo.element;
+            
+            console.log(`🧠 ✅ AI Batch Fill: ${fieldInfo.name || fieldInfo.id} → "${result.value}" (${result.confidence}%)`);
+            console.log(`🧠 📝 AI Reasoning: ${result.reasoning}`);
+            console.log(`🧠 📍 Data Path: ${result.dataPath || 'not specified'}`);
+            
+            try {
+              fillElement(element, result.value);
+              filledCount++;
+              aiFilledCount++;
+              totalMatches++;
+            } catch (fillError) {
+              console.error(`❌ Failed to fill element:`, fillError);
+            }
+          }
+        }
+      }
+    } catch (aiError) {
+      console.error('❌ Batch AI processing failed:', aiError);
+    }
+  }
+  
+  const duration = Date.now() - startTime;
+  console.log(`🎉 Enhanced fallback matching completed in ${duration}ms:`);
+  console.log(`   📊 Total elements: ${formElements.length}`);
+  console.log(`   ✅ Filled: ${filledCount}`);
+  console.log(`   🧠 AI filled: ${aiFilledCount}`);
+  console.log(`   📈 Success rate: ${((filledCount / formElements.length) * 100).toFixed(1)}%`);
+  
+  return { filled: filledCount, total: formElements.length, aiMatches: aiFilledCount };
+}
+
+// New batch AI analysis function
+async function analyzeBatchFieldsWithAI(fields, profileData, mappingConfig) {
+  const startTime = Date.now();
+  console.log(`🧠 Starting batch AI analysis for ${fields.length} fields...`);
+  
+  try {
+    // Load field variations for AI context
+    const fieldVariations = await getRawMappingConfig();
+    
+    // Prepare the batch request
+    const requestData = {
+      fields: fields.map(f => ({
+        name: f.name,
+        id: f.id,
+        type: f.type,
+        placeholder: f.placeholder,
+        label: f.label,
+        className: f.className,
+        context: f.context,
+        required: f.required,
+        maxLength: f.maxLength
+      })),
+      profileData: profileData,
+      mappingConfig: mappingConfig,
+      fieldVariations: fieldVariations
+    };
+    
+    console.log('🧠 Batch AI Request Data:', {
+      fieldsCount: requestData.fields.length,
+      fieldNames: requestData.fields.map(f => f.name || f.id || 'unnamed'),
+      profileDataKeys: Object.keys(profileData)
+    });
+    
+    // Call the batch AI function
+    const response = await fetchWithTimeout(
+      `${AI_CONFIG.supabaseUrl}/functions/v1/ai-batch-analysis`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${AI_CONFIG.supabaseKey}`
+        },
+        body: JSON.stringify(requestData)
+      },
+      15000 // 15 second timeout for batch processing
+    );
+    
+    if (!response.ok) {
+      throw new Error(`Batch AI HTTP ${response.status}: ${response.statusText}`);
+    }
+    
+    const data = await response.json();
+    const duration = Date.now() - startTime;
+    
+    console.log(`🧠 Batch AI completed in ${duration}ms`);
+    console.log('🧠 Raw Batch AI Response:', data);
+    
+    if (data.success && data.results) {
+      console.log('🧠 Batch AI Analysis Summary:', {
+        totalFields: data.debug?.totalFields || fields.length,
+        processedResults: data.debug?.processedResults || data.results.length,
+        fieldsToFill: data.debug?.fieldsToFill || data.results.filter(r => r && r.shouldFill).length,
+        averageConfidence: data.results.length > 0 ? 
+          data.results.reduce((sum, r) => sum + (r?.confidence || 0), 0) / data.results.length : 0
+      });
+      
+      // Log detailed results
+      data.results.forEach((result, index) => {
+        if (result && result.shouldFill) {
+          const fieldInfo = fields[result.fieldIndex] || fields[index];
+          console.log(`🧠 ✅ AI will fill: ${fieldInfo?.name || fieldInfo?.id || `Field #${index}`} → "${result.value}" (${result.confidence}%)`);
+        } else if (result) {
+          const fieldInfo = fields[result.fieldIndex] || fields[index];
+          console.log(`🧠 ❌ AI skipped: ${fieldInfo?.name || fieldInfo?.id || `Field #${index}`} (${result.confidence}%)`);
+        }
+      });
+      
+      return data.results;
+    } else {
+      console.log('🧠 Batch AI returned no valid results');
+      return [];
+    }
+    
+  } catch (error) {
+    const duration = Date.now() - startTime;
+    console.error(`❌ Batch AI analysis failed after ${duration}ms:`, error.message);
+    
+    // Reset processing flag if AI is hanging the process
+    if (error.message.includes('timed out')) {
+      console.warn('⚠️ Batch AI timeout detected - falling back to standard matching');
+    }
+    
+    return [];
+  }
+}
+
+// Legacy individual AI function (kept for fallback)
+async function analyzeFieldWithAI(fieldInfo, profileData) {
+  console.warn('⚠️ Using legacy individual AI analysis - consider switching to batch processing');
+  const startTime = Date.now();
+  
+  try {
+    // Load field variations for AI context
+    const fieldVariations = await getRawMappingConfig();
+    const mappingConfig = await loadMapping();
+    
+    const requestData = {
+      fieldInfo: getEnhancedFieldContext(fieldInfo.element),
+      profileData: profileData,
+      mappingConfig: mappingConfig,
+      fieldVariations: fieldVariations
+    };
+    
+    console.log('🧠 Individual AI Request:', fieldInfo.name || fieldInfo.id);
+    
+    const response = await fetchWithTimeout(
+      'https://yuojrygcrcpajiglbekd.supabase.co/functions/v1/ai-field-analysis',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${AI_CONFIG.supabaseKey}`
+        },
+        body: JSON.stringify(requestData)
+      },
+      10000
+    );
+    
+    if (!response.ok) {
+      throw new Error(`AI HTTP ${response.status}: ${response.statusText}`);
+    }
+    
+    const data = await response.json();
+    const duration = Date.now() - startTime;
+    
+    console.log(`🧠 Individual AI completed in ${duration}ms for ${fieldInfo.name || fieldInfo.id}`);
+    console.log('🧠 Individual AI Response:', data);
+    
+    if (data.success && data.analysis) {
+      const aiResponse = data.analysis;
+      
+      // Validate AI response structure
+      if (!aiResponse || typeof aiResponse !== 'object') {
+        console.warn('🧠 ⚠️ Invalid AI response structure:', aiResponse);
+        return null;
+      }
+      
+      // Validate confidence is a number
+      const confidence = typeof aiResponse.confidence === 'number' ? aiResponse.confidence : 0;
+      
+      // Updated confidence threshold to 60%
+      if (aiResponse.shouldFill && confidence >= 60) {
+        console.log(`🧠 ✅ Individual AI Match: ${fieldInfo.name} → "${aiResponse.value}" (${confidence}%)`);
+        console.log(`🧠 📝 AI Reasoning: ${aiResponse.reasoning || 'no reasoning provided'}`);
+        console.log(`🧠 📍 Data Path: ${aiResponse.dataPath || 'not specified'}`);
+        
+        return {
+          value: aiResponse.value,
+          confidence: confidence,
+          reasoning: aiResponse.reasoning || 'AI match',
+          source: 'individual_ai',
+          dataPath: aiResponse.dataPath,
+          fieldType: aiResponse.fieldType
+        };
+      } else {
+        console.log(`🧠 ❌ Individual AI suggested no fill: confidence ${confidence}% < 60%`);
+        if (aiResponse.reasoning) {
+          console.log(`🧠 💭 AI reasoning: ${aiResponse.reasoning}`);
+        }
+      }
+    } else {
+      console.log('🧠 Individual AI analysis returned no valid response structure');
+    }
+    
+    return null;
+  } catch (error) {
+    const duration = Date.now() - startTime;
+    console.error(`❌ Individual AI analysis failed after ${duration}ms:`, error.message);
+    
+    return null;
+  }
 }
 
 // Handle field detection
@@ -532,36 +885,45 @@ function buildSelectors(variant) {
 }
 
 function computeScore(element, variant) {
+  // Safety check: ensure variant is a string
+  if (typeof variant !== 'string') {
+    console.warn('⚠️ computeScore called with non-string variant:', typeof variant, variant);
+    return 0;
+  }
+  
   let score = 0;
   const name = element.name?.toLowerCase() || '';
   const id = element.id?.toLowerCase() || '';
   const placeholder = element.placeholder?.toLowerCase() || '';
   const className = element.className?.toLowerCase() || '';
   
+  // Convert variant to lowercase for comparison
+  const variantLower = variant.toLowerCase();
+  
   // Exact matches get highest score
-  if (name === variant || id === variant) score += 10;
+  if (name === variantLower || id === variantLower) score += 10;
   
   // Partial matches
-  if (name.includes(variant) || id.includes(variant)) score += 7;
+  if (name.includes(variantLower) || id.includes(variantLower)) score += 7;
   
   // Data attributes
-  if (element.getAttribute('data-testid') === variant) score += 6;
-  if (element.getAttribute('data-automation-id') === variant) score += 6;
+  if (element.getAttribute('data-testid') === variantLower) score += 6;
+  if (element.getAttribute('data-automation-id') === variantLower) score += 6;
   
   // Class names
-  if (className.includes(variant)) score += 5;
+  if (className.includes(variantLower)) score += 5;
   
   // Placeholder text
-  if (placeholder.includes(variant)) score += 4;
+  if (placeholder.includes(variantLower)) score += 4;
   
   // Label association
   const label = getFieldLabel(element)?.toLowerCase() || '';
-  if (label.includes(variant)) score += 3;
+  if (label.includes(variantLower)) score += 3;
   
   // Type-specific bonuses
-  if (element.type === 'email' && variant.includes('email')) score += 2;
-  if (element.type === 'tel' && variant.includes('phone')) score += 2;
-  if (element.type === 'url' && (variant.includes('website') || variant.includes('url'))) score += 2;
+  if (element.type === 'email' && variantLower.includes('email')) score += 2;
+  if (element.type === 'tel' && variantLower.includes('phone')) score += 2;
+  if (element.type === 'url' && (variantLower.includes('website') || variantLower.includes('url'))) score += 2;
   
   return score;
 }
@@ -691,8 +1053,9 @@ function findSemanticMatch(context, profileData) {
 }
 
 // Set up dynamic observation
-function observeDynamic(profileData, mappingConfig) {
+function observeDynamic(profileData, mappingConfig, useAI = false) {
   console.log('👁️ Setting up dynamic observation');
+  console.log('👁️ AI enabled for dynamic observation:', useAI);
   
   let debounceTimer = null;
   
@@ -718,7 +1081,7 @@ function observeDynamic(profileData, mappingConfig) {
       
       if (hasNewFields) {
         console.log('🔄 New fields detected, re-running filler');
-        await handleFillForm(profileData);
+        await handleFillForm(profileData, useAI);
       }
     }, 500);
   });
@@ -840,8 +1203,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       switch (request.action) {
         case 'detectFields':
           console.log('🔍 Detecting form fields');
-          const result = await handleDetectFields();
-          sendResponse({ success: true, ...result });
+          await handleDetectFields();
+          sendResponse({ success: true, message: 'Fields detected' });
           break;
           
         case 'stopObservation':
