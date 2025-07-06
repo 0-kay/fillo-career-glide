@@ -308,6 +308,7 @@ class FilloPopup {
 
       // Handle response
       if (response?.success) {
+        console.log("🔄 Filled form... function called -success");
         this.showStatus(`✅ Filled ${response.filled || 0} fields!`, "success");
       } else {
         this.showStatus(`❌ ${response?.error || 'No fillable fields found'}`, "error");
