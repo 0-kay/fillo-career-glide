@@ -24,6 +24,7 @@ class FilloPopup {
     this.elements = {
       authSection: document.getElementById("auth-section"),
       mainSection: document.getElementById("main-section"),
+      aiConfigSection: document.getElementById("ai-config-section"),
       profileSelect: document.getElementById("profile-select"),
       profilePreview: document.getElementById("profile-preview"),
       fillBtn: document.getElementById("fill-btn"),
@@ -32,10 +33,14 @@ class FilloPopup {
       refreshBtn: document.getElementById("refresh-btn"),
       footerRefreshBtn: document.getElementById("footer-refresh-btn"),
       helpBtn: document.getElementById("help-btn"),
+      aiSettingsBtn: document.getElementById("ai-settings-btn"),
       status: document.getElementById("status"),
       previewName: document.getElementById("preview-name"),
       previewEmail: document.getElementById("preview-email"),
       previewCompleteness: document.getElementById("preview-completeness"),
+      // AI Status elements
+      backToMain: document.getElementById("back-to-main"),
+      aiStatus: document.getElementById("ai-status"),
     };
   }
 
@@ -45,6 +50,7 @@ class FilloPopup {
     });
 
     this.elements.fillBtn.addEventListener("click", () => {
+      console.log("🔄 Filling form...");
       this.fillForm();
     });
 
@@ -67,6 +73,17 @@ class FilloPopup {
     this.elements.helpBtn.addEventListener("click", () => {
       this.showHelp();
     });
+
+    // AI Configuration listeners
+    this.elements.aiSettingsBtn.addEventListener("click", () => {
+      this.showAIConfig();
+    });
+
+    this.elements.backToMain.addEventListener("click", () => {
+      this.showMain();
+    });
+
+
   }
 
   async checkForToken() {
@@ -219,6 +236,7 @@ class FilloPopup {
   }
 
   async fillForm() {
+    console.log("🔄 Filling form... function called");
     if (!this.selectedProfileId) {
       this.showStatus("Please select a profile first", "error");
       return;
@@ -226,6 +244,7 @@ class FilloPopup {
 
     try {
       this.showStatus("Filling form...", "info");
+      console.log("🔄 Filling form... function called -trying now");
       const [tab] = await chrome.tabs.query({
         active: true,
         currentWindow: true,
@@ -235,26 +254,75 @@ class FilloPopup {
         (p) => p.id === this.selectedProfileId
       );
 
-      // Inject content script
-      await chrome.scripting.executeScript({
-        target: { tabId: tab.id },
-        files: ["content.js"],
-      });
+      // Check if this is a supported site
+      const url = new URL(tab.url);
+      console.log(`🌐 Attempting to fill form on: ${url.hostname}`);
 
-      // Send profile data to content script
-      const response = await chrome.tabs.sendMessage(tab.id, {
-        action: "fillForm",
-        profileData: profile,
-      });
+      // Try to communicate with content script
+      let response = null;
+      
+      try {
+        // First attempt: content script should be auto-injected
+        console.log("🔄 First attempt: Sending fillForm message to content script...");
+        console.log("📋 Profile data:", profile);
+        
+        response = await chrome.tabs.sendMessage(tab.id, {
+          action: "fillForm",
+          profileData: profile,
+          useAI: true,
+        });
+        
+        console.log("✅ Content script response (first attempt):", response);
+      } catch (messageError) {
+        // Content script not available - inject manually (this is normal for some  pages)
+        try {
+          console.log("🔄 Initializing form filler for this page...");
 
+          
+          console.log("❌ Content script not available, injecting manually:", messageError.message);
+          
+          await chrome.scripting.executeScript({
+            target: { tabId: tab.id },
+            files: ["content.js"],
+          });
+
+          console.log("✅ Content script injected, waiting for initialization...");
+          
+          // Wait for script to initialize
+          await new Promise(resolve => setTimeout(resolve, 1000));
+
+          // Try communication again
+          console.log("🔄 Retry: Sending fillForm message to content script...");
+          response = await chrome.tabs.sendMessage(tab.id, {
+            action: "fillForm",
+            profileData: profile,
+            useAI: true,
+          });
+          
+          console.log("✅ Content script response (after injection):", response);
+        } catch (injectionError) {
+          console.log("❌ Injection failed:", injectionError.message);
+          throw new Error("Cannot access this page - try a different website");
+        }
+      }
+
+      // Handle response
       if (response?.success) {
-        this.showStatus("✅ Form filled successfully!", "success");
+        this.showStatus(`✅ Filled ${response.filled || 0} fields!`, "success");
       } else {
-        this.showStatus("❌ Fill failed", "error");
+        this.showStatus(`❌ ${response?.error || 'No fillable fields found'}`, "error");
       }
     } catch (error) {
       console.log("❌ Fill form error:", error);
-      this.showStatus("Fill failed: " + error.message, "error");
+      
+      // Better error handling for different scenarios
+      if (error.message.includes("Cannot access")) {
+        this.showStatus("❌ Cannot access this page. Try on a different website.", "error");
+      } else if (error.message.includes("chrome://") || error.message.includes("chrome-extension://")) {
+        this.showStatus("❌ Extension cannot work on browser internal pages.", "error");
+      } else {
+        this.showStatus("❌ Fill failed. Please refresh the page and try again.", "error");
+      }
     }
   }
 
@@ -300,8 +368,10 @@ class FilloPopup {
     );
   }
 
+
+
   showHelp() {
-    chrome.tabs.create({ url: chrome.runtime.getURL("test-form.html") });
+    chrome.tabs.create({ url: chrome.runtime.getURL("test-ai-form.html") });
   }
 
   showAuth(message = "Please sign in to access your resume profiles") {
@@ -332,7 +402,27 @@ class FilloPopup {
   hideStatus() {
     this.elements.status.classList.add("hidden");
   }
+
+  // AI Status Methods
+  showAIConfig() {
+    this.elements.authSection.classList.add("hidden");
+    this.elements.mainSection.classList.add("hidden");
+    this.elements.aiConfigSection.classList.remove("hidden");
+  }
+
+  showAIStatus(message, type = "info") {
+    this.elements.aiStatus.textContent = message;
+    this.elements.aiStatus.className = `status ${type}`;
+    this.elements.aiStatus.classList.remove("hidden");
+  }
+
+  hideAIStatus() {
+    this.elements.aiStatus.textContent = "";
+    this.elements.aiStatus.className = "status hidden";
+  }
 }
+
+
 
 // Initialize popup when DOM is ready
 function initializePopup() {

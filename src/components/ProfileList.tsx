@@ -93,8 +93,13 @@ const ProfileList = () => {
     const personalDetails = profile.personal_details || {};
     const workExp = profile.work_experience?.[0]; // Most recent experience
     
+    // Construct full name from individual components
+    const fullName = [profile.first_name, profile.middle_name, profile.last_name]
+      .filter(part => part && part.trim())
+      .join(' ') || personalDetails.fullName || 'Unknown User';
+    
     return {
-      name: personalDetails.fullName || profile.name,
+      name: fullName,
       email: personalDetails.email,
       currentRole: workExp?.jobTitle,
       currentCompany: workExp?.company,
@@ -281,7 +286,7 @@ const ProfileList = () => {
                   <Button 
                     variant="ghost" 
                     size="sm"
-                    onClick={() => handleDelete(profile.id, profile.name)}
+                    onClick={() => handleDelete(profile.id, summary.name)}
                     className="text-red-600 hover:text-red-700"
                   >
                     <Trash2 className="h-4 w-4" />
