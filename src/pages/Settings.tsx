@@ -118,6 +118,8 @@ const Settings = () => {
             </div>
           </Card>
 
+
+
           {/* Privacy & Security */}
           <Card className="p-6">
             <div className="flex items-center space-x-3 mb-6">

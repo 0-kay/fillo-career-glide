@@ -70,9 +70,38 @@
       <div id="status" class="status hidden"></div>
     </div>
 
+    <!-- AI Status Section -->
+    <div id="ai-config-section" class="section hidden">
+      <h3>🧠 AI Status</h3>
+      <p class="help-text">AI-powered form filling is enabled via Supabase</p>
+      
+      <div class="ai-info">
+        <div class="status-row">
+          <span class="label">AI Engine:</span>
+          <span class="value">OpenAI GPT-3.5-turbo</span>
+        </div>
+        <div class="status-row">
+          <span class="label">Provider:</span>
+          <span class="value">Supabase Edge Function</span>
+        </div>
+        <div class="status-row">
+          <span class="label">Status:</span>
+          <span class="value success">✅ Active</span>
+        </div>
+      </div>
+
+      <div class="ai-actions">
+        <button id="back-to-main" class="btn btn-link">← Back</button>
+      </div>
+
+      <div id="ai-status" class="status hidden"></div>
+    </div>
+
     <!-- Footer -->
     <div class="popup-footer">
       <button id="footer-refresh-btn" class="btn-link">🔄 Refresh</button>
+      <span class="divider">•</span>
+      <button id="ai-settings-btn" class="btn-link">🧠 AI Settings</button>
       <span class="divider">•</span>
       <button id="help-btn" class="btn-link">❓ Help</button>
     </div>

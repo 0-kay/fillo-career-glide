@@ -58,6 +58,8 @@ RETURN THIS EXACT JSON STRUCTURE:
 {
   "personalInfo": {
     "fullName": "Extract exact full name",
+    "firstName": "Extract first namen from the full name",
+    "lastName": "Extract last name from the full name",
     "email": "Extract email address",
     "phone": "Extract phone with country code if present",
     "address": "Extract city, state/country",

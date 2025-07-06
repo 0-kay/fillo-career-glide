@@ -10,11 +10,15 @@
     "tabs"
   ],
   "host_permissions": [
-    "https://*/*",
-    "http://*/*",
+    "https://*.workday.com/*",
+    "https://*.icims.com/*",
+    "https://*.greenhouse.io/*",
+    "https://*.lever.co/*",
+    "https://*.jobvite.com/*",
+    "https://*.smartrecruiters.com/*",
     "https://yuojrygcrcpajiglbekd.supabase.co/*",
-    "http://localhost:*/*",
-    "http://127.0.0.1:*/*"
+    "http://localhost:8080/*",
+    "http://127.0.0.1:8080/*"
   ],
   "background": {
     "service_worker": "background.js"
@@ -22,8 +26,13 @@
   "content_scripts": [
     {
       "matches": [
-        "https://*/*",
-        "http://*/*"
+        "https://*.workday.com/*",
+        "https://*.icims.com/*",
+        "https://*.greenhouse.io/*",
+        "https://*.lever.co/*",
+        "https://*.jobvite.com/*",
+        "https://*.smartrecruiters.com/*",
+        "http://localhost:8080/*"
       ],
       "js": [
         "content.js"
@@ -31,12 +40,12 @@
       "css": [
         "styles.css"
       ],
-      "run_at": "document_idle"
+      "run_at": "document_start"
     }
   ],
   "externally_connectable": {
     "matches": [
-      "http://localhost:*/*"
+      "http://localhost:8080/*"
     ]
   },
   "action": {
@@ -59,8 +68,13 @@
         "matching_fields.json"
       ],
       "matches": [
-        "https://*/*",
-        "http://*/*"
+        "https://*.workday.com/*",
+        "https://*.icims.com/*",
+        "https://*.greenhouse.io/*",
+        "https://*.lever.co/*",
+        "https://*.jobvite.com/*",
+        "https://*.smartrecruiters.com/*",
+        "http://localhost:8080/*"
       ]
     }
   ]

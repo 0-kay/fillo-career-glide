@@ -4,6 +4,7 @@ import { Upload, FileText, X, Loader2 } from 'lucide-react';
 import { useProfiles } from '@/hooks/useProfiles';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
+import { extractNameFromResume } from '@/utils/nameParser';
 import mammoth from 'mammoth';
 import * as pdfjsLib from 'pdfjs-dist';
 
@@ -312,8 +313,14 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
       console.log('Experience from OpenAI:', parsedData.experience);
       console.log('Education from OpenAI:', parsedData.education);
       
+      // Extract and parse name components
+      const nameData = extractNameFromResume(parsedData);
+      console.log('Parsed name data:', nameData);
+      
       const profileData = {
-        name: parsedData.personalInfo?.fullName || file.name.replace(/\.[^/.]+$/, ''),
+        first_name: nameData.first_name || 'Unknown',
+        middle_name: nameData.middle_name,
+        last_name: nameData.last_name || 'User',
         
         // Enhanced personal details structure
         personal_details: {
