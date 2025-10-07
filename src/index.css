@@ -2,7 +2,7 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Definition of the design system. All colors, gradients, fonts, etc should be defined here. */
+/* Centralized design tokens for colors, gradients, and typography. */
 
 @layer base {
   :root {

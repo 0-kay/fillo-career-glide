@@ -1,73 +1,70 @@
-# Welcome to your Lovable project
+# Fillo Career Glide
 
-## Project info
+Fillo Career Glide is a Vite-powered React application that helps job seekers streamline repetitive application workflows. The web app pairs with a Chrome extension to mirror the authenticated state of the user and autofill enterprise job application forms such as Workday and iCIMS.
 
-**URL**: https://lovable.dev/projects/6c864901-42da-4fa8-8385-41098682d6a3
+## Features
 
-## How can I edit this code?
+- ✨ **Landing experience** that introduces the product benefits and funnels users to authentication.
+- 🔐 **Auth-aware extension integration** – the app broadcasts Supabase session updates to the browser extension.
+- 📊 **Dashboard & profile management** surfaces – build tailored profiles the extension can reuse.
+- 🧩 **Shadcn UI component system** styled with Tailwind CSS.
 
-There are several ways of editing your application.
+## Tech stack
 
-**Use Lovable**
+- [Vite](https://vitejs.dev/) for the build toolchain and dev server
+- [React 18](https://react.dev/) with TypeScript
+- [Tailwind CSS](https://tailwindcss.com/) for utility-first styling
+- [shadcn/ui](https://ui.shadcn.com/) component primitives
+- [@tanstack/react-query](https://tanstack.com/query/latest) for data fetching
+- [Supabase](https://supabase.com/) for authentication and persistence
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/6c864901-42da-4fa8-8385-41098682d6a3) and start prompting.
+## Getting started
 
-Changes made via Lovable will be committed automatically to this repo.
+1. **Install dependencies**
 
-**Use your preferred IDE**
+   ```bash
+   npm install
+   ```
 
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
+2. **Run the development server**
 
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
+   ```bash
+   npm run dev
+   ```
 
-Follow these steps:
+   The app starts on [http://localhost:5173](http://localhost:5173) by default.
 
-```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
+3. **Lint the project**
 
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
+   ```bash
+   npm run lint
+   ```
 
-# Step 3: Install the necessary dependencies.
-npm i
+   The ESLint configuration targets modern React/TypeScript best practices.
 
-# Step 4: Start the development server with auto-reloading and an instant preview.
-npm run dev
+## Project structure
+
+```
+src/
+├── components/       # Reusable UI components (Landing page, shared UI primitives, etc.)
+├── hooks/            # Custom React hooks including extension integration helpers
+├── integrations/     # Supabase SDK wrappers and API helpers
+├── pages/            # Route-level views
+└── utils/            # Utility helpers such as name parsing
 ```
 
-**Edit a file directly in GitHub**
+Outside of `src/` you'll find `extension/` (Chrome extension source) and `supabase/` (SQL migrations and scripts) that work alongside the application.
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+## Browser extension pairing
 
-**Use GitHub Codespaces**
+The `useFilloExtension` hook emits authentication changes to the Chrome extension via `window.postMessage`. Include the `<ExtensionIntegration />` helper component inside the authenticated area of the app so the extension stays in sync with user logins and logouts.
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+## Deployment
 
-## What technologies are used for this project?
+This project can be hosted on any static-friendly provider such as Netlify, Vercel, or Supabase Hosting. Build the production bundle with:
 
-This project is built with:
+```bash
+npm run build
+```
 
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
-
-## How can I deploy this project?
-
-Simply open [Lovable](https://lovable.dev/projects/6c864901-42da-4fa8-8385-41098682d6a3) and click on Share -> Publish.
-
-## Can I connect a custom domain to my Lovable project?
-
-Yes, you can!
-
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
-
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/tips-tricks/custom-domain#step-by-step-guide)
+Then deploy the contents of the generated `dist/` directory to your hosting provider of choice.
