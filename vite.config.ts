@@ -8,6 +8,13 @@ export default defineConfig(({ mode }) => ({
   server: {
     host: "::",
     port: 8080,
+    proxy: {
+      '/mcp': {
+        target: 'http://localhost:8787',
+        changeOrigin: true,
+        rewrite: p => p.replace(/^\/mcp/, ''),
+      },
+    },
   },
   plugins: [
     react(),
