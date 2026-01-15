@@ -32,7 +32,25 @@ serve(async (req) => {
       throw new Error('Invalid status. Must be resolved, dismissed, or wont_fix')
     }
 
-    // Update suggestion status
+    // First check if suggestion exists
+    const { data: existingData, error: checkError } = await supabaseClient
+      .from('missed_fields')
+      .select('id, profile_id')
+      .eq('id', suggestionId)
+      .eq('user_id', user.id)
+      .maybeSingle()
+
+    if (checkError) {
+      console.error('Error checking suggestion:', checkError)
+      throw checkError
+    }
+
+    if (!existingData) {
+      console.warn(`Suggestion ${suggestionId} not found for user ${user.id}`)
+      throw new Error('Suggestion not found or you do not have permission to modify it')
+    }
+
+    // Now update it
     const { error: updateError, data: updatedSuggestion } = await supabaseClient
       .from('missed_fields')
       .update({
@@ -41,14 +59,24 @@ serve(async (req) => {
         resolved_note: note || null
       })
       .eq('id', suggestionId)
-      .eq('user_id', user.id) // Ensure user owns this suggestion
+      .eq('user_id', user.id)
       .select()
-      .single()
+      .maybeSingle()
 
-    if (updateError) throw updateError
+    if (updateError) {
+      console.error('Error updating suggestion:', updateError)
+      throw updateError
+    }
+
+    if (!updatedSuggestion) {
+      console.error('Update returned no rows - possible RLS issue')
+      throw new Error('Failed to update suggestion - permission denied or record not found')
+    }
+
+    console.log('✅ Updated suggestion:', updatedSuggestion.id)
 
     // If user provided updated data, update the profile
-    if (updatedData && updatedSuggestion.profile_id) {
+    if (updatedData && existingData.profile_id) {
       const { error: profileError } = await supabaseClient
         .from('application_profiles')
         .update(updatedData)

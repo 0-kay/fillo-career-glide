@@ -14,13 +14,12 @@ serve(async (req) => {
   }
 
   try {
-    const { fieldInfo, profileData, mappingConfig = [], fieldVariations = {}, pastMisses = [] } = await req.json()
+    const { fieldInfo, profileData, mappingConfig = [], fieldVariations = {} } = await req.json()
 
     console.log('🧠 Enhanced AI Field Analysis Request:', {
       fieldInfo: fieldInfo.name,
       mappingCount: mappingConfig.length,
-      variationKeys: Object.keys(fieldVariations),
-      pastMissesCount: pastMisses.length
+      variationKeys: Object.keys(fieldVariations)
     })
 
     // Get OpenAI API key from environment
@@ -70,11 +69,6 @@ serve(async (req) => {
 
     const relatedVariations = getFieldVariations(fieldInfo)
 
-    const intelligence = pastMisses.length > 0
-      ? `\nPROFILE INTELLIGENCE / LESSONS LEARNED (Previous failed fill attempts):
-${pastMisses.map((m: any) => `- Failed on: ${m.page_url}\n  Advice: ${m.ai_suggestion}`).join('\n')}\n`
-      : '';
-
     // Prepare comprehensive AI prompt
     const prompt = `
 You are an expert form-filling AI assistant. Analyze this form field and determine what profile data should fill it.
@@ -99,7 +93,7 @@ ${relatedVariations.length > 0 ?
 
 COMPLETE PROFILE DATA AVAILABLE:
 ${JSON.stringify(profileData, null, 2)}
-${intelligence}
+
 INTELLIGENT MATCHING RULES:
 1. Analyze field semantics, not just exact name matches
 2. Consider context clues from labels, placeholders, and surrounding text
@@ -109,7 +103,6 @@ INTELLIGENT MATCHING RULES:
 6. Consider conditional logic (e.g., "Do you have experience?" → yes if work_experience exists)
 7. Handle array data intelligently (use first item, count, or summary)
 8. Support both US and international formats
-9. CLOSING THE LOOP: Use "LESSONS LEARNED" section. If this field is similar to a previously missed one and profile data still lacks the recommended info, LEAVE IT BLANK. If advice was followed and data is present, FILL IT.
 
 SPECIAL FIELD TYPES TO HANDLE:
 - Names: first_name, last_name, full_name, middle_name
@@ -178,7 +171,11 @@ CRITICAL GUIDELINES:
     return new Response(
       JSON.stringify({
         success: true,
-        analysis: aiResponse
+        analysis: aiResponse,
+        debug: {
+          fieldVariations: relatedVariations,
+          profileDataKeys: Object.keys(profileData)
+        }
       }),
       {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -192,7 +189,7 @@ CRITICAL GUIDELINES:
     return new Response(
       JSON.stringify({
         success: false,
-        error: (error as any).message
+        error: error.message
       }),
       {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -200,4 +197,4 @@ CRITICAL GUIDELINES:
       }
     )
   }
-})
+}) 
