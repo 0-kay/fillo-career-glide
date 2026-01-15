@@ -1,7 +1,11 @@
 // Fillo Auto-Fill Extension - Background Script
 // Simple background script with minimal functionality
 
+// Import environment configuration
+importScripts('env-config.js');
+
 console.log("🚀 Fillo Auto-Fill: Background script started");
+console.log("🔧 Extension ID:", ENV_CONFIG.EXTENSION_ID);
 
 // Handle extension installation
 chrome.runtime.onInstalled.addListener(() => {
@@ -23,7 +27,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === "SAVE_MISSED_FIELDS") {
     console.log("📝 Background: Saving missed fields for analysis", request.missedFields.length);
 
-    const SUPABASE_URL = "https://yuojrygcrcpajiglbekd.supabase.co";
+    // Get Supabase URL from env config (loaded in manifest)
+    const SUPABASE_URL = typeof ENV_CONFIG !== 'undefined'
+      ? ENV_CONFIG.SUPABASE_URL
+      : 'https://yuojrygcrcpajiglbekd.supabase.co'; // Fallback
 
     chrome.storage.local.get(["FILLO_AUTH_TOKEN"], async (result) => {
       const token = result.FILLO_AUTH_TOKEN;
@@ -70,13 +77,23 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
 chrome.runtime.onMessageExternal.addListener(
   (request, sender, sendResponse) => {
-    // Also allow external sync if origin matches
-    if (sender.origin === "http://localhost:8080" || sender.origin?.includes("fillo")) {
+    // Check if origin is allowed (using env config if available)
+    const allowedOrigins = typeof ENV_CONFIG !== 'undefined'
+      ? ENV_CONFIG.ALLOWED_ORIGINS
+      : ['http://localhost:8080', 'http://127.0.0.1:8080'];
+
+    const isAllowed = allowedOrigins.some(origin => sender.origin === origin)
+      || sender.origin?.includes("fillo");
+
+    if (isAllowed) {
       console.log("Received external message:", request);
       if (request.accessToken) {
         chrome.storage.local.set({ FILLO_AUTH_TOKEN: request.accessToken });
         sendResponse({ success: true, result: "token saved" });
       }
+    } else {
+      console.warn("Rejected external message from unauthorized origin:", sender.origin);
+      sendResponse({ success: false, error: "unauthorized origin" });
     }
     return true;
   }
