@@ -3,7 +3,7 @@
   const { fetchWithTimeout, relayLog } = ns.utils;
   const { getRawMappingConfig, loadMapping } = ns.mapping;
 
-  ns.ai.analyzeBatchFieldsWithAI = async function(fields, profileData, mappingConfig){
+  ns.ai.analyzeBatchFieldsWithAI = async function(fields, profileData, mappingConfig, pastMisses = []){
     try{
       const fieldVariations = await getRawMappingConfig();
       const payload = {
@@ -23,7 +23,8 @@
         })),
         profileData,
         mappingConfig,
-        fieldVariations
+        fieldVariations,
+        pastMisses
       };
       relayLog('log', '🧠 Sending batch AI request...', { fields: fields.length });
       const r = await fetch(`${AI_CONFIG.supabaseUrl}/functions/v1/ai-batch-analysis`, {
@@ -75,13 +76,13 @@
     }catch(e){ console.error('Batch AI failed:', e.message); relayLog('error', 'Batch AI failed:', e.message); return []; }
   };
 
-  ns.ai.analyzeSingleFieldWithAI = async function(fieldInfo, profileData){
+  ns.ai.analyzeSingleFieldWithAI = async function(fieldInfo, profileData, pastMisses = []){
     try{
       const [fieldVariations, mappingConfig] = await Promise.all([getRawMappingConfig(), loadMapping().catch(()=>[]) ]);
       const payload = { fieldInfo: {
         ...fieldInfo,
         context: typeof fieldInfo.context === 'string' ? fieldInfo.context : JSON.stringify(fieldInfo.context || {})
-      }, profileData, mappingConfig, fieldVariations };
+      }, profileData, mappingConfig, fieldVariations, pastMisses };
       const r = await fetchWithTimeout(`${AI_CONFIG.supabaseUrl}/functions/v1/ai-field-analysis`, {
         method:'POST', headers:{ 'Content-Type':'application/json', 'Authorization': `Bearer ${AI_CONFIG.supabaseKey}` }, body: JSON.stringify(payload)
       }, 10000);

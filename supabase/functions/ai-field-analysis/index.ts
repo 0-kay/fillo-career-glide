@@ -14,14 +14,15 @@ serve(async (req) => {
   }
 
   try {
-    const { fieldInfo, profileData, mappingConfig = [], fieldVariations = {} } = await req.json()
-    
-    console.log('🧠 Enhanced AI Field Analysis Request:', { 
-      fieldInfo: fieldInfo.name, 
+    const { fieldInfo, profileData, mappingConfig = [], fieldVariations = {}, pastMisses = [] } = await req.json()
+
+    console.log('🧠 Enhanced AI Field Analysis Request:', {
+      fieldInfo: fieldInfo.name,
       mappingCount: mappingConfig.length,
-      variationKeys: Object.keys(fieldVariations)
+      variationKeys: Object.keys(fieldVariations),
+      pastMissesCount: pastMisses.length
     })
-    
+
     // Get OpenAI API key from environment
     const openaiApiKey = Deno.env.get('OPENAI_API_KEY')
     if (!openaiApiKey) {
@@ -43,8 +44,8 @@ serve(async (req) => {
       for (const [key, value] of Object.entries(fieldVariations || {})) {
         if (Array.isArray(value)) {
           // Direct array of variations
-          if (searchTerms.some(term => 
-            value.some(v => v.toLowerCase().includes(term.toLowerCase()) || 
+          if (searchTerms.some(term =>
+            value.some(v => v.toLowerCase().includes(term.toLowerCase()) ||
                            term.toLowerCase().includes(v.toLowerCase()))
           )) {
             value.forEach(v => variations.add(v))
@@ -53,8 +54,8 @@ serve(async (req) => {
           // Nested object with variations
           for (const [subKey, subValue] of Object.entries(value as Record<string, any>)) {
             if (Array.isArray(subValue)) {
-              if (searchTerms.some(term => 
-                subValue.some(v => v.toLowerCase().includes(term.toLowerCase()) || 
+              if (searchTerms.some(term =>
+                subValue.some(v => v.toLowerCase().includes(term.toLowerCase()) ||
                                term.toLowerCase().includes(v.toLowerCase()))
               )) {
                 subValue.forEach(v => variations.add(v))
@@ -68,6 +69,11 @@ serve(async (req) => {
     }
 
     const relatedVariations = getFieldVariations(fieldInfo)
+
+    const intelligence = pastMisses.length > 0
+      ? `\nPROFILE INTELLIGENCE / LESSONS LEARNED (Previous failed fill attempts):
+${pastMisses.map((m: any) => `- Failed on: ${m.page_url}\n  Advice: ${m.ai_suggestion}`).join('\n')}\n`
+      : '';
 
     // Prepare comprehensive AI prompt
     const prompt = `
@@ -86,14 +92,14 @@ FORM FIELD ANALYSIS:
 - Max Length: ${fieldInfo.maxLength}
 
 KNOWN FIELD VARIATIONS:
-${relatedVariations.length > 0 ? 
-  `These field names are known to be related: ${relatedVariations.join(', ')}` : 
+${relatedVariations.length > 0 ?
+  `These field names are known to be related: ${relatedVariations.join(', ')}` :
   'No direct variations found in mapping database'
 }
 
 COMPLETE PROFILE DATA AVAILABLE:
 ${JSON.stringify(profileData, null, 2)}
-
+${intelligence}
 INTELLIGENT MATCHING RULES:
 1. Analyze field semantics, not just exact name matches
 2. Consider context clues from labels, placeholders, and surrounding text
@@ -103,17 +109,18 @@ INTELLIGENT MATCHING RULES:
 6. Consider conditional logic (e.g., "Do you have experience?" → yes if work_experience exists)
 7. Handle array data intelligently (use first item, count, or summary)
 8. Support both US and international formats
+9. CLOSING THE LOOP: Use "LESSONS LEARNED" section. If this field is similar to a previously missed one and profile data still lacks the recommended info, LEAVE IT BLANK. If advice was followed and data is present, FILL IT.
 
 SPECIAL FIELD TYPES TO HANDLE:
-- Names: first_name, last_name, full_name, middle_name, and other related variations
-- Contact: email, phone, address, linkedin, github, portfolio, and other related variations
-- Dates: start_date, end_date, graduation_date (format as needed), and other related variations
-- Experience: years_of_experience, job_title, company, description, and other related variations
-- Education: degree, school, gpa, major, and other related variations
-- Skills: technical_skills, soft_skills, languages, certifications, and other related variations
-- Preferences: salary, location, job_type, remote_work, and other related variations
-- Consent: background_check, drug_test, willing_to_relocate, and other related variations
-- Arrays: work_experience[], education_history[], projects[], and other related variations
+- Names: first_name, last_name, full_name, middle_name
+- Contact: email, phone, address, linkedin, github, portfolio
+- Dates: start_date, end_date, graduation_date (format as needed)
+- Experience: years_of_experience, job_title, company, description
+- Education: degree, school, gpa, major
+- Skills: technical_skills, soft_skills, languages, certifications
+- Preferences: salary, location, job_type, remote_work
+- Consent: background_check, drug_test, willing_to_relocate
+- Arrays: work_experience[], education_history[], projects[]
 
 RESPONSE FORMAT (JSON ONLY):
 {
@@ -129,7 +136,7 @@ CRITICAL GUIDELINES:
 - Only suggest filling if confidence > 70
 - For boolean/checkbox fields, use true/false
 - For dates, use appropriate format (MM/DD/YYYY or YYYY-MM-DD)
-- For arrays, use first item or aggregate appropriately  
+- For arrays, use first item or aggregate appropriately
 - For numbers, provide clean numeric values
 - Consider field context to avoid mismatches
 - Never fill passwords, payment info, or sensitive data
@@ -157,25 +164,21 @@ CRITICAL GUIDELINES:
 
     const data = await response.json()
     let aiResponse
-    
+
     try {
       aiResponse = JSON.parse(data.choices[0].message.content)
     } catch (parseError) {
       console.error('❌ Failed to parse AI response:', data.choices[0].message.content)
       throw new Error('Invalid AI response format')
     }
-    
+
     console.log('🧠 Enhanced AI Analysis Result:', aiResponse)
-    
+
     // Return the AI analysis result
     return new Response(
       JSON.stringify({
         success: true,
-        analysis: aiResponse,
-        debug: {
-          fieldVariations: relatedVariations,
-          profileDataKeys: Object.keys(profileData)
-        }
+        analysis: aiResponse
       }),
       {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -185,11 +188,11 @@ CRITICAL GUIDELINES:
 
   } catch (error) {
     console.error('❌ AI Field Analysis Error:', error)
-    
+
     return new Response(
       JSON.stringify({
         success: false,
-        error: error.message
+        error: (error as any).message
       }),
       {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -197,4 +200,4 @@ CRITICAL GUIDELINES:
       }
     )
   }
-}) 
+})

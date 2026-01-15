@@ -6,25 +6,32 @@ import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Textarea } from '@/components/ui/textarea';
 import { ArrowLeft, Plus, X, Save, Loader2, ExternalLink, Award, Globe, Briefcase, GraduationCap, Code, Users, Trophy, BookOpen, User, Settings } from 'lucide-react';
-import { Link, useParams, useNavigate } from 'react-router-dom';
+import { useNavigate, useParams, Link } from 'react-router-dom';
+import { supabase } from '@/integrations/supabase/client';
 import { useProfiles } from '@/hooks/useProfiles';
 import { useToast } from '@/hooks/use-toast';
+import { MissedFieldCard } from '@/components/MissedFieldCard';
+import { QuickAddModal } from '@/components/QuickAddModal';
 
 const ProfileEdit = () => {
   const { id } = useParams();
   const navigate = useNavigate();
   const { getProfile, updateProfile } = useProfiles();
   const { toast } = useToast();
-  
+
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [formData, setFormData] = useState<any>(null);
   const [newSkill, setNewSkill] = useState('');
+  const [missedFieldsSuggestions, setMissedFieldsSuggestions] = useState<any[]>([]);
+  const [loadingSuggestions, setLoadingSuggestions] = useState(false);
+  const [quickAddModalOpen, setQuickAddModalOpen] = useState(false);
+  const [selectedSuggestion, setSelectedSuggestion] = useState<any>(null);
 
   useEffect(() => {
     const fetchProfile = async () => {
       if (!id) return;
-      
+
       setLoading(true);
       try {
         const { data, error } = await getProfile(id);
@@ -39,7 +46,7 @@ const ProfileEdit = () => {
         } else if (data) {
           // Initialize form data with proper field mappings from actual data structure
           setFormData({
-            profileName: data.name || 'Untitled Profile',
+            full_name: data.full_name || "Untitled Profile",
             personalDetails: data.personal_details || {},
             workExperience: data.work_experience || [],
             educationHistory: data.education_history || [],
@@ -52,7 +59,7 @@ const ProfileEdit = () => {
             languages: data.languages || [],
             volunteerExperience: data.volunteer_experience || [],
             jobPreferences: data.job_preferences || {},
-            resumeMetadata: data.resume_metadata || {}
+            resumeMetadata: data.resume_metadata || {},
           });
         }
       } catch (error) {
@@ -67,7 +74,29 @@ const ProfileEdit = () => {
       }
     };
 
+    const fetchMissedFields = async () => {
+      if (!id) return;
+      setLoadingSuggestions(true);
+      try {
+        const { data, error } = await (supabase as any)
+          .from('missed_fields')
+          .select('*')
+          .eq('profile_id', id)
+          .order('created_at', { ascending: false })
+          .limit(5);
+
+        if (!error && data) {
+          setMissedFieldsSuggestions(data);
+        }
+      } catch (err) {
+        console.warn('Failed to fetch missed fields suggestions:', err);
+      } finally {
+        setLoadingSuggestions(false);
+      }
+    };
+
     fetchProfile();
+    fetchMissedFields();
   }, [id, getProfile, navigate, toast]);
 
   const handlePersonalDetailsChange = (field: string, value: string) => {
@@ -107,11 +136,11 @@ const ProfileEdit = () => {
 
   const handleSave = async () => {
     if (!id || !formData) return;
-    
+
     setSaving(true);
     try {
       const { error } = await updateProfile(id, {
-        name: formData.profileName,
+        full_name: formData.profileName,
         personal_details: formData.personalDetails,
         work_experience: formData.workExperience,
         education_history: formData.educationHistory,
@@ -119,12 +148,12 @@ const ProfileEdit = () => {
         soft_skills: formData.softSkills,
         tools_technologies: formData.toolsTechnologies,
         projects: formData.projects,
-        certifications_licenses: formData.certifications,
+        certifications: formData.certifications,
         awards_honors: formData.awards,
         languages: formData.languages,
         volunteer_experience: formData.volunteerExperience,
         job_preferences: formData.jobPreferences,
-        resume_metadata: formData.resumeMetadata
+        resume_metadata: formData.resumeMetadata,
       });
 
       if (error) {
@@ -153,11 +182,11 @@ const ProfileEdit = () => {
   };
 
   // EditableField component for inline editing
-  const EditableField = ({ 
-    value, 
-    onSave, 
-    fieldKey, 
-    type = 'text', 
+  const EditableField = ({
+    value,
+    onSave,
+    fieldKey,
+    type = 'text',
     multiline = false,
     placeholder = "Click to edit...",
     className = ""
@@ -234,7 +263,7 @@ const ProfileEdit = () => {
     }
 
     return (
-      <div 
+      <div
         className={`cursor-pointer hover:bg-gray-50 p-2 rounded border border-transparent hover:border-gray-200 transition-colors min-h-[2rem] flex items-start ${className}`}
         onClick={handleEdit}
         title="Click to edit"
@@ -334,6 +363,60 @@ const ProfileEdit = () => {
         </div>
 
         <div className="space-y-8">
+          {/* AI Suggestions Section - Enhanced */}
+          {missedFieldsSuggestions.length > 0 && (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center">
+                  <Globe className="h-5 w-5 mr-2 text-blue-600" />
+                  <h4 className="font-semibold text-gray-900">AI-Powered Profile Improvements</h4>
+                  <Badge variant="secondary" className="ml-2">
+                    {missedFieldsSuggestions.filter(s => s.status === 'pending').length} pending
+                  </Badge>
+                </div>
+              </div>
+              <p className="text-sm text-gray-600">
+                Based on your recent auto-fill attempts, we've identified missing information. Take action to improve your profile:
+              </p>
+              <div className="grid gap-4">
+                {missedFieldsSuggestions
+                  .filter(s => s.status === 'pending')
+                  .map((suggestion) => (
+                    <MissedFieldCard
+                      key={suggestion.id}
+                      suggestion={suggestion}
+                      onResolved={() => {
+                        // Refresh suggestions after resolving
+                        setMissedFieldsSuggestions(prev =>
+                          prev.filter(s => s.id !== suggestion.id)
+                        );
+                      }}
+                      onQuickAdd={(sug) => {
+                        setSelectedSuggestion(sug);
+                        setQuickAddModalOpen(true);
+                      }}
+                    />
+                  ))}
+              </div>
+            </div>
+          )}
+
+          <QuickAddModal
+            isOpen={quickAddModalOpen}
+            onClose={() => {
+              setQuickAddModalOpen(false);
+              setSelectedSuggestion(null);
+            }}
+            suggestion={selectedSuggestion}
+            profileId={id || ''}
+            onSuccess={() => {
+              // Refresh suggestions and profile data
+              setMissedFieldsSuggestions(prev =>
+                prev.filter(s => s.id !== selectedSuggestion?.id)
+              );
+            }}
+          />
+
           {/* Profile Name */}
           <Card className="p-6">
             <div className="flex items-center mb-4">
@@ -413,17 +496,17 @@ const ProfileEdit = () => {
                 />
               </div>
             </div>
-            
+
             {/* Additional Links */}
             {formData.personalDetails?.additionalLinks && formData.personalDetails.additionalLinks.length > 0 && (
               <div className="mt-4">
                 <Label className="text-sm font-medium">Additional Links</Label>
                 <div className="flex flex-wrap gap-2 mt-2">
                   {formData.personalDetails.additionalLinks.map((link: any, linkIndex: number) => (
-                    <a 
+                    <a
                       key={linkIndex}
                       href={link.url?.startsWith('http') ? link.url : `https://${link.url}`}
-                      target="_blank" 
+                      target="_blank"
                       rel="noopener noreferrer"
                       className="flex items-center gap-1 px-3 py-1 text-xs bg-blue-100 text-blue-700 rounded-full hover:bg-blue-200 transition-colors"
                     >
@@ -434,16 +517,16 @@ const ProfileEdit = () => {
                 </div>
               </div>
             )}
-            
+
             {/* Main Profile Links */}
             {(formData.personalDetails?.linkedin || formData.personalDetails?.github || formData.personalDetails?.portfolio) && (
               <div className="mt-4">
                 <Label className="text-sm font-medium">Profile Links</Label>
                 <div className="flex flex-wrap gap-2 mt-2">
                   {formData.personalDetails?.linkedin && (
-                    <a 
+                    <a
                       href={formData.personalDetails.linkedin.startsWith('http') ? formData.personalDetails.linkedin : `https://${formData.personalDetails.linkedin}`}
-                      target="_blank" 
+                      target="_blank"
                       rel="noopener noreferrer"
                       className="flex items-center gap-1 px-3 py-1 text-xs bg-blue-100 text-blue-700 rounded-full hover:bg-blue-200 transition-colors"
                     >
@@ -452,9 +535,9 @@ const ProfileEdit = () => {
                     </a>
                   )}
                   {formData.personalDetails?.github && (
-                    <a 
+                    <a
                       href={formData.personalDetails.github.startsWith('http') ? formData.personalDetails.github : `https://${formData.personalDetails.github}`}
-                      target="_blank" 
+                      target="_blank"
                       rel="noopener noreferrer"
                       className="flex items-center gap-1 px-3 py-1 text-xs bg-gray-100 text-gray-700 rounded-full hover:bg-gray-200 transition-colors"
                     >
@@ -463,9 +546,9 @@ const ProfileEdit = () => {
                     </a>
                   )}
                   {formData.personalDetails?.portfolio && (
-                    <a 
+                    <a
                       href={formData.personalDetails.portfolio.startsWith('http') ? formData.personalDetails.portfolio : `https://${formData.personalDetails.portfolio}`}
-                      target="_blank" 
+                      target="_blank"
                       rel="noopener noreferrer"
                       className="flex items-center gap-1 px-3 py-1 text-xs bg-purple-100 text-purple-700 rounded-full hover:bg-purple-200 transition-colors"
                     >
@@ -476,7 +559,7 @@ const ProfileEdit = () => {
                 </div>
               </div>
             )}
-            
+
             <div className="mt-4">
               <Label htmlFor="summary">Professional Summary</Label>
               <EditableField
@@ -496,7 +579,7 @@ const ProfileEdit = () => {
               <Code className="h-5 w-5 mr-2 text-blue-600" />
               <h4 className="font-semibold text-gray-900">Technical Skills</h4>
             </div>
-            
+
             {/* All Skills */}
             <div className="mb-6">
               <Label className="text-sm font-medium">All Skills</Label>
@@ -564,9 +647,9 @@ const ProfileEdit = () => {
                 <Briefcase className="h-5 w-5 mr-2 text-blue-600" />
                 <h4 className="font-semibold text-gray-900">Work Experience</h4>
               </div>
-              <Button 
-                size="sm" 
-                onClick={handleSave} 
+              <Button
+                size="sm"
+                onClick={handleSave}
                 disabled={saving}
                 className="bg-blue-600 hover:bg-blue-700"
               >
@@ -625,7 +708,7 @@ const ProfileEdit = () => {
                       />
                     </div>
                   </div>
-                  
+
                   <div className="mb-4">
                     <Label className="text-sm font-medium">Description</Label>
                     <EditableField
@@ -775,16 +858,16 @@ const ProfileEdit = () => {
                         />
                       </div>
                     </div>
-                    
+
                     {/* Project Links */}
                     {(project?.url || project?.githubUrl || project?.demoUrl || (project?.links && project.links.length > 0)) && (
                       <div className="mb-4">
                         <Label className="text-sm font-medium">Project Links</Label>
                         <div className="flex flex-wrap gap-2 mt-2">
                           {project?.url && (
-                            <a 
+                            <a
                               href={project.url.startsWith('http') ? project.url : `https://${project.url}`}
-                              target="_blank" 
+                              target="_blank"
                               rel="noopener noreferrer"
                               className="flex items-center gap-1 px-3 py-1 text-xs bg-blue-100 text-blue-700 rounded-full hover:bg-blue-200 transition-colors"
                             >
@@ -793,9 +876,9 @@ const ProfileEdit = () => {
                             </a>
                           )}
                           {project?.githubUrl && (
-                            <a 
+                            <a
                               href={project.githubUrl.startsWith('http') ? project.githubUrl : `https://${project.githubUrl}`}
-                              target="_blank" 
+                              target="_blank"
                               rel="noopener noreferrer"
                               className="flex items-center gap-1 px-3 py-1 text-xs bg-gray-100 text-gray-700 rounded-full hover:bg-gray-200 transition-colors"
                             >
@@ -804,9 +887,9 @@ const ProfileEdit = () => {
                             </a>
                           )}
                           {project?.demoUrl && (
-                            <a 
+                            <a
                               href={project.demoUrl.startsWith('http') ? project.demoUrl : `https://${project.demoUrl}`}
-                              target="_blank" 
+                              target="_blank"
                               rel="noopener noreferrer"
                               className="flex items-center gap-1 px-3 py-1 text-xs bg-green-100 text-green-700 rounded-full hover:bg-green-200 transition-colors"
                             >
@@ -815,10 +898,10 @@ const ProfileEdit = () => {
                             </a>
                           )}
                           {project?.links && project.links.map((link: any, linkIndex: number) => (
-                            <a 
+                            <a
                               key={linkIndex}
                               href={link.url?.startsWith('http') ? link.url : `https://${link.url}`}
-                              target="_blank" 
+                              target="_blank"
                               rel="noopener noreferrer"
                               className="flex items-center gap-1 px-3 py-1 text-xs bg-purple-100 text-purple-700 rounded-full hover:bg-purple-200 transition-colors"
                             >
@@ -829,7 +912,7 @@ const ProfileEdit = () => {
                         </div>
                       </div>
                     )}
-                    
+
                     <div className="mb-4">
                       <Label className="text-sm font-medium">Description</Label>
                       <EditableField

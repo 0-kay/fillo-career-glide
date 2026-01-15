@@ -40,6 +40,16 @@
         "styles.css"
       ],
       "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "http://localhost:8080/*",
+        "http://127.0.0.1:8080/*"
+      ],
+      "js": [
+        "content/auth-sync.js"
+      ],
+      "run_at": "document_start"
     }
   ],
   "externally_connectable": {

@@ -19,7 +19,7 @@
             console.log('📩 Received fillForm request:', request);
             try {
               const result = await Promise.race([
-                ns.engine.handleFillForm(request.profileData, request.useAI),
+                ns.engine.handleFillForm(request.profileData, request.useAI, request.pastMisses),
                 new Promise((_, reject) => setTimeout(() => reject(new Error('Engine timeout (300s)')), 300000))
               ]);
               console.log('✅ FillForm complete:', result);
