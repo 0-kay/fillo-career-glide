@@ -35,25 +35,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Simple function to save auth token to Chrome storage
+    // Simple function to save auth token to Chrome extension
     const saveTokenToChrome = (session: Session | null) => {
-      if (typeof window !== 'undefined' && window.chrome?.storage?.local) {
-        if (session?.access_token) {
-          console.log('💾 Saving token to Chrome storage...');
-          window.chrome.storage.local.set({
-            FILLO_AUTH_TOKEN: session.access_token
-          }).then(() => {
-            console.log('✅ Token saved to Chrome storage');
-          }).catch((error) => {
-            console.log('❌ Failed to save token:', error);
-          });
-        } else {
-          console.log('🗑️ Clearing token from Chrome storage...');
-          window.chrome.storage.local.remove(['FILLO_AUTH_TOKEN']).then(() => {
-            console.log('✅ Token cleared from Chrome storage');
-          }).catch((error) => {
-            console.log('❌ Failed to clear token:', error);
-          });
+      if (typeof window !== 'undefined') {
+        const tokenToSend = session?.access_token ?? null;
+        console.log(tokenToSend ? '🔑 Notifying extension of new token' : '🗑️ Notifying extension to clear token');
+
+        // Notify via postMessage (auth-sync.js will catch this)
+        window.postMessage(
+          {
+            source: 'web-app',
+            type: 'SEND_TOKEN',
+            token: tokenToSend,
+          },
+          '*'
+        );
+
+        // Also try direct call if extension exposed it
+        if (typeof window.filloExtensionNotifyAuth === 'function') {
+          window.filloExtensionNotifyAuth(tokenToSend);
         }
       }
     };
@@ -65,7 +65,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setSession(session);
         setUser(session?.user ?? null);
         setLoading(false);
-        
+
         // Always save token to Chrome storage on any auth change
         saveTokenToChrome(session);
       }
@@ -77,7 +77,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setSession(session);
       setUser(session?.user ?? null);
       setLoading(false);
-      
+
       // Save initial token to Chrome storage
       saveTokenToChrome(session);
     });
@@ -87,7 +87,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signUp = async (email: string, password: string, fullName?: string) => {
     const redirectUrl = `${window.location.origin}/`;
-    
+
     const { error } = await supabase.auth.signUp({
       email,
       password,

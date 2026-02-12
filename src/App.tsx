@@ -11,20 +11,13 @@ import Dashboard from "./pages/Dashboard";
 import NotFound from "./pages/NotFound";
 import Settings from "./pages/Settings";
 import ProfileEdit from "./pages/ProfileEdit";
-import Test from "./pages/Test";
 
 const queryClient = new QueryClient();
 
 // Component to handle extension integration (must be inside AuthProvider)
 function ExtensionIntegration() {
-  const { extensionAvailable } = useFilloExtension();
-  
-  // Log extension status for debugging
-  if (extensionAvailable) {
-    console.log('🤖 Fillo Chrome Extension detected and connected');
-  }
-  
-  return null; // This component doesn't render anything
+  useFilloExtension();
+  return null;
 }
 
 const App = () => (
@@ -41,7 +34,6 @@ const App = () => (
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="/profile/edit/:id" element={<ProfileEdit />} />
-            <Route path="/test" element={<Test/>} />
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
             <Route path="*" element={<NotFound />} />
           </Routes>

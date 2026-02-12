@@ -31,7 +31,8 @@
     const authData = localStorage.getItem('sb-yuojrygcrcpajiglbekd-auth-token');
     console.log('Auth token exists:', !!authData);
 
-    const extensionId = 'amlhnapedfhipgdhaihgikcdclckancp';
+    const extensionId = 'onjnkheoimgbaacfojkhamcldacfinlg';
+    
     const auth_data = JSON.parse(authData)
     const message = { accessToken: auth_data.access_token };
     chrome.runtime.sendMessage(extensionId, message, (response) => {

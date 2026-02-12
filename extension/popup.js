@@ -1,20 +1,69 @@
-// Fillo Auto-Fill Extension - Simple Authentication Flow
-// Just check Chrome storage for FILLO_AUTH_TOKEN and use it
+// Fillo Auto-Fill Extension - Popup Script
+// Handles auth, profile selection, and robust content injection
 
 const SUPABASE_URL = "https://yuojrygcrcpajiglbekd.supabase.co";
 const SUPABASE_ANON_KEY =
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inl1b2pyeWdjcmNwYWppZ2xiZWtkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTEyMzAzMjksImV4cCI6MjA2NjgwNjMyOX0.9dYnQRjtSocxmb9gCw0fOf4GfPk2mUQNcrkOqwu8Rck";
+
+// ---------- Helpers ----------
+function isForbiddenUrl(urlStr) {
+  try {
+    const url = new URL(urlStr);
+    return url.protocol === "chrome:" || url.protocol === "chrome-extension:";
+  } catch {
+    return false;
+  }
+}
+
+async function ensureContentReady(tabId) {
+  // Ping once
+  try {
+    const ping = await chrome.tabs.sendMessage(tabId, { action: "ping" });
+    console.log("✅ Content script responded:", ping);
+    return true;
+  } catch (_) {
+    console.log("ℹ️ No ping response — injecting modules...");
+  }
+
+  // Inject all content scripts across all frames
+  const files = [
+    "content/namespace.js",
+    "content/config.js",
+    "content/utils.js",
+    "content/mapping.js",
+    "content/ai.js",
+    "content/planner.js",
+    "content/engine.js",
+    "content/messaging.js",
+  ];
+
+  for (const file of files) {
+    await chrome.scripting.executeScript({
+      target: { tabId, allFrames: true },
+      files: [file],
+    });
+    console.log("✅ Injected:", file);
+  }
+
+  await new Promise((r) => setTimeout(r, 800));
+
+  const ping2 = await chrome.tabs.sendMessage(tabId, { action: "ping" });
+  console.log("✅ Content script initialized:", ping2);
+  return true;
+}
+
+// ---------- Popup Core ----------
 class FilloPopup {
   constructor() {
     this.authToken = null;
     this.profiles = [];
     this.selectedProfileId = null;
+    this.pastMisses = [];
     this.elements = {};
   }
 
   async initialize() {
     console.log("🚀 Fillo Auto-Fill: Initializing popup...");
-
     this.initElements();
     this.attachListeners();
     await this.checkForToken();
@@ -38,61 +87,40 @@ class FilloPopup {
       previewName: document.getElementById("preview-name"),
       previewEmail: document.getElementById("preview-email"),
       previewCompleteness: document.getElementById("preview-completeness"),
-      // AI Status elements
       backToMain: document.getElementById("back-to-main"),
       aiStatus: document.getElementById("ai-status"),
     };
   }
 
   attachListeners() {
-    this.elements.profileSelect.addEventListener("change", (e) => {
-      this.handleProfileSelection(e.target.value);
-    });
-
-    this.elements.fillBtn.addEventListener("click", () => {
-      console.log("🔄 Filling form...");
-      this.fillForm();
-    });
-
-    this.elements.detectBtn.addEventListener("click", () => {
-      this.detectFields();
-    });
-
-    this.elements.signinBtn.addEventListener("click", () => {
-      this.openWebApp();
-    });
-
-    this.elements.refreshBtn.addEventListener("click", () => {
-      this.checkForToken();
-    });
-
-    this.elements.footerRefreshBtn.addEventListener("click", () => {
-      this.checkForToken();
-    });
-
-    this.elements.helpBtn.addEventListener("click", () => {
-      this.showHelp();
-    });
-
-    // AI Configuration listeners
-    this.elements.aiSettingsBtn.addEventListener("click", () => {
-      this.showAIConfig();
-    });
-
-    this.elements.backToMain.addEventListener("click", () => {
-      this.showMain();
-    });
-
-
+    this.elements.profileSelect.addEventListener("change", (e) =>
+      this.handleProfileSelection(e.target.value)
+    );
+    this.elements.fillBtn.addEventListener("click", () => this.fillForm());
+    this.elements.detectBtn.addEventListener("click", () =>
+      this.detectFields()
+    );
+    this.elements.signinBtn.addEventListener("click", () => this.openWebApp());
+    this.elements.refreshBtn.addEventListener("click", () =>
+      this.checkForToken()
+    );
+    this.elements.footerRefreshBtn.addEventListener("click", () =>
+      this.checkForToken()
+    );
+    this.elements.helpBtn.addEventListener("click", () => this.showHelp());
+    this.elements.aiSettingsBtn.addEventListener("click", () =>
+      this.showAIConfig()
+    );
+    this.elements.backToMain.addEventListener("click", () => this.showMain());
   }
 
+  // ---------- Authentication ----------
   async checkForToken() {
-    console.log("🔍 Checking for FILLO_AUTH_TOKEN in Chrome storage...");
-
+    console.log("🔍 Checking for FILLO_AUTH_TOKEN...");
     try {
       const result = await chrome.storage.local.get(["FILLO_AUTH_TOKEN"]);
       if (result.FILLO_AUTH_TOKEN) {
-        console.log("✅ Found auth token");
+        console.log("✅ Found token");
         this.authToken = result.FILLO_AUTH_TOKEN;
         await this.loadProfiles();
       } else {
@@ -100,7 +128,7 @@ class FilloPopup {
         this.showAuth("Please sign in to access your resume profiles");
       }
     } catch (error) {
-      console.log("❌ Error checking for token:", error);
+      console.error("❌ Token check error:", error);
       this.showAuth("Error checking authentication. Please try again.");
     }
   }
@@ -110,12 +138,11 @@ class FilloPopup {
       this.showAuth("No authentication token available");
       return;
     }
-
     try {
-      console.log("📡 Loading profiles from Supabase...");
+      console.log("📡 Fetching profiles from Supabase...");
       this.showStatus("Loading profiles...", "info");
 
-      const response = await fetch(
+      const res = await fetch(
         `${SUPABASE_URL}/rest/v1/application_profiles?select=*`,
         {
           headers: {
@@ -126,19 +153,18 @@ class FilloPopup {
         }
       );
 
-      console.log("📡 API response status:", response.status);
+      console.log("📡 Supabase response status:", res.status);
+      const profiles = await res.json();
 
-      if (!response.ok) {
-        console.log(await response.json());
-        throw new Error(`API Error: ${response.status} ${response.statusText}`);
-      }
+      console.group("🧠 Supabase Profiles");
+      console.log(profiles);
+      console.groupEnd();
 
-      const profiles = await response.json();
-      console.log("✅ Loaded profiles:", profiles.length);
-
-      if (profiles.length === 0) {
+      if (!res.ok)
+        throw new Error(`API Error: ${res.status} ${res.statusText}`);
+      if (!Array.isArray(profiles) || profiles.length === 0) {
         this.showAuth(
-          "No profiles found. Please create a profile in your Fillo account first."
+          "No profiles found. Please create one in your Fillo account."
         );
         return;
       }
@@ -147,84 +173,86 @@ class FilloPopup {
       this.populateProfiles();
       this.showMain();
       this.hideStatus();
-    } catch (error) {
-      console.log("❌ Failed to load profiles:", error);
+    } catch (err) {
+      console.error("❌ Failed to load profiles:", err);
       this.showAuth("Failed to load profiles. Please sign in again.");
     }
   }
 
+  // ---------- Profiles ----------
   populateProfiles() {
     this.elements.profileSelect.innerHTML =
       '<option value="">Select a profile...</option>';
-
     this.profiles.forEach((profile) => {
-      const option = document.createElement("option");
-      option.value = profile.id;
-
-      // Create profile name from available data
-      let profileName = profile.full_name;
-      if (profile.name) {
-        profileName = profile.name;
-      } else if (profile.personal_details) {
-        const first = profile.personal_details.first_name || "";
-        const last = profile.personal_details.last_name || "";
-        if (first || last) {
-          profileName = `${first} ${last}`.trim();
-        }
-      }
-
-      option.textContent = profileName;
-      this.elements.profileSelect.appendChild(option);
+      const opt = document.createElement("option");
+      opt.value = profile.id;
+      opt.textContent =
+        profile.name ||
+        profile.full_name ||
+        `${profile.personal_details?.first_name || ""} ${
+          profile.personal_details?.last_name || ""
+        }`.trim() ||
+        "Unnamed Profile";
+      this.elements.profileSelect.appendChild(opt);
     });
   }
 
-  handleProfileSelection(profileId) {
+  async handleProfileSelection(profileId) {
     this.selectedProfileId = profileId;
-
     if (profileId) {
       const profile = this.profiles.find((p) => p.id === profileId);
       if (profile) {
         this.updateProfilePreview(profile);
         this.elements.fillBtn.disabled = false;
+        await this.fetchPastMisses(profileId);
       }
     } else {
       this.clearProfilePreview();
       this.elements.fillBtn.disabled = true;
+      this.pastMisses = [];
+    }
+  }
+
+  async fetchPastMisses(profileId) {
+    if (!this.authToken) return;
+    try {
+      console.log(`📡 Fetching past misses for profile ${profileId}...`);
+      const res = await fetch(
+        `${SUPABASE_URL}/rest/v1/missed_fields?profile_id=eq.${profileId}&select=ai_suggestion,page_url,created_at&order=created_at.desc&limit=10`,
+        {
+          headers: {
+            Authorization: `Bearer ${this.authToken}`,
+            apikey: SUPABASE_ANON_KEY,
+            "Content-Type": "application/json",
+          },
+        }
+      );
+
+      if (res.ok) {
+        this.pastMisses = await res.json();
+        console.log(`🧠 Loaded ${this.pastMisses.length} past misses for context.`);
+      }
+    } catch (err) {
+      console.warn("⚠️ Failed to fetch past misses:", err);
     }
   }
 
   updateProfilePreview(profile) {
-    const personalDetails = profile.personal_details || {};
-    console.log("details", profile);
-
-    // Profile name
-    let profileName = "Unknown Name";
-    if (profile.name) {
-      profileName = profile.name;
-    } else {
-      const fullname = personalDetails.fullName || "";
-      // const last = personalDetails.last_name || '';
-      profileName = fullname;
-    }
-
-    // Email
+    const details = profile.personal_details || {};
+    const profileName = profile.name || details.fullName || "Unknown Name";
     const email =
       profile.email ||
-      personalDetails.email ||
-      personalDetails.contact_email ||
+      details.email ||
+      details.contact_email ||
       "No email provided";
-
-    // Completeness calculation
-    const fields = [
-      personalDetails.first_name,
-      personalDetails.last_name,
-      personalDetails.email,
-      personalDetails.phone,
-      personalDetails.address,
-    ];
-    const filledFields = fields.filter((f) => f && f.trim()).length;
-    const completeness = Math.round((filledFields / fields.length) * 100);
-
+    const filledFields = [
+      details.first_name,
+      details.last_name,
+      details.email,
+      details.phone,
+      details.address,
+    ].filter(Boolean).length;
+    const completeness = Math.round((filledFields / 5) * 100);
     this.elements.previewName.textContent = profileName;
     this.elements.previewEmail.textContent = email;
     this.elements.previewCompleteness.textContent = `${completeness}% complete`;
@@ -235,95 +263,70 @@ class FilloPopup {
     this.elements.profilePreview.classList.add("hidden");
   }
 
+  // ---------- Fill Logic ----------
   async fillForm() {
-    console.log("🔄 Filling form... function called");
-    if (!this.selectedProfileId) {
-      this.showStatus("Please select a profile first", "error");
-      return;
-    }
+    console.log("🔄 Starting fillForm...");
+    if (!this.selectedProfileId)
+      return this.showStatus("Please select a profile first", "error");
 
     try {
-      this.showStatus("Filling form...", "info");
-      console.log("🔄 Filling form... function called -trying now");
       const [tab] = await chrome.tabs.query({
         active: true,
         currentWindow: true,
       });
+      if (!tab?.id) return this.showStatus("No active tab found", "error");
+      if (isForbiddenUrl(tab.url))
+        return this.showStatus(
+          "❌ Extension cannot run on browser internal pages.",
+          "error"
+        );
 
       const profile = this.profiles.find(
         (p) => p.id === this.selectedProfileId
       );
+      console.group("📦 Profile Data");
+      console.log(JSON.stringify(profile, null, 2));
+      console.groupEnd();
 
-      // Check if this is a supported site
-      const url = new URL(tab.url);
-      console.log(`🌐 Attempting to fill form on: ${url.hostname}`);
+      this.showStatus("Filling form...", "info");
+      await ensureContentReady(tab.id);
 
-      // Try to communicate with content script
-      let response = null;
-      
-      try {
-        // First attempt: content script should be auto-injected
-        console.log("🔄 First attempt: Sending fillForm message to content script...");
-        console.log("📋 Profile data:", profile);
-        
-        response = await chrome.tabs.sendMessage(tab.id, {
-          action: "fillForm",
-          profileData: profile,
-          useAI: true,
-        });
-        
-        console.log("✅ Content script response (first attempt):", response);
-      } catch (messageError) {
-        // Content script not available - inject manually (this is normal for some  pages)
-        try {
-          console.log("🔄 Initializing form filler for this page...");
+      console.log("🚀 Sending fillForm message...");
+      const response = await chrome.tabs.sendMessage(tab.id, {
+        action: "fillForm",
+        profileData: profile,
+        useAI: true,
+        pastMisses: this.pastMisses
+      });
 
-          
-          console.log("❌ Content script not available, injecting manually:", messageError.message);
-          
-          await chrome.scripting.executeScript({
-            target: { tabId: tab.id },
-            files: ["content.js"],
-          });
-
-          console.log("✅ Content script injected, waiting for initialization...");
-          
-          // Wait for script to initialize
-          await new Promise(resolve => setTimeout(resolve, 1000));
-
-          // Try communication again
-          console.log("🔄 Retry: Sending fillForm message to content script...");
-          response = await chrome.tabs.sendMessage(tab.id, {
-            action: "fillForm",
-            profileData: profile,
-            useAI: true,
-          });
-          
-          console.log("✅ Content script response (after injection):", response);
-        } catch (injectionError) {
-          console.log("❌ Injection failed:", injectionError.message);
-          throw new Error("Cannot access this page - try a different website");
-        }
-      }
-
-      // Handle response
+      console.log("✅ Content script response:", response);
       if (response?.success) {
-        console.log("🔄 Filled form... function called -success");
-        this.showStatus(`✅ Filled ${response.filled || 0} fields!`, "success");
+        this.showStatus(
+          `✅ Filled ${response.filled || 0}/${response.attempted || 0} fields${
+            typeof response.aiMatches === "number"
+              ? ` (${response.aiMatches} via AI)`
+              : ""
+          }`,
+          "success"
+        );
       } else {
-        this.showStatus(`❌ ${response?.error || 'No fillable fields found'}`, "error");
+        this.showStatus(
+          `❌ ${response?.error || "No fillable fields found"}`,
+          "error"
+        );
       }
-    } catch (error) {
-      console.log("❌ Fill form error:", error);
-      
-      // Better error handling for different scenarios
-      if (error.message.includes("Cannot access")) {
-        this.showStatus("❌ Cannot access this page. Try on a different website.", "error");
-      } else if (error.message.includes("chrome://") || error.message.includes("chrome-extension://")) {
-        this.showStatus("❌ Extension cannot work on browser internal pages.", "error");
-      } else {
-        this.showStatus("❌ Fill failed. Please refresh the page and try again.", "error");
-      }
+    } catch (err) {
+      console.error("❌ Fill form failed:", err);
+      if (err.message.includes("Cannot access"))
+        this.showStatus(
+          "❌ Cannot access this page. Try a different site.",
+          "error"
+        );
+      else
+        this.showStatus(
+          "❌ Fill failed. Please refresh the page and retry.",
+          "error"
+        );
     }
   }
 
@@ -333,40 +336,40 @@ class FilloPopup {
         active: true,
         currentWindow: true,
       });
-
       const results = await chrome.scripting.executeScript({
-        target: { tabId: tab.id },
+        target: { tabId: tab.id, allFrames: true },
         func: () => {
-          const formFields = document.querySelectorAll(
-            "input, textarea, select"
-          );
-          return {
-            totalFields: formFields.length,
-            url: window.location.href,
-          };
+          try {
+            const formFields = document.querySelectorAll(
+              "input, textarea, select"
+            );
+            return {
+              totalFields: formFields.length,
+              url: window.location.href,
+            };
+          } catch (e) {
+            return { totalFields: 0, error: e?.message };
+          }
         },
       });
-
-      const result = results[0]?.result;
-      if (result) {
-        this.showStatus(
-          `Found ${result.totalFields} form fields on this page`,
-          "success"
-        );
-      }
-    } catch (error) {
-      console.log("❌ Field detection failed:", error);
-      this.showStatus("Field detection failed: " + error.message, "error");
+      const total = results.reduce(
+        (sum, r) => sum + (r.result?.totalFields || 0),
+        0
+      );
+      this.showStatus(
+        `Found ${total} form fields across ${results.length} frame(s)`,
+        "success"
+      );
+    } catch (err) {
+      console.error("❌ Field detection failed:", err);
+      this.showStatus("Field detection failed: " + err.message, "error");
     }
   }
 
   async openWebApp() {
     console.log("🌐 Opening Fillo web app...");
     await chrome.tabs.create({ url: "http://localhost:8080" });
-    this.showStatus(
-      "Please sign in to your account, then click refresh.",
-      "info"
-    );
+    this.showStatus("Please sign in, then click refresh.", "info");
   }
 
 
@@ -375,14 +378,11 @@ class FilloPopup {
     chrome.tabs.create({ url: chrome.runtime.getURL("test-ai-form.html") });
   }
 
-  showAuth(message = "Please sign in to access your resume profiles") {
+  // ---------- UI ----------
+  showAuth(msg = "Please sign in to access your profiles") {
     this.elements.authSection.classList.remove("hidden");
     this.elements.mainSection.classList.add("hidden");
-
-    const authMessage = document.getElementById("auth-message");
-    if (authMessage) {
-      authMessage.textContent = message;
-    }
+    document.getElementById("auth-message").textContent = msg;
   }
 
   showMain() {
@@ -390,52 +390,51 @@ class FilloPopup {
     this.elements.mainSection.classList.remove("hidden");
   }
 
-  showStatus(message, type = "info") {
-    this.elements.status.textContent = message;
+  showStatus(msg, type = "info") {
+    this.elements.status.textContent = msg;
     this.elements.status.className = `status ${type}`;
     this.elements.status.classList.remove("hidden");
-
-    if (type === "success" || type === "error") {
+    if (["success", "error"].includes(type))
       setTimeout(() => this.hideStatus(), 3000);
-    }
   }
 
   hideStatus() {
     this.elements.status.classList.add("hidden");
   }
 
-  // AI Status Methods
   showAIConfig() {
     this.elements.authSection.classList.add("hidden");
     this.elements.mainSection.classList.add("hidden");
     this.elements.aiConfigSection.classList.remove("hidden");
   }
-
-  showAIStatus(message, type = "info") {
-    this.elements.aiStatus.textContent = message;
-    this.elements.aiStatus.className = `status ${type}`;
-    this.elements.aiStatus.classList.remove("hidden");
-  }
-
-  hideAIStatus() {
-    this.elements.aiStatus.textContent = "";
-    this.elements.aiStatus.className = "status hidden";
-  }
 }
 
-
-
-// Initialize popup when DOM is ready
+// ---------- Initialize ----------
 function initializePopup() {
-  console.log("📱 Initializing Fillo popup...");
+  console.log("📱 Initializing popup...");
+  // Listen for relayed logs from content scripts
+  try {
+    chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+      if (msg && msg.action === "relayLog") {
+        const level = msg.level || "log";
+        const args = Array.isArray(msg.args) ? msg.args : [msg.message || ""];
+        try {
+          (console[level] || console.log).apply(console, [
+            "[Fillo Relay]",
+            ...args,
+          ]);
+        } catch {
+          console.log("[Fillo Relay]", ...args);
+        }
+      }
+    });
+  } catch (_) {}
   const popup = new FilloPopup();
-  popup.initialize().catch((error) => {
-    console.error("❌ Popup initialization failed:", error);
-  });
+  popup
+    .initialize()
+    .catch((err) => console.error("❌ Popup init failed:", err));
 }
 
-if (document.readyState === "loading") {
+if (document.readyState === "loading")
   document.addEventListener("DOMContentLoaded", initializePopup);
-} else {
-  initializePopup();
-}
+else initializePopup();

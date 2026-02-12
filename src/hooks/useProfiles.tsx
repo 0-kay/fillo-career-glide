@@ -164,7 +164,7 @@ export function useProfiles() {
   }, [user?.id, fetchProfiles]);
 
   const updateProfile = useCallback(async (id: string, profileData: Partial<{
-    name: string;
+    full_name: string;
     personal_details: Json;
     education_history: Json;
     work_experience: Json;

@@ -1,70 +1,65 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useAuth } from './useAuth';
 
 /**
- * Hook to integrate with the Fillo Chrome Extension
- * Automatically notifies the extension when user auth state changes
+ * Hook to integrate with the Fillo Chrome Extension.
+ * Keeps the browser extension in sync with the authentication state of the user.
  */
 export function useFilloExtension() {
   const { user, session } = useAuth();
-
-    window.postMessage({
-    source: "web-app",
-    type: "SEND_TOKEN",
-    token: session?.access_token
-  }, "*")
-
+  const accessToken = session?.access_token ?? null;
+  const [extensionAvailable, setExtensionAvailable] = useState(false);
 
   useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
 
-    window.filloExtensionNotifyAuth = (token: string | null) => {
-      console.log("Token received from extension:", token);
-    };
-    // Function to notify the extension of auth changes
+    let isMounted = true;
+
     const notifyExtension = () => {
+      const filloNotify = window.filloExtensionNotifyAuth;
+      const tokenToSend = user && accessToken ? accessToken : null;
 
-      console.log("Fillo: ", typeof window.filloExtensionNotifyAuth)
-      // Check if the extension's content script is available
-      if (typeof window.filloExtensionNotifyAuth === 'function') {
-        const accessToken = session?.access_token;
-
-        if (user && accessToken) {
-          console.log('🔔 Notifying Fillo extension: User authenticated');
-          window.filloExtensionNotifyAuth(accessToken);
-        } else {
-          console.log('🔔 Notifying Fillo extension: User logged out');
-          window.filloExtensionNotifyAuth(null);
-        }
-      } else {
-        // Extension not installed or content script not loaded
-        console.log('🤖 Fillo extension not detected');
+      if (isMounted) {
+        setExtensionAvailable(typeof filloNotify === 'function');
       }
+
+      if (typeof filloNotify === 'function') {
+        filloNotify(tokenToSend);
+      }
+
+      window.postMessage(
+        {
+          source: 'web-app',
+          type: 'SEND_TOKEN',
+          token: tokenToSend,
+        },
+        '*',
+      );
     };
 
-    // Notify on auth state changes
     notifyExtension();
 
-    // Also notify when the page becomes visible (user switches tabs)
     const handleVisibilityChange = () => {
       if (!document.hidden) {
-        setTimeout(notifyExtension, 500);
+        notifyExtension();
       }
     };
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
+      isMounted = false;
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [user, session]);
-  return {
-    extensionAvailable: typeof window.filloExtensionNotifyAuth === 'function'
-  };
+  }, [accessToken, user]);
+
+  return { extensionAvailable };
 }
 
-// Add TypeScript declaration for the global function
 declare global {
   interface Window {
     filloExtensionNotifyAuth?: (token: string | null) => void;
   }
-} 
+}
