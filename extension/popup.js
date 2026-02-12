@@ -372,6 +372,8 @@ class FilloPopup {
     this.showStatus("Please sign in, then click refresh.", "info");
   }
 
+
+
   showHelp() {
     chrome.tabs.create({ url: chrome.runtime.getURL("test-ai-form.html") });
   }

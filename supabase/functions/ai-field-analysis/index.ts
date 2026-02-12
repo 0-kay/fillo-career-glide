@@ -185,7 +185,6 @@ CRITICAL GUIDELINES:
 
   } catch (error) {
     console.error('❌ AI Field Analysis Error:', error)
-
     return new Response(
       JSON.stringify({
         success: false,
