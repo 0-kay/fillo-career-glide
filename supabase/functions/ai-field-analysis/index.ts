@@ -157,6 +157,7 @@ CRITICAL GUIDELINES:
 
     const data = await response.json()
     let aiResponse
+
     try {
       aiResponse = JSON.parse(data.choices[0].message.content)
     } catch (parseError) {
