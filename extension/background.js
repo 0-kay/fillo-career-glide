@@ -19,7 +19,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
 
 chrome.runtime.onMessageExternal.addListener((request, sender, sendResponse) => {
-  if (sender.origin === 'http://localhost:8080') {
+  if (sender.origin === 'http://localhost:5173' || sender.origin === 'http://localhost:8080') {
     console.log('Received message:', request);
      chrome.storage.local.set({ FILLO_AUTH_TOKEN: request.accessToken })
  

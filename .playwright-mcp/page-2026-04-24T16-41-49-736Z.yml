@@ -1,0 +1,159 @@
+- generic [ref=e2]:
+  - region "Notifications (F8)":
+    - list
+  - generic [ref=e157]:
+    - banner [ref=e158]:
+      - generic [ref=e160]:
+        - generic [ref=e161]:
+          - generic [ref=e163]: F
+          - generic [ref=e164]: Fillo
+        - generic [ref=e165]:
+          - link "Settings" [ref=e166] [cursor=pointer]:
+            - /url: /settings
+            - button "Settings" [ref=e167]:
+              - img
+              - text: Settings
+          - button "eragbonikpeya@gmail.com" [ref=e168] [cursor=pointer]:
+            - img
+            - text: eragbonikpeya@gmail.com
+          - button "Sign Out" [ref=e169] [cursor=pointer]:
+            - img
+            - text: Sign Out
+    - generic [ref=e170]:
+      - generic [ref=e171]:
+        - heading "Welcome back, Eragbonikpeya!" [level=1] [ref=e172]
+        - paragraph [ref=e173]: You have 2 profiles ready for job applications.
+      - generic [ref=e174]:
+        - generic [ref=e176]:
+          - generic [ref=e177]:
+            - paragraph [ref=e178]: Active Profiles
+            - paragraph [ref=e179]: "2"
+            - paragraph [ref=e180]: 1 fully complete
+          - img [ref=e181]
+        - generic [ref=e185]:
+          - generic [ref=e186]:
+            - paragraph [ref=e187]: Average Completeness
+            - paragraph [ref=e188]: 93%
+            - paragraph [ref=e189]: Excellent!
+          - img [ref=e190]
+        - generic [ref=e194]:
+          - generic [ref=e195]:
+            - paragraph [ref=e196]: Extension Status
+            - generic [ref=e197]: Not Installed
+            - paragraph [ref=e198]: Install to auto-fill
+          - img [ref=e199]
+      - generic [ref=e204]:
+        - generic [ref=e206]:
+          - generic [ref=e207]:
+            - heading "Your Profiles" [level=2] [ref=e208]
+            - button "Upload Resume" [ref=e209] [cursor=pointer]:
+              - img
+              - text: Upload Resume
+          - generic [ref=e211]:
+            - generic [ref=e212]:
+              - img [ref=e214]
+              - generic [ref=e217]:
+                - heading "Michael Adebayo" [level=3] [ref=e218]
+                - paragraph [ref=e219]: Senior Software Engineer at TechNova Solutions, Inc.
+                - paragraph [ref=e220]: michael.adebayo.dev@example.com
+                - paragraph [ref=e221]: Software Engineer with 5+ years of experience building scalable backend systems, APIs, and distributed services. Strong...
+                - generic [ref=e222]:
+                  - generic [ref=e223]:
+                    - img [ref=e224]
+                    - text: 3 jobs
+                  - generic [ref=e227]:
+                    - img [ref=e228]
+                    - text: 2 degrees
+                  - generic [ref=e231]:
+                    - img [ref=e232]
+                    - text: 21 skills
+                  - generic [ref=e235]:
+                    - img [ref=e236]
+                    - text: 2 projects
+                  - generic [ref=e239]:
+                    - img [ref=e240]
+                    - text: 2 certs
+                - generic [ref=e244]:
+                  - generic [ref=e245]: Java
+                  - generic [ref=e246]: Go
+                  - generic [ref=e247]: Python
+                  - generic [ref=e248]: JavaScript
+                  - generic [ref=e249]: TypeScript
+                  - generic [ref=e250]: +16 more
+                - generic [ref=e251]:
+                  - generic [ref=e252]:
+                    - img [ref=e253]
+                    - text: "Last updated: 4/23/2026"
+                  - generic [ref=e256]:
+                    - img [ref=e257]
+                    - text: Untitled document-3.pdf
+            - generic [ref=e260]:
+              - generic [ref=e261]: 100% complete
+              - button [ref=e262] [cursor=pointer]:
+                - img
+              - button [ref=e263] [cursor=pointer]:
+                - img
+          - generic [ref=e264]:
+            - generic [ref=e265]:
+              - generic [ref=e266]:
+                - img [ref=e268]
+                - generic [ref=e271]:
+                  - heading "Winner Agbonikpeya" [level=3] [ref=e272]
+                  - paragraph [ref=e273]: Software Engineer Intern at Tredbase
+                  - paragraph [ref=e274]: winneragbonikpeya@gmail.com
+                  - generic [ref=e275]:
+                    - generic [ref=e276]:
+                      - img [ref=e277]
+                      - text: 3 jobs
+                    - generic [ref=e280]:
+                      - img [ref=e281]
+                      - text: 1 degree
+                    - generic [ref=e284]:
+                      - img [ref=e285]
+                      - text: 18 skills
+                    - generic [ref=e288]:
+                      - img [ref=e289]
+                      - text: 4 projects
+                  - generic [ref=e293]:
+                    - generic [ref=e294]: Java
+                    - generic [ref=e295]: TypeScript
+                    - generic [ref=e296]: SQL
+                    - generic [ref=e297]: Go
+                    - generic [ref=e298]: Spring Boot
+                    - generic [ref=e299]: +13 more
+                  - generic [ref=e300]:
+                    - generic [ref=e301]:
+                      - img [ref=e302]
+                      - text: "Last updated: 3/20/2026"
+                    - generic [ref=e305]:
+                      - img [ref=e306]
+                      - text: resume.pdf
+              - generic [ref=e309]:
+                - generic [ref=e310]: 85% complete
+                - button [ref=e311] [cursor=pointer]:
+                  - img
+                - button [ref=e312] [cursor=pointer]:
+                  - img
+            - paragraph [ref=e314]: Complete your profile to improve auto-fill accuracy.
+        - generic [ref=e315]:
+          - generic [ref=e316]:
+            - heading "Browser Extension" [level=3] [ref=e317]
+            - paragraph [ref=e318]: Install our Chrome extension to start auto-filling job applications using your profiles.
+            - button "Install Extension" [ref=e319] [cursor=pointer]:
+              - img
+              - text: Install Extension
+          - generic [ref=e320]:
+            - heading "Tips for Eragbonikpeya" [level=3] [ref=e321]
+            - list [ref=e322]:
+              - listitem [ref=e323]: • Create different profiles for different job types
+              - listitem [ref=e324]: • Keep your profiles updated with latest experience
+              - listitem [ref=e325]: • Use the extension on Workday and ICIMS sites
+          - generic [ref=e326]:
+            - heading "Recent Activity" [level=3] [ref=e327]
+            - generic [ref=e328]:
+              - generic [ref=e331]:
+                - paragraph
+                - paragraph [ref=e332]: Updated 4/23/2026
+              - generic [ref=e335]:
+                - paragraph
+                - paragraph [ref=e336]: Updated 3/20/2026

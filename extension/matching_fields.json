@@ -56,13 +56,57 @@
             "telephone",
             "telephoneNumber"
         ],
-        "address": [
-            "address",
-            "Address",
-            "streetAddress",
-            "street_address",
-            "addr"
+        "phoneExtension": [
+            "extension",
+            "phoneExtension",
+            "phone_extension",
+            "ext"
         ],
+        "address": {
+            "line1": [
+                "address",
+                "Address",
+                "streetAddress",
+                "street_address",
+                "addr",
+                "addressLine1",
+                "address_line_1"
+            ],
+            "line2": [
+                "addressLine2",
+                "address_line_2",
+                "apt",
+                "suite",
+                "unit"
+            ],
+            "city": [
+                "city",
+                "City",
+                "municipality"
+            ],
+            "state": [
+                "state",
+                "State",
+                "province",
+                "Province",
+                "region",
+                "countryRegion"
+            ],
+            "postalCode": [
+                "postalCode",
+                "postal_code",
+                "PostalCode",
+                "zipCode",
+                "zip_code",
+                "zip"
+            ],
+            "country": [
+                "country",
+                "Country",
+                "countryCode",
+                "country_code"
+            ]
+        },
         "linkedin": [
             "linkedin",
             "linkedIn",
@@ -382,8 +426,15 @@
         "salaryExpectation": [
             "salaryExpectation",
             "expectedSalary",
+            "expected salary",
+            "salary expectations",
             "salary",
-            "compensation"
+            "compensation",
+            "expectedCompensation",
+            "expected compensation",
+            "compensationExpectation",
+            "compensation expectations",
+            "pay expectations"
         ],
         "location": [
             "preferredLocation",

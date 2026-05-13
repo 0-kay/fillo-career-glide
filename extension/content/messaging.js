@@ -19,7 +19,11 @@
             console.log('📩 Received fillForm request:', request);
             try {
               const result = await Promise.race([
-                ns.engine.handleFillForm(request.profileData, request.useAI),
+                ns.engine.handleFillForm(request.profileData, request.useAI, {
+                  detectedFields: request.detectedFields || null,
+                  resumeDataUri: request.resumeDataUri || null,
+                  resumeFileName: request.resumeFileName || null
+                }),
                 new Promise((_, reject) => setTimeout(() => reject(new Error('Engine timeout (300s)')), 300000))
               ]);
               console.log('✅ FillForm complete:', result);
@@ -30,8 +34,11 @@
             }
             return true; // keep port open
           case 'detectFields':
-            // Optional: implement detect if needed
-            sendResponse({ success:true, message:'Fields detected (not implemented in split version)' });
+            if (!ns.engine?.detectFields) {
+              sendResponse({ success:false, error:'Field detector not loaded' });
+              break;
+            }
+            sendResponse({ success:true, ...ns.engine.detectFields() });
             break;
           case 'stopObservation':
             if (ns.state.currentObserver){ ns.state.currentObserver.disconnect(); ns.state.currentObserver = null; }

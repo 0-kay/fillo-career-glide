@@ -90,4 +90,32 @@
       return (data && data.success) ? data.analysis : null;
     }catch(e){ console.error('Single AI failed:', e.message); relayLog('error', 'Single AI failed:', e.message); return null; }
   };
+
+  ns.ai.matchDropdownOptionWithAI = async function(targetValue, optionsArray){
+    try {
+      if (!AI_CONFIG.enabled || !optionsArray || optionsArray.length === 0) return null;
+      relayLog('log', '🧠 Asking AI to pick best option from list for value:', targetValue);
+      const payload = { targetValue, options: optionsArray };
+      const r = await fetchWithTimeout(`${AI_CONFIG.supabaseUrl}/functions/v1/ai-match-option`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${AI_CONFIG.supabaseKey}` },
+        body: JSON.stringify(payload)
+      }, 8000);
+
+      if (!r.ok) throw new Error(`Option Match AI HTTP ${r.status}`);
+      const data = await r.json();
+      if (data && data.success && data.match && typeof data.match.matchedOptionIndex === 'number') {
+        if (data.match.confidence >= 60) {
+          console.log(`🧠 AI Option Match found:`, optionsArray[data.match.matchedOptionIndex], `(Confidence: ${data.match.confidence}%)`);
+          return data.match.matchedOptionIndex;
+        } else {
+          console.log('🧠 AI Option Match confidence too low:', data.match.confidence);
+        }
+      }
+      return null;
+    } catch(e) {
+      console.error('Option Match AI failed:', e.message);
+      return null;
+    }
+  };
 })(window.__Fillo);

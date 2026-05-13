@@ -5,25 +5,36 @@ import { Label } from '@/components/ui/label';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Textarea } from '@/components/ui/textarea';
-import { ArrowLeft, Plus, X, Save, Loader2, ExternalLink, Award, Globe, Briefcase, GraduationCap, Code, Users, Trophy, BookOpen, User, Settings } from 'lucide-react';
+import { ArrowLeft, Plus, X, Save, Loader2, ExternalLink, Award, Globe, Briefcase, GraduationCap, Code, Users, Trophy, BookOpen, User, Settings, ClipboardCheck } from 'lucide-react';
 import { Link, useParams, useNavigate } from 'react-router-dom';
 import { useProfiles } from '@/hooks/useProfiles';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/hooks/useAuth';
+import ScreeningQuestionsDialog, { ScreeningAnswer } from '@/components/ScreeningQuestionsDialog';
 
 const ProfileEdit = () => {
   const { id } = useParams();
   const navigate = useNavigate();
   const { getProfile, updateProfile } = useProfiles();
+  const { user, loading: authLoading } = useAuth();
   const { toast } = useToast();
   
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [formData, setFormData] = useState<any>(null);
   const [newSkill, setNewSkill] = useState('');
+  const [showScreeningDialog, setShowScreeningDialog] = useState(false);
 
   useEffect(() => {
+    if (authLoading) return; // Wait until authentication check is complete
+    
     const fetchProfile = async () => {
-      if (!id) return;
+      if (!id || !user) {
+        if (!user) {
+          navigate('/');
+        }
+        return;
+      }
       
       setLoading(true);
       try {
@@ -38,11 +49,44 @@ const ProfileEdit = () => {
           navigate('/dashboard');
         } else if (data) {
           // Initialize form data with proper field mappings from actual data structure
+          const pd = data.personal_details || {} as any;
+          pd.fullName = pd.full_name || pd.fullName || '';
+          // Normalize address: migrate flat string to object format
+          if (!pd.address || typeof pd.address === 'string') {
+            pd.address = { line1: '', line2: '', city: '', state: '', postalCode: '', country: '' };
+          }
+          // Normalize phone: strip whitespace
+          if (pd.phone) {
+            pd.phone = pd.phone.replace(/\s+/g, '');
+          }
+          // Normalize phoneExtension: clear bogus values like "empty string"
+          if (!pd.phoneExtension || pd.phoneExtension === 'empty string') {
+            pd.phoneExtension = '';
+          }
+          // Normalize education dates: migrate plain strings to {year, month} objects
+          const normalizeEduDate = (d: any) => {
+            if (d && typeof d === 'object' && 'year' in d) return { year: d.year || "", month: d.month || "" };
+            if (typeof d === 'string') {
+              const s = d.trim();
+              const ym = s.match(/^(\d{1,2})[\/\-](\d{4})$/);
+              if (ym) return { year: ym[2], month: ym[1] };
+              const yOnly = s.match(/^(\d{4})$/);
+              if (yOnly) return { year: yOnly[1], month: "" };
+              return { year: s, month: "" };
+            }
+            return { year: "", month: "" };
+          };
+          const educationHistory = (data.education_history || []).map((edu: any) => ({
+            ...edu,
+            startDate: normalizeEduDate(edu.startDate),
+            endDate: normalizeEduDate(edu.endDate),
+          }));
+
           setFormData({
             profileName: data.name || 'Untitled Profile',
-            personalDetails: data.personal_details || {},
+            personalDetails: pd,
             workExperience: data.work_experience || [],
-            educationHistory: data.education_history || [],
+            educationHistory,
             technicalSkills: data.technical_skills || {},
             softSkills: data.soft_skills || {},
             toolsTechnologies: data.tools_technologies || {},
@@ -52,6 +96,7 @@ const ProfileEdit = () => {
             languages: data.languages || [],
             volunteerExperience: data.volunteer_experience || [],
             jobPreferences: data.job_preferences || {},
+            screeningAnswers: (data.job_preferences as any)?.screening_answers || [],
             resumeMetadata: data.resume_metadata || {}
           });
         }
@@ -68,14 +113,28 @@ const ProfileEdit = () => {
     };
 
     fetchProfile();
-  }, [id, getProfile, navigate, toast]);
+  }, [id, getProfile, navigate, toast, user, authLoading]);
 
   const handlePersonalDetailsChange = (field: string, value: string) => {
     setFormData((prev: any) => ({
       ...prev,
       personalDetails: {
         ...prev.personalDetails,
-        [field]: value
+        [field]: value,
+        ...(field === 'fullName' ? { full_name: value } : {})
+      }
+    }));
+  };
+
+  const handleAddressChange = (field: string, value: string) => {
+    setFormData((prev: any) => ({
+      ...prev,
+      personalDetails: {
+        ...prev.personalDetails,
+        address: {
+          ...(prev.personalDetails?.address || {}),
+          [field]: value
+        }
       }
     }));
   };
@@ -110,9 +169,16 @@ const ProfileEdit = () => {
     
     setSaving(true);
     try {
+      // Ensure address is always saved as an object and phoneExtension is included
+      const personalDetails = {
+        ...formData.personalDetails,
+        address: typeof formData.personalDetails?.address === 'object' && formData.personalDetails?.address !== null
+          ? formData.personalDetails.address
+          : { line1: '', line2: '', city: '', state: '', postalCode: '', country: '' },
+        phoneExtension: formData.personalDetails?.phoneExtension || '',
+      };
       const { error } = await updateProfile(id, {
-        name: formData.profileName,
-        personal_details: formData.personalDetails,
+        personal_details: personalDetails,
         work_experience: formData.workExperience,
         education_history: formData.educationHistory,
         technical_skills: formData.technicalSkills,
@@ -123,7 +189,7 @@ const ProfileEdit = () => {
         awards_honors: formData.awards,
         languages: formData.languages,
         volunteer_experience: formData.volunteerExperience,
-        job_preferences: formData.jobPreferences,
+        job_preferences: { ...formData.jobPreferences, screening_answers: formData.screeningAnswers },
         resume_metadata: formData.resumeMetadata
       });
 
@@ -381,12 +447,62 @@ const ProfileEdit = () => {
                 />
               </div>
               <div>
-                <Label htmlFor="address">Address</Label>
+                <Label htmlFor="phoneExtension">Phone Extension</Label>
                 <Input
-                  id="address"
-                  value={formData.personalDetails?.address || ''}
-                  onChange={(e) => handlePersonalDetailsChange('address', e.target.value)}
+                  id="phoneExtension"
+                  value={formData.personalDetails?.phoneExtension || ''}
+                  onChange={(e) => handlePersonalDetailsChange('phoneExtension', e.target.value)}
                 />
+              </div>
+              <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <Label htmlFor="addressLine1">Address Line 1</Label>
+                  <Input
+                    id="addressLine1"
+                    value={formData.personalDetails?.address?.line1 || ''}
+                    onChange={(e) => handleAddressChange('line1', e.target.value)}
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="addressLine2">Address Line 2</Label>
+                  <Input
+                    id="addressLine2"
+                    value={formData.personalDetails?.address?.line2 || ''}
+                    onChange={(e) => handleAddressChange('line2', e.target.value)}
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="city">City</Label>
+                  <Input
+                    id="city"
+                    value={formData.personalDetails?.address?.city || ''}
+                    onChange={(e) => handleAddressChange('city', e.target.value)}
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="state">State / Province</Label>
+                  <Input
+                    id="state"
+                    value={formData.personalDetails?.address?.state || ''}
+                    onChange={(e) => handleAddressChange('state', e.target.value)}
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="postalCode">Postal Code</Label>
+                  <Input
+                    id="postalCode"
+                    value={formData.personalDetails?.address?.postalCode || ''}
+                    onChange={(e) => handleAddressChange('postalCode', e.target.value)}
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="country">Country</Label>
+                  <Input
+                    id="country"
+                    value={formData.personalDetails?.address?.country || ''}
+                    onChange={(e) => handleAddressChange('country', e.target.value)}
+                  />
+                </div>
               </div>
               <div>
                 <Label htmlFor="linkedin">LinkedIn</Label>
@@ -703,9 +819,9 @@ const ProfileEdit = () => {
                       <p className="text-sm text-gray-700">{edu?.school || 'N/A'}</p>
                     </div>
                     <div>
-                      <Label className="text-sm font-medium">Duration</Label>
+                      <Label className="text-sm font-medium">Graduation</Label>
                       <p className="text-sm text-gray-700">
-                        {edu?.startDate || 'N/A'} - {edu?.endDate || 'Present'}
+                        {edu?.endDate?.month ? `${edu.endDate.month}/` : ''}{edu?.endDate?.year || 'N/A'}
                       </p>
                     </div>
                     <div>
@@ -1025,6 +1141,56 @@ const ProfileEdit = () => {
               </div>
             </Card>
           )}
+
+          {/* Screening Questions */}
+          <Card className="p-6">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center">
+                <ClipboardCheck className="h-5 w-5 mr-2 text-blue-600" />
+                <h4 className="font-semibold text-gray-900">Screening Questions</h4>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowScreeningDialog(true)}
+              >
+                Edit
+              </Button>
+            </div>
+            {formData.screeningAnswers && formData.screeningAnswers.length > 0 ? (
+              <div className="space-y-3">
+                {formData.screeningAnswers.map((sa: ScreeningAnswer) => (
+                  <div key={sa.id} className="flex items-center justify-between border rounded-lg p-3 bg-gray-50">
+                    <p className="text-sm text-gray-700 flex-1 mr-4">{sa.question}</p>
+                    <span className="text-sm font-medium text-gray-900 shrink-0">
+                      {sa.answer || <span className="text-gray-400">Not answered</span>}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-gray-500 text-center py-4">
+                No screening answers configured.{' '}
+                <button
+                  type="button"
+                  className="text-blue-600 hover:underline"
+                  onClick={() => setShowScreeningDialog(true)}
+                >
+                  Add answers
+                </button>
+              </p>
+            )}
+          </Card>
+
+          <ScreeningQuestionsDialog
+            isOpen={showScreeningDialog}
+            onClose={() => setShowScreeningDialog(false)}
+            onSave={(answers) => {
+              setFormData((prev: any) => ({ ...prev, screeningAnswers: answers }));
+              setShowScreeningDialog(false);
+            }}
+            initialAnswers={formData.screeningAnswers}
+          />
 
           {/* Actions */}
           <div className="flex justify-end space-x-4">
