@@ -114,6 +114,33 @@
           "selector": "input[data-automation-id='file-upload-input-ref'], [data-automation-id='attachments-FileUpload'] input[type='file'], [data-automation-id='resumeUpload'] input[type='file'], [data-automation-id='resumeSection'] input[type='file']"
         },
         {
+          "key": "disability_status",
+          "name": "disabilityStatus",
+          "label": "Please check one of the boxes below:",
+          "type": "single_choice",
+          "profilePath": "job_preferences.eeo.disability_status",
+          "patterns": [
+            "disability",
+            "self identified disability",
+            "disability status",
+            "ofccp",
+            "please check one of the boxes below"
+          ],
+          "default": "I do not want to answer"
+        },
+        {
+          "key": "date_signed",
+          "label": "Date Signed",
+          "type": "date",
+          "profilePath": "__today",
+          "patterns": [
+            "date signed",
+            "signature date",
+            "date",
+            "today"
+          ]
+        },
+        {
           "name": "linkedInAccount",
           "label": "LinkedIn",
           "type": "text",
@@ -180,13 +207,13 @@
             {
               "name": "school",
               "label": "School",
-              "type": "text",
+              "type": "single-select",
               "key": "school"
             },
             {
               "name": "schoolName",
               "label": "School or University",
-              "type": "text",
+              "type": "single-select",
               "key": "school"
             },
             {

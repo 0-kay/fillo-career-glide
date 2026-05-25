@@ -10,6 +10,7 @@
 
     // --- User-interaction tracking (persists across re-fills) ---
     const userTouchedFieldIds = new Set();
+    const unknownFieldLogIds = new Set();
     let lastUserInputTime = 0;
 
     const workdayDropdownSelector = [
@@ -1190,6 +1191,8 @@
         const parts = [
             el.name || '',
             el.id || '',
+            el.getAttribute('data-automation-id') || '',
+            el.getAttribute('data-fkit-id') || '',
             el.getAttribute('aria-label') || '',
             el.placeholder || '',
             el.getAttribute('data-testid') || ''
@@ -1250,6 +1253,426 @@
         }
 
         return !!(element.value && element.value.trim() !== '');
+    }
+
+    function normalizeFieldText(text) {
+        return String(text || '')
+            .toLowerCase()
+            .replace(/\*/g, ' ')
+            .replace(/&/g, ' and ')
+            .replace(/[_-]+/g, ' ')
+            .replace(/[^a-z0-9+]+/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+    }
+
+    function getContextLabel(element, container = null) {
+        const scope = container || element?.closest?.('[data-automation-id^="formField-"], fieldset, .form-group, .iCIMS_Forms_Field, td') || null;
+        const richText = scope?.querySelector?.([
+            'legend div[data-automation-id="richText"] p span',
+            'legend div[data-automation-id="richText"] p',
+            'legend div[data-automation-id="richText"]',
+            '[data-automation-id="richText"]',
+            '[data-automation-id="formLabel"]',
+            'legend',
+            'label'
+        ].join(', '));
+        const label = richText?.textContent || getFieldLabel(element) || element?.getAttribute?.('aria-label') || '';
+        return String(label || '').replace(/\*/g, '').replace(/\s+/g, ' ').trim();
+    }
+
+    function getOptionText(input) {
+        if (!input) return '';
+        const label = getFieldLabel(input);
+        if (label) return label.replace(/\s+/g, ' ').trim();
+        const labelParent = input.closest?.('label');
+        if (labelParent?.textContent) {
+            return labelParent.textContent.replace(input.value || '', '').replace(/\s+/g, ' ').trim();
+        }
+        const wrapper = input.closest?.('[data-automation-id*="checkbox"], [data-automation-id*="radio"], div, span, li') || input.parentElement;
+        return (wrapper?.textContent || input.value || '').replace(/\s+/g, ' ').trim();
+    }
+
+    function getChoiceClickTarget(input) {
+        if (!input) return null;
+        if (input.id) {
+            try {
+                const label = document.querySelector(`label[for="${CSS.escape(input.id)}"]`);
+                if (label && isElementVisible(label)) return label;
+            } catch (_) {}
+        }
+        const parentLabel = input.closest?.('label');
+        if (parentLabel && isElementVisible(parentLabel)) return parentLabel;
+        const wrapper = input.closest?.('[data-automation-id*="checkbox"], [data-automation-id*="radio"], [role="checkbox"], [role="radio"], div, span');
+        return wrapper && isElementVisible(wrapper) ? wrapper : input;
+    }
+
+    function getNormalizedFieldIdentity(field) {
+        const element = field?.container || field?.element || field?.elements?.[0];
+        const rect = element?.getBoundingClientRect?.();
+        return [
+            field?.type || '',
+            field?.name || '',
+            field?.id || '',
+            field?.automationId || '',
+            field?.fkitId || '',
+            normalizeFieldText(field?.label || '').slice(0, 80),
+            rect ? Math.round(rect.top) : ''
+        ].filter(Boolean).join('|');
+    }
+
+    function isNormalizedFieldFilled(field, fieldTracker) {
+        if (!field) return true;
+        if (fieldTracker?.normalizedFilledIds?.has(field.identity)) return true;
+        const targets = [field.container, field.element, ...(field.elements || [])].filter(Boolean);
+        if (targets.some(el => fieldTracker?.filledElements?.has(el))) return true;
+        if (fieldTracker?.allowRefill) return false;
+
+        if (field.type === 'checkboxGroup' || field.type === 'radio') {
+            return (field.elements || []).some(el => !!el.checked);
+        }
+        if (field.element) return isFieldFilled(field.element, fieldTracker);
+        return false;
+    }
+
+    function detectNormalizedType(element, container = null, groupElements = null) {
+        if (groupElements?.length) {
+            const groupType = (groupElements[0].type || '').toLowerCase();
+            return groupType === 'radio' ? 'radio' : 'checkboxGroup';
+        }
+        const tag = element?.tagName?.toLowerCase();
+        const type = (element?.type || '').toLowerCase();
+        if (container?.querySelector?.('[data-automation-id="dateInputWrapper"]')) return 'date';
+        if (tag === 'select') return 'select';
+        if (tag === 'textarea') return 'textarea';
+        if (tag === 'button' && (element.getAttribute('aria-haspopup') === 'listbox' || element.getAttribute('role') === 'combobox')) return 'workdayDropdown';
+        if (element?.getAttribute?.('role') === 'combobox') return 'workdayDropdown';
+        if (type === 'date') return 'date';
+        if (type === 'radio') return 'radio';
+        if (type === 'checkbox') return 'checkboxGroup';
+        return 'text';
+    }
+
+    function buildNormalizedField(element, { container = null, groupElements = null } = {}) {
+        if (!element && !groupElements?.length) return null;
+        const target = element || groupElements[0];
+        const scope = container || target.closest?.('[data-automation-id^="formField-"], fieldset, .form-group, .iCIMS_Forms_Field, td') || target;
+        const type = detectNormalizedType(target, scope, groupElements);
+        const options = [];
+        if (groupElements?.length) {
+            for (const optionEl of groupElements) {
+                const text = getOptionText(optionEl);
+                if (text) options.push(text);
+            }
+        } else if (target?.tagName?.toLowerCase() === 'select') {
+            for (const option of Array.from(target.options || [])) {
+                const text = option.textContent?.trim();
+                if (text && !/select|choose/i.test(text)) options.push(text);
+            }
+        }
+
+        const automationId = scope?.getAttribute?.('data-automation-id') || target?.getAttribute?.('data-automation-id') || '';
+        const fkitId = scope?.getAttribute?.('data-fkit-id') || target?.getAttribute?.('data-fkit-id') || '';
+        const field = {
+            element: target,
+            container: scope,
+            elements: groupElements || null,
+            type,
+            label: getContextLabel(target, scope),
+            name: target?.name || target?.getAttribute?.('name') || '',
+            id: target?.id || target?.getAttribute?.('id') || '',
+            automationId,
+            fkitId,
+            ariaLabel: target?.getAttribute?.('aria-label') || '',
+            placeholder: target?.getAttribute?.('placeholder') || '',
+            options,
+            containerText: (scope?.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 800)
+        };
+        field.identity = getNormalizedFieldIdentity(field);
+        return field;
+    }
+
+    function scanNormalizedFields(fieldTracker) {
+        const fields = [];
+        const seen = new Set();
+        const consumed = new WeakSet();
+
+        const addField = (field) => {
+            if (!field?.element) return;
+            const isChoice = field.type === 'checkboxGroup' || field.type === 'radio';
+            if (!isChoice && !isElementVisible(field.element)) return;
+            if (isChoice && field.container && !isElementVisible(field.container) && !field.elements?.some(el => isElementVisible(getChoiceClickTarget(el)))) return;
+            if (isNormalizedFieldFilled(field, fieldTracker)) return;
+            if (seen.has(field.identity)) return;
+            seen.add(field.identity);
+            fields.push(field);
+        };
+
+        for (const container of Array.from(document.querySelectorAll('[data-automation-id^="formField-"], fieldset'))) {
+            if (!isElementVisible(container)) continue;
+            const choiceInputs = Array.from(container.querySelectorAll('input[type="radio"], input[type="checkbox"]'))
+                .filter(el => !el.disabled);
+            if (choiceInputs.length > 1) {
+                choiceInputs.forEach(el => consumed.add(el));
+                addField(buildNormalizedField(choiceInputs[0], { container, groupElements: choiceInputs }));
+                continue;
+            }
+
+            const target = container.querySelector('input:not([type="hidden"]):not([type="file"]), textarea, select, button[aria-haspopup="listbox"], [role="combobox"]');
+            if (target && !consumed.has(target) && isElementVisible(target) && !target.disabled) {
+                consumed.add(target);
+                addField(buildNormalizedField(target, { container }));
+            }
+        }
+
+        const radioNames = new Set();
+        for (const input of Array.from(document.querySelectorAll('input[type="radio"], input[type="checkbox"]'))) {
+            if (consumed.has(input) || input.disabled) continue;
+            const key = input.name ? `${input.type}:${input.name}` : `${input.type}:${input.id || input.value || getOptionText(input)}`;
+            if (radioNames.has(key)) continue;
+            const group = input.name
+                ? Array.from(document.querySelectorAll(`input[type="${CSS.escape(input.type)}"][name="${CSS.escape(input.name)}"]`)).filter(el => isElementVisible(el) && !el.disabled)
+                : [input];
+            group.forEach(el => consumed.add(el));
+            radioNames.add(key);
+            addField(buildNormalizedField(input, { container: input.closest('fieldset, [data-automation-id^="formField-"], .form-group, td'), groupElements: group }));
+        }
+
+        for (const el of Array.from(document.querySelectorAll('input:not([type="hidden"]):not([type="file"]), textarea, select, button[aria-haspopup="listbox"], [role="combobox"]'))) {
+            if (consumed.has(el) || !isElementVisible(el) || el.disabled) continue;
+            addField(buildNormalizedField(el));
+        }
+
+        return fields.sort((a, b) => getVisualOrderKey(a.element) - getVisualOrderKey(b.element));
+    }
+
+    function getFieldSearchText(field) {
+        return normalizeFieldText([
+            field.label,
+            field.name,
+            field.id,
+            field.automationId,
+            field.fkitId,
+            field.ariaLabel,
+            field.placeholder,
+            field.containerText,
+            ...(field.options || [])
+        ].filter(Boolean).join(' '));
+    }
+
+    function scoreNormalizedField(field, mapping) {
+        const fieldText = getFieldSearchText(field);
+        if (!fieldText || !mapping) return 0;
+        let score = 0;
+        const mappingName = normalizeFieldText(mapping.name || '');
+        const mappingLabel = normalizeFieldText(mapping.label || '');
+        const mappingKey = normalizeFieldText(mapping.key || '');
+
+        if (mappingName && [field.name, field.id, field.automationId.replace(/^formField-/, ''), field.fkitId].some(v => normalizeFieldText(v) === mappingName)) score += 35;
+        if (mappingLabel && normalizeFieldText(field.label) === mappingLabel) score += 30;
+        if (mappingKey && fieldText.includes(mappingKey)) score += 15;
+        if (mappingName && fieldText.includes(mappingName)) score += 12;
+        if (mappingLabel && mappingLabel.length > 3 && fieldText.includes(mappingLabel)) score += 12;
+
+        for (const pattern of mapping.patterns || []) {
+            const normalizedPattern = normalizeFieldText(pattern);
+            if (!normalizedPattern) continue;
+            if (fieldText.includes(normalizedPattern)) score += 10;
+        }
+
+        const expectedType = String(mapping.type || '').toLowerCase();
+        if (expectedType) {
+            const isChoiceMapping = ['single_choice', 'checkboxgroup', 'radio'].includes(expectedType);
+            const isChoiceField = field.type === 'checkboxGroup' || field.type === 'radio';
+            if (isChoiceMapping && isChoiceField) score += 8;
+            if (!isChoiceMapping && isChoiceField && !['checkbox', 'boolean'].includes(expectedType)) score -= 12;
+            if (expectedType === 'date' && field.type === 'date') score += 8;
+            if ((expectedType === 'text' || expectedType === 'textarea') && (field.type === 'text' || field.type === 'textarea')) score += 4;
+        }
+
+        return score;
+    }
+
+    function findBestNormalizedMapping(field, mappings) {
+        let best = null;
+        let bestScore = 0;
+        for (const mapping of mappings || []) {
+            if (!mapping?.profilePath) continue;
+            const score = scoreNormalizedField(field, mapping);
+            if (score > bestScore) {
+                best = mapping;
+                bestScore = score;
+            }
+        }
+        return bestScore >= 18 ? { mapping: best, score: bestScore } : null;
+    }
+
+    function resolveMappedValue(profileData, mapping) {
+        if (!mapping?.profilePath) return null;
+        if (mapping.profilePath === '__today') return new Date();
+        const value = getProfileValueForPath(profileData, mapping.profilePath);
+        if (value != null && value !== '') return value;
+        return Object.prototype.hasOwnProperty.call(mapping, 'default') ? mapping.default : null;
+    }
+
+    function normalizeDateValue(value) {
+        const date = value instanceof Date ? value : null;
+        if (date && !Number.isNaN(date.getTime())) {
+            return {
+                year: String(date.getFullYear()),
+                month: String(date.getMonth() + 1).padStart(2, '0'),
+                day: String(date.getDate()).padStart(2, '0'),
+                iso: `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+            };
+        }
+
+        const str = String(value || '').trim();
+        let month = null, day = null, year = null;
+        let match = str.match(/^(\d{4})[\/\-](\d{1,2})(?:[\/\-](\d{1,2}))?$/);
+        if (match) { year = match[1]; month = match[2]; day = match[3] || null; }
+        if (!year) {
+            match = str.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+            if (match) { month = match[1]; day = match[2]; year = match[3]; }
+        }
+        if (!year) {
+            match = str.match(/^(\d{1,2})[\/\-](\d{4})$/);
+            if (match) { month = match[1]; year = match[2]; }
+        }
+        if (!year) {
+            const monthNames = { jan:1, january:1, feb:2, february:2, mar:3, march:3, apr:4, april:4, may:5, jun:6, june:6, jul:7, july:7, aug:8, august:8, sep:9, september:9, oct:10, october:10, nov:11, november:11, dec:12, december:12 };
+            match = str.match(/^([a-zA-Z]+)\s+(\d{1,2},\s*)?(\d{4})$/);
+            if (match) { month = String(monthNames[match[1].toLowerCase()] || ''); day = match[2]?.replace(/\D/g, '') || null; year = match[3]; }
+        }
+        if (!year && /^\d{4}$/.test(str)) year = str;
+        return {
+            year,
+            month: month ? String(parseInt(month, 10)).padStart(2, '0') : null,
+            day: day ? String(parseInt(day, 10)).padStart(2, '0') : null,
+            iso: year && month && day ? `${year}-${String(parseInt(month, 10)).padStart(2, '0')}-${String(parseInt(day, 10)).padStart(2, '0')}` : str
+        };
+    }
+
+    async function fillNormalizedDate(field, value, fieldTracker) {
+        const parts = normalizeDateValue(value);
+        if (!parts.year && !parts.iso) return false;
+        const wrapper = field.container?.querySelector?.('[data-automation-id="dateInputWrapper"]') ||
+            field.element?.closest?.('[data-automation-id="dateInputWrapper"]');
+        if (wrapper) {
+            let filled = false;
+            const monthInput = wrapper.querySelector('[data-automation-id="dateSectionMonth-input"], input[aria-label*="month" i]');
+            const dayInput = wrapper.querySelector('[data-automation-id="dateSectionDay-input"], input[aria-label*="day" i]');
+            const yearInput = wrapper.querySelector('[data-automation-id="dateSectionYear-input"], input[aria-label*="year" i]');
+            if (monthInput && parts.month) { await fillElement(monthInput, String(parseInt(parts.month, 10))); filled = true; }
+            if (dayInput && parts.day) { await fillElement(dayInput, String(parseInt(parts.day, 10))); filled = true; }
+            if (yearInput && parts.year) { await fillElement(yearInput, parts.year); filled = true; }
+            if (filled) {
+                markFieldFilled(wrapper, 'classifier', fieldTracker);
+                return true;
+            }
+        }
+        if (field.element) {
+            return await fillElement(field.element, field.element.type === 'date' ? parts.iso : [parts.month, parts.day, parts.year].filter(Boolean).join('/'));
+        }
+        return false;
+    }
+
+    function scoreChoiceOption(optionText, wantedValue) {
+        const option = normalizeSelectText(optionText);
+        const wanted = normalizeSelectText(wantedValue);
+        if (!option || !wanted) return 0;
+        if (selectionTextMatches(optionText, wantedValue)) return 100;
+        if (option.startsWith(wanted)) return 85;
+        if (option.includes(wanted)) return 75;
+        if (wanted.includes(option) && option.length > 2) return 55;
+        const wantedWords = wanted.split(/\s+/).filter(w => w.length > 2);
+        if (!wantedWords.length) return 0;
+        const optionWords = option.split(/\s+/);
+        const hits = wantedWords.filter(w => optionWords.some(ow => ow === w || ow.includes(w) || w.includes(ow))).length;
+        return Math.floor((hits / wantedWords.length) * 60);
+    }
+
+    async function fillChoiceGroup(field, value, fieldTracker) {
+        const elements = field.elements || [];
+        if (!elements.length) return false;
+        const ranked = elements
+            .map((el, idx) => ({ el, idx, text: getOptionText(el), score: scoreChoiceOption(getOptionText(el), value) }))
+            .sort((a, b) => b.score - a.score || a.idx - b.idx);
+        const best = ranked[0];
+        if (!best || best.score < 40) {
+            console.log(`[Fillo] No choice option matched "${value}" for "${field.label || field.name || field.identity}"`);
+            return false;
+        }
+        if (best.el.checked) {
+            markFieldFilled(best.el, 'classifier', fieldTracker);
+            return true;
+        }
+        const clickTarget = getChoiceClickTarget(best.el);
+        best.el.focus?.();
+        clickLikeUser(clickTarget || best.el);
+        best.el.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
+        markFieldFilled(best.el, 'classifier', fieldTracker);
+        return true;
+    }
+
+    function logUnknownNormalizedField(field, fieldTracker) {
+        const id = field.identity || getNormalizedFieldIdentity(field);
+        if (unknownFieldLogIds.has(id)) return;
+        unknownFieldLogIds.add(id);
+        if (!fieldTracker?.unknownFieldIds) return;
+        if (fieldTracker.unknownFieldIds.has(id)) return;
+        fieldTracker.unknownFieldIds.add(id);
+        const label = field.label || field.ariaLabel || field.placeholder || field.name || field.id || '(unlabeled)';
+        console.log(`[Fillo] Unknown field: "${label}"`, {
+            type: field.type,
+            name: field.name,
+            id: field.id,
+            automationId: field.automationId,
+            fkitId: field.fkitId,
+            options: field.options || []
+        });
+    }
+
+    async function fillByClassifier(profileData, mappings, fieldTracker) {
+        if (!Array.isArray(mappings) || mappings.length === 0) return 0;
+        const fields = scanNormalizedFields(fieldTracker);
+        let filled = 0;
+
+        for (const field of fields) {
+            const best = findBestNormalizedMapping(field, mappings);
+            if (!best) {
+                logUnknownNormalizedField(field, fieldTracker);
+                continue;
+            }
+
+            const value = resolveMappedValue(profileData, best.mapping);
+            if (value == null || value === '') continue;
+
+            try {
+                const mappingType = String(best.mapping.type || '').toLowerCase();
+                let success = false;
+                if (field.type === 'checkboxGroup' || field.type === 'radio' || ['single_choice', 'checkboxgroup', 'radio'].includes(mappingType)) {
+                    success = await fillChoiceGroup(field, value, fieldTracker);
+                } else if (field.type === 'date' || mappingType === 'date') {
+                    success = await fillNormalizedDate(field, value, fieldTracker);
+                } else if (field.element) {
+                    const displayValue = Array.isArray(value) ? value.join(', ') : (value instanceof Date ? normalizeDateValue(value).iso : String(value));
+                    success = await fillElement(field.element, displayValue);
+                    if (success) markFieldFilled(field.element, 'classifier', fieldTracker);
+                }
+
+                if (success) {
+                    fieldTracker.normalizedFilledIds?.add(field.identity);
+                    if (field.container) fieldTracker.filledElements.add(field.container);
+                    relayLog('info', `[Classifier] "${field.label || field.name || field.identity}" → ${best.mapping.profilePath}`);
+                    filled++;
+                    await new Promise(r => setTimeout(r, 80));
+                }
+            } catch (error) {
+                console.warn('[Fillo] Classifier fill failed:', field, error);
+            }
+        }
+
+        return filled;
     }
 
     function fileInputHasExistingFile(fileInput) {
@@ -1539,6 +1962,7 @@
 
     function getProfileValueForPath(profileData, path) {
         const keys = Array.isArray(path) ? path : String(path || '').split('.');
+        if (keys.length === 1 && keys[0] === '__today') return new Date();
         const value = getValue(profileData, keys);
         if (value != null && value !== '') return value;
 
@@ -1817,6 +2241,219 @@
         );
     }
 
+    async function fillWorkdaySearchFirstOption(fieldName, displayValue, selectors, fieldTracker) {
+        const searchText = String(displayValue || '').trim();
+        if (!searchText) return false;
+
+        let searchInput = null;
+        const findSearchInput = (root) => {
+            if (!root?.querySelectorAll) return null;
+            const inputSelectors = [
+                '[data-automation-id="searchBox"]',
+                'input[data-uxi-widget-type="selectinput"]',
+                'input[data-uxi-multiselect-id]',
+                'input[placeholder="Search"]',
+                'input:not([type="hidden"])'
+            ];
+            for (const selector of inputSelectors) {
+                const candidate = Array.from(root.querySelectorAll(selector))
+                    .find(input => input?.tagName?.toLowerCase() === 'input' && !input.disabled && isElementVisible(input));
+                if (candidate) return candidate;
+            }
+            return null;
+        };
+
+        for (const sel of selectors) {
+            try {
+                for (const el of document.querySelectorAll(sel)) {
+                    if (!isElementVisible(el)) continue;
+                    if (el.tagName?.toLowerCase() === 'input') {
+                        searchInput = el;
+                        break;
+                    }
+                    searchInput = findSearchInput(el);
+                    if (searchInput) break;
+                }
+            } catch (_) {}
+            if (searchInput) break;
+        }
+
+        if (!searchInput) {
+            const formFieldEl = document.querySelector(`[data-automation-id="formField-${fieldName}"]`);
+            searchInput = findSearchInput(formFieldEl);
+        }
+        if (!searchInput || !isElementVisible(searchInput)) return false;
+
+        const widget = searchInput.closest('[data-automation-id="multiSelectContainer"]') ||
+            searchInput.closest('[data-automation-id^="formField-"]') ||
+            searchInput.parentElement;
+        const inputContainer = widget?.querySelector('[data-automation-id="multiselectInputContainer"]');
+        const searchButton = widget?.querySelector('[data-automation-id="promptSearchButton"], [data-automation-id="promptIcon"]');
+        const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(searchInput), 'value')?.set;
+
+        clickLikeUser(inputContainer || widget || searchInput);
+        await new Promise(r => setTimeout(r, 200));
+        if (searchButton && !String(searchInput.value || '').trim()) {
+            clickLikeUser(searchButton);
+            await new Promise(r => setTimeout(r, 250));
+        }
+
+        searchInput.focus();
+        searchInput.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
+        searchInput.select?.();
+        document.execCommand('delete');
+        if (setter) setter.call(searchInput, '');
+        else searchInput.value = '';
+        searchInput.dispatchEvent(new InputEvent('input', { bubbles: true, cancelable: true, inputType: 'deleteContentBackward' }));
+        await new Promise(r => setTimeout(r, 50));
+
+        const inserted = document.execCommand('insertText', false, searchText);
+        if (!inserted) {
+            for (let i = 0; i < searchText.length; i++) {
+                const ch = searchText[i];
+                const nextValue = searchText.substring(0, i + 1);
+                searchInput.dispatchEvent(new KeyboardEvent('keydown', { key: ch, bubbles: true, cancelable: true }));
+                if (setter) setter.call(searchInput, nextValue);
+                else searchInput.value = nextValue;
+                searchInput.dispatchEvent(new InputEvent('input', { bubbles: true, cancelable: true, inputType: 'insertText', data: ch }));
+                searchInput.dispatchEvent(new KeyboardEvent('keyup', { key: ch, bubbles: true, cancelable: true }));
+                await new Promise(r => setTimeout(r, 20));
+            }
+        }
+        if (searchInput.value !== searchText) {
+            if (setter) setter.call(searchInput, searchText);
+            else searchInput.value = searchText;
+        }
+        searchInput.dispatchEvent(new InputEvent('input', { bubbles: true, cancelable: true, inputType: 'insertText', data: searchText }));
+        searchInput.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
+
+        dispatchKey(searchInput, 'Enter', 'Enter', 13);
+        console.log("Enter key clicked for the drop down")
+
+        const getOptions = () => {
+            const controls = searchInput.getAttribute('aria-controls');
+            const widgetId = searchInput.getAttribute('data-uxi-multiselect-id');
+
+            const controlledList = controls ? document.getElementById(controls) : null;
+            const associatedPrompt = widgetId
+                ? document.querySelector(`[data-associated-widget="${widgetId}"]`)
+                : null;
+            const fallbackRoots = !controlledList && !associatedPrompt
+                ? [
+                    ...getOpenWorkdayDropdowns(),
+                    ...document.querySelectorAll('[data-automation-id="responsiveMonikerPrompt"], [data-automation-id="multiselectListBox"], [data-automation-id="activeListContainer"], [data-automation-id="listBox"], [role="listbox"], ul[role="listbox"]')
+                ]
+                : [];
+            const roots = Array.from(new Set([
+                controlledList,
+                associatedPrompt,
+                ...fallbackRoots
+            ].filter(Boolean))).filter(isElementVisible);
+            const emptyOptionPattern = /no result|no match|no items?|loading|searching|type to search|select one/i;
+            const optionNodes = roots.flatMap(root => Array.from(root.querySelectorAll([
+                '[data-automation-id="menuItem"][role="option"]',
+                '[role="option"]',
+                '[data-automation-id="multiselectOption"]',
+                '[data-automation-id="promptOption"]',
+                'li[data-automation-id="multiselectItem"]',
+                'li'
+            ].join(', '))));
+            const optionRows = optionNodes.map(opt =>
+                opt.closest?.('[data-automation-id="menuItem"][role="option"], [role="option"], li[data-automation-id="multiselectItem"], li') || opt
+            );
+
+            return Array.from(new Set(optionRows)).filter(opt => {
+                const text = opt.textContent?.trim() || '';
+                return isElementVisible(opt) &&
+                    text &&
+                    !opt.closest('[data-automation-id="selectedItemList"]') &&
+                    !emptyOptionPattern.test(text);
+            });
+        };
+
+        let options = getOptions();
+        for (let poll = 0; poll < 20 && options.length === 0; poll++) {
+            if (poll === 2) dispatchKey(searchInput, 'Enter', 'Enter', 13);
+            await new Promise(r => setTimeout(r, 250));
+            options = getOptions();
+        }
+
+        // Rank options by how well they match the requested value rather than blindly
+        // taking options[0] — the first result is often a sub-entry (e.g. "Cockrell School
+        // of Engineering, The University of Texas at Austin" for "University of Texas at
+        // Austin") or a leftover placeholder ("Select One").
+        const wantedNorm = normalizeSelectText(searchText);
+        const wantedTokens = wantedNorm.split(' ').filter(Boolean);
+        const scoreSearchOption = (rawText) => {
+            const cand = normalizeSelectText(rawText || '');
+            if (!cand || /^(select one|select\.\.\.|choose one|none)$/.test(cand)) return -1;
+            if (cand === wantedNorm) return 100;
+            if (selectionTextMatches(rawText, searchText)) {
+                // Among includes-style hits, prefer the option closest in length to the
+                // requested value so "...University of Texas at Austin" beats a longer parent.
+                const lengthPenalty = Math.min(40, Math.abs(cand.length - wantedNorm.length));
+                return (cand.startsWith(wantedNorm) ? 90 : 75) - lengthPenalty * 0.2;
+            }
+            const candTokens = cand.split(' ').filter(Boolean);
+            if (!wantedTokens.length || !candTokens.length) return 0;
+            let hits = 0;
+            for (const w of wantedTokens) {
+                if (candTokens.some(c => c === w || c.includes(w) || w.includes(c))) hits++;
+            }
+            return Math.floor((hits / wantedTokens.length) * 60);
+        };
+        const rankedOptions = options
+            .map((opt, idx) => ({ opt, idx, text: opt.textContent?.trim() || '', score: scoreSearchOption(opt.textContent) }))
+            .sort((a, b) => b.score - a.score || a.idx - b.idx);
+        // Best match by value; fall back to the first non-placeholder option only when
+        // nothing matches the requested value at all.
+        const bestRanked = rankedOptions.find(r => r.score > 0) || rankedOptions.find(r => r.score >= 0);
+        const firstOption = bestRanked?.opt;
+        if (!firstOption) {
+            console.log(`[Platform] No Workday search option appeared for ${fieldName}: ${searchText}`);
+            return false;
+        }
+
+        const selectWorkdayPromptOption = async (option) => {
+            const row = option.closest?.('[data-automation-id="menuItem"][role="option"], [role="option"]') || option;
+            const listbox = row.closest?.('[role="listbox"], [data-automation-id="activeListContainer"]');
+            const targets = [
+                row.querySelector?.('[data-automation-id="promptLeafNode"]'),
+                row.querySelector?.('[data-automation-id="promptOption"]'),
+                row.querySelector?.('[data-automation-id="radioBtn"]'),
+                row
+            ].filter(Boolean);
+
+            row.scrollIntoView({ block: 'nearest' });
+            searchInput.focus();
+            dispatchKey(searchInput, 'ArrowDown', 'ArrowDown', 40);
+            if (listbox) {
+                listbox.focus?.();
+                dispatchKey(listbox, 'Enter', 'Enter', 13);
+                await new Promise(r => setTimeout(r, 150));
+            }
+
+            for (const target of targets) {
+                target.scrollIntoView?.({ block: 'nearest' });
+                clickLikeUser(target);
+                target.dispatchEvent?.(new Event('change', { bubbles: true, cancelable: true }));
+                await new Promise(r => setTimeout(r, 200));
+                if (getOpenWorkdayDropdowns().length === 0) break;
+            }
+        };
+
+        firstOption.scrollIntoView({ block: 'nearest' });
+        await selectWorkdayPromptOption(firstOption);
+        await new Promise(r => setTimeout(r, 400));
+
+        searchInput.dispatchEvent(new FocusEvent('blur', { bubbles: true }));
+        searchInput.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
+        await dismissWorkdayDropdown(searchInput, document.querySelector('[data-automation-id="applyFlowFooter"]') || document.querySelector('main') || document.body);
+        markFieldFilled(searchInput, 'platform', fieldTracker);
+        console.log(`[Platform] Workday search selected option for ${fieldName}: "${bestRanked?.text}" (score ${bestRanked?.score?.toFixed?.(1)}) for requested "${searchText}"`);
+        return true;
+    }
+
     /**
      * Fill one array entry's fields into the currently-visible empty inputs.
      * Maps profile object keys to form fields by checking name/data-automation-id/label.
@@ -1897,6 +2534,15 @@
                     `[name$="_${field.name}"]`,        // Ends with exactly "_fieldName"
                     field.name                         // For querySelectorAll if it's a tag
                 ];
+
+                if (arrayPath === 'education_history' && ['school', 'schoolName'].includes(field.name)) {
+                    const selected = await fillWorkdaySearchFirstOption(field.name, displayValue, selectors, fieldTracker);
+                    if (selected) {
+                        filled++;
+                        await new Promise(r => setTimeout(r, 120));
+                        continue;
+                    }
+                }
 
                 // Workday date fields: find the dateInputWrapper and fill Month/Year spinbuttons
                 const isDateField = ['startDate', 'endDate', 'educationStartDate', 'educationEndDate', 'firstYearAttended', 'lastYearAttended'].includes(field.name);
@@ -2705,8 +3351,10 @@
                             liveInput = findMultiSelectInput(formFieldScope) || findMultiSelectInput(hiddenWrap);
                         }
                         if (!liveInput || !isElementVisible(liveInput)) {
-                            console.log(`[Platform] Multi-select input gone for "${skill}", stopping`);
-                            break;
+                            // The widget can briefly detach while a pill renders — skip this
+                            // skill and retry on the next rather than abandoning all remaining.
+                            console.log(`[Platform] Multi-select input not found for "${skill}", skipping to next`);
+                            continue;
                         }
                     }
 
@@ -2715,14 +3363,32 @@
                     // Focus and activate the input
                     await activateSkillPrompt(liveInput);
 
-                    // Clear current value: Ctrl+A then Delete, then reset via setter fallback
-                    liveInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', code: 'KeyA', keyCode: 65, ctrlKey: true, bubbles: true, cancelable: true }));
-                    liveInput.dispatchEvent(new KeyboardEvent('keyup',   { key: 'a', code: 'KeyA', keyCode: 65, ctrlKey: true, bubbles: true, cancelable: true }));
-                    await new Promise(r => setTimeout(r, 30));
-                    document.execCommand('delete');
-                    if (setter) setter.call(liveInput, '');
-                    else liveInput.value = '';
-                    liveInput.dispatchEvent(new InputEvent('input', { bubbles: true, cancelable: true, inputType: 'deleteContentBackward' }));
+                    // Clear current value: Ctrl+A then Delete, then reset via setter fallback.
+                    const clearLiveInput = () => {
+                        liveInput.focus();
+                        liveInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', code: 'KeyA', keyCode: 65, ctrlKey: true, bubbles: true, cancelable: true }));
+                        liveInput.dispatchEvent(new KeyboardEvent('keyup',   { key: 'a', code: 'KeyA', keyCode: 65, ctrlKey: true, bubbles: true, cancelable: true }));
+                        liveInput.select?.();
+                        document.execCommand('delete');
+                        if (setter) setter.call(liveInput, '');
+                        else liveInput.value = '';
+                        liveInput.dispatchEvent(new InputEvent('input', { bubbles: true, cancelable: true, inputType: 'deleteContentBackward' }));
+                    };
+                    clearLiveInput();
+                    await new Promise(r => setTimeout(r, 40));
+                    // Verify it actually emptied. UXI sometimes ignores execCommand/setter, leaving
+                    // the previous skill's text in place — which then keeps surfacing that skill's
+                    // options for every subsequent search (the root of "every skill became Java").
+                    // Backspace it out character-by-character as a guaranteed fallback.
+                    for (let guard = 0; guard < 40 && String(liveInput.value || '').length; guard++) {
+                        liveInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Backspace', code: 'Backspace', keyCode: 8, bubbles: true, cancelable: true }));
+                        const trimmed = String(liveInput.value || '').slice(0, -1);
+                        if (setter) setter.call(liveInput, trimmed);
+                        else liveInput.value = trimmed;
+                        liveInput.dispatchEvent(new InputEvent('input', { bubbles: true, cancelable: true, inputType: 'deleteContentBackward' }));
+                        liveInput.dispatchEvent(new KeyboardEvent('keyup', { key: 'Backspace', code: 'Backspace', keyCode: 8, bubbles: true, cancelable: true }));
+                        await new Promise(r => setTimeout(r, 15));
+                    }
                     await new Promise(r => setTimeout(r, 50));
 
                     // Type the skill using execCommand('insertText') — this fires isTrusted browser
@@ -2748,6 +3414,8 @@
                     liveInput.dispatchEvent(new InputEvent('input', { bubbles: true, cancelable: true, inputType: 'insertText', data: skill }));
                     liveInput.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
                     dispatchKey(liveInput, 'ArrowDown', 'ArrowDown', 40);
+                    await new Promise(r => setTimeout(r, 150));
+                    dispatchKey(liveInput, 'Enter', 'Enter', 13);
 
                     // Wait for Workday debounce (~300ms)
                     await new Promise(r => setTimeout(r, 400));
@@ -2758,42 +3426,49 @@
                     // state separately from selectable options.
                     const getSkillListState = () => {
                         const cid = liveInput.getAttribute('aria-controls');
+                        const widgetId = liveInput.getAttribute('data-uxi-multiselect-id');
                         const lr = cid ? document.getElementById(cid) : null;
+                        const associatedPrompt = widgetId
+                            ? document.querySelector(`[data-associated-widget="${widgetId}"]`)
+                            : null;
+                        const fallbackRoots = !lr && !associatedPrompt
+                            ? [
+                                ...getOpenWorkdayDropdowns(),
+                                ...document.querySelectorAll('[data-automation-id="responsiveMonikerPrompt"], [data-automation-id="multiselectListBox"], [data-automation-id="activeListContainer"], [role="listbox"], ul[role="listbox"]')
+                            ]
+                            : [];
                         const roots = Array.from(new Set([
                             lr,
-                            ...getOpenWorkdayDropdowns(),
-                            ...document.querySelectorAll('[data-automation-id="multiselectListBox"], [role="listbox"], ul[role="listbox"]')
+                            associatedPrompt,
+                            ...fallbackRoots
                         ].filter(Boolean))).filter(isElementVisible);
 
                         const scopedOptionSelector = [
+                            '[data-automation-id="menuItem"][role="option"]',
                             '[role="option"]',
                             '[data-automation-id="multiselectOption"]',
                             '[data-automation-id="promptOption"]',
                             'li[data-automation-id="multiselectItem"]',
                             'li'
                         ].join(', ');
-                        const directOptionSelector = [
-                            '[role="option"]',
-                            '[data-automation-id="multiselectOption"]',
-                            '[data-automation-id="promptOption"]',
-                            'li[data-automation-id="multiselectItem"]'
-                        ].join(', ');
-                        const nodes = [
-                            ...roots.flatMap(root => Array.from(root.querySelectorAll(scopedOptionSelector))),
-                            ...document.querySelectorAll(directOptionSelector)
-                        ];
-                        const options = Array.from(new Set(nodes)).filter(o =>
-                            isElementVisible(o) && o.textContent.trim() &&
-                            !o.closest('[data-automation-id="selectedItemList"]') &&
-                            o.getAttribute('data-automation-id') !== 'selectedItem' &&
-                            !o.textContent.trim().toLowerCase().includes('no result') &&
-                            !o.textContent.trim().toLowerCase().includes('no matches') &&
-                            !o.textContent.trim().toLowerCase().includes('loading') &&
-                            !o.textContent.trim().toLowerCase().includes('searching') &&
-                            !o.textContent.trim().toLowerCase().includes('type to search')
+                        const emptyOptionPattern = /no result|no match|no items?|loading|searching|type to search/i;
+                        const nodes = roots.flatMap(root => Array.from(root.querySelectorAll(scopedOptionSelector)));
+                        const optionRows = nodes.map(opt =>
+                            opt.closest?.('[data-automation-id="menuItem"][role="option"], [role="option"], li[data-automation-id="multiselectItem"], li') || opt
                         );
+                        const options = Array.from(new Set(optionRows)).filter(o => {
+                            const text = o.textContent?.trim() || '';
+                            const optionWidgetId = o.querySelector?.('[data-uxi-multiselect-id]')?.getAttribute('data-uxi-multiselect-id')
+                                || o.getAttribute?.('data-uxi-multiselect-id');
+                            return isElementVisible(o) &&
+                                text &&
+                                (!widgetId || !optionWidgetId || optionWidgetId === widgetId) &&
+                                !o.closest('[data-automation-id="selectedItemList"]') &&
+                                o.getAttribute('data-automation-id') !== 'selectedItem' &&
+                                !emptyOptionPattern.test(text);
+                        });
                         const listText = roots.map(root => root.textContent || '').join(' ').toLowerCase();
-                        const noResults = /no results?|no matches|no items found/.test(listText);
+                        const noResults = /no results?|no matches|no items? found|no items?/.test(listText);
                         const hasBusyNode = roots.some(root =>
                             root.getAttribute('aria-busy') === 'true' ||
                             root.querySelector('[aria-busy="true"], [role="progressbar"], [data-automation-id*="loading" i], [data-automation-id*="spinner" i]')
@@ -2810,7 +3485,7 @@
                             if (state.options.length > 0 || state.noResults) return state;
 
                             // If typing did not open the dropdown, press Enter to trigger the search.
-                            if (poll === 2 && !state.loading) {
+                            if ((poll === 0 || poll === 2) && !state.loading) {
                                 dispatchKey(liveInput, 'ArrowDown', 'ArrowDown', 40);
                                 dispatchKey(liveInput, 'Enter', 'Enter', 13);
                             }
@@ -2832,39 +3507,86 @@
                         return state;
                     };
 
-                    const getSelectedSkillCount = () => {
+                    const skillPillSelector = [
+                        '[data-automation-id="selectedItem"]',
+                        '[data-automation-id="selectedItemList"] [role="listitem"]',
+                        '[data-automation-id="selectedItemList"] li'
+                    ].join(', ');
+                    const getSelectedSkillTexts = () => {
                         const currentScope = document.querySelector(`[data-automation-id="formField-${field.name}"]`) || msContainer || document;
-                        return currentScope.querySelectorAll([
-                            '[data-automation-id="selectedItem"]',
-                            '[data-automation-id="selectedItemList"] [role="listitem"]',
-                            '[data-automation-id="selectedItemList"] li'
-                        ].join(', ')).length;
-                    };
-                    const selectedSkillTextIncludes = (wantedText) => {
-                        const wanted = normalizeSkillText(wantedText);
-                        if (!wanted) return false;
-                        const currentScope = document.querySelector(`[data-automation-id="formField-${field.name}"]`) || msContainer || document;
-                        const selectedText = Array.from(currentScope.querySelectorAll([
-                            '[data-automation-id="selectedItem"]',
-                            '[data-automation-id="selectedItemList"]',
-                            '[data-automation-id="promptAriaInstruction"]'
-                        ].join(', '))).map(node => node.textContent || '').join(' ');
-                        return normalizeSkillText(selectedText).includes(wanted);
+                        return Array.from(currentScope.querySelectorAll(skillPillSelector))
+                            .filter(isElementVisible)
+                            .map(node => normalizeSkillText(node.textContent || ''))
+                            .filter(Boolean);
                     };
 
-                    // Poll for dropdown results
-                    const pillsBefore = getSelectedSkillCount();
+                    // Snapshot the pills already present BEFORE attempting this skill. A
+                    // selection only counts when a pill that wasn't in this snapshot appears —
+                    // otherwise a pre-existing pill (e.g. an earlier "Java") falsely confirms
+                    // every later skill, which is exactly what made the whole list resolve to
+                    // "Java". Use a multiset difference so duplicate texts can't mask a miss.
+                    const pillTextsBefore = getSelectedSkillTexts();
+                    const pillsBefore = pillTextsBefore.length;
+                    const newlySelectedSkillTexts = () => {
+                        const remaining = pillTextsBefore.slice();
+                        const added = [];
+                        for (const t of getSelectedSkillTexts()) {
+                            const i = remaining.indexOf(t);
+                            if (i >= 0) remaining.splice(i, 1);
+                            else added.push(t);
+                        }
+                        return added;
+                    };
+
                     let picked = false;
                     let attemptedSelection = false;
 
-                    const checkPill = (wantedText = skill) =>
-                        getSelectedSkillCount() > pillsBefore ||
-                        selectedSkillTextIncludes(wantedText) ||
-                        selectedSkillTextIncludes(skill);
-                    const waitForPill = async (polls, interval, wantedText = skill) => {
+                    // Confirmed only when a genuinely new pill appears (count increased AND a
+                    // text not already present shows up).
+                    const checkPill = () => newlySelectedSkillTexts().length > 0;
+                    const waitForPill = async (polls, interval) => {
                         for (let c = 0; c < polls; c++) {
                             await new Promise(r => setTimeout(r, interval));
-                            if (checkPill(wantedText)) return true;
+                            if (checkPill()) return true;
+                        }
+                        return false;
+                    };
+                    const clickWorkdaySkillOption = async (option) => {
+                        const row = option.closest?.('[data-automation-id="menuItem"][role="option"], [role="option"]') || option;
+                        const listbox = row.closest?.('[role="listbox"], [data-automation-id="activeListContainer"]');
+                        const isChecked = () => {
+                            const checkbox = row.querySelector?.('[data-automation-id="checkboxPanel"], input[type="checkbox"]');
+                            const checkboxWrap = row.querySelector?.('[data-automation-id="checkbox"]');
+                            const leaf = row.querySelector?.('[data-automation-id="promptLeafNode"]');
+                            return checkbox?.checked === true ||
+                                checkbox?.getAttribute?.('aria-checked') === 'true' ||
+                                checkboxWrap?.getAttribute?.('data-automationcheckboxchecked') === 'true' ||
+                                leaf?.getAttribute?.('data-automation-checked') === 'Checked' ||
+                                leaf?.getAttribute?.('data-uxi-multiselectlistitem-isselected') === 'true';
+                        };
+                        const targets = [
+                            row.querySelector?.('[data-automation-id="promptLeafNode"]'),
+                            row.querySelector?.('[data-automation-id="promptOption"]'),
+                            row.querySelector?.('[data-automation-id="checkboxPanel"]'),
+                            row.querySelector?.('[data-automation-id="checkbox"]'),
+                            row
+                        ].filter(Boolean);
+
+                        row.scrollIntoView({ block: 'nearest' });
+                        liveInput.focus();
+                        dispatchKey(liveInput, 'ArrowDown', 'ArrowDown', 40);
+                        if (listbox) {
+                            listbox.focus?.();
+                            dispatchKey(listbox, 'Enter', 'Enter', 13);
+                            if (await waitForPill(4, 100)) return true;
+                        }
+
+                        for (const target of targets) {
+                            target.scrollIntoView?.({ block: 'nearest' });
+                            clickLikeUser(target);
+                            target.dispatchEvent?.(new Event('change', { bubbles: true, cancelable: true }));
+                            if (await waitForPill(4, 100)) return true;
+                            if (isChecked()) return true;
                         }
                         return false;
                     };
@@ -2873,7 +3595,7 @@
                         const skillState = await waitForSkillOptions();
                         const dropdownOpts = skillState.options;
 
-                        if (checkPill(skill)) {
+                        if (checkPill()) {
                             console.log(`[Platform] Multi-select added "${skill}" via keyboard entry`);
                             addedCount++;
                             picked = true;
@@ -2892,15 +3614,26 @@
 
                             const best = ranked[0];
                             let confirmed = false;
+                            if (!best || best.score < 40) {
+                                console.log(`[Platform] No strong skill option match for "${skill}"`);
+                            }
 
-                            // Try 1: press Enter on the search INPUT — this selects the
+                            // Try 1: use the same Workday prompt selection sequence as
+                            // school/university search, with checkbox targets included.
+                            if (best?.opt && best.score >= 40) {
+                                confirmed = await clickWorkdaySkillOption(best.opt);
+                            }
+
+                            // Try 2: press Enter on the search INPUT — this selects the
                             // already-highlighted first result in UXI multiselects.
-                            liveInput.focus();
-                            dispatchKey(liveInput, 'Enter', 'Enter', 13);
-                            confirmed = await waitForPill(10, 100, best?.text || skill);
+                            if (!confirmed && best?.score >= 40) {
+                                liveInput.focus();
+                                dispatchKey(liveInput, 'Enter', 'Enter', 13);
+                                confirmed = await waitForPill(10, 100);
+                            }
 
-                            // Try 2: ArrowDown to highlight best option, then Enter on the input.
-                            if (!confirmed) {
+                            // Try 3: ArrowDown to highlight best option, then Enter on the input.
+                            if (!confirmed && best?.score >= 40) {
                                 const downCount = Math.max(1, (best?.idx ?? 0) + 1);
                                 liveInput.focus();
                                 for (let step = 0; step < downCount; step++) {
@@ -2912,14 +3645,7 @@
                                     await new Promise(r => setTimeout(r, 300));
                                     dispatchKey(liveInput, 'Enter', 'Enter', 13);
                                 }
-                                confirmed = await waitForPill(8, 100, best?.text || skill);
-                            }
-	
-                            // Try 3: click the option element directly as a last resort.
-                            if (!confirmed && best?.opt) {
-                                best.opt.scrollIntoView({ block: 'nearest' });
-                                clickLikeUser(best.opt);
-                                confirmed = await waitForPill(12, 100, best?.text || skill);
+                                confirmed = await waitForPill(8, 100);
                             }
 
                             if (confirmed) {
@@ -2939,7 +3665,7 @@
                             attemptedSelection = true;
                             liveInput.focus();
                             dispatchKey(liveInput, 'Enter', 'Enter', 13);
-                            const confirmed = await waitForPill(8, 100, skill);
+                            const confirmed = await waitForPill(8, 100);
                             if (confirmed) {
                                 console.log(`[Platform] Multi-select added "${skill}" via free-text Enter`);
                                 addedCount++;
@@ -3023,11 +3749,25 @@
                 // UXI input is controlled, so direct value assignment often leaves the
                 // dropdown unfiltered and open.
                 const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(ssInput), 'value')?.set;
+                // Moniker searchBox variants (e.g. "School or University") keep the input
+                // "Minimized" until the prompt is opened — clicking the input alone surfaces no
+                // options, so click the prompt button / input container to expand it first.
+                const ssWidget = ssInput.closest('[data-automation-id="multiSelectContainer"]');
+                const ssInputContainer = ssWidget?.querySelector('[data-automation-id="multiselectInputContainer"]');
+                const ssSearchButton = ssWidget?.querySelector('[data-automation-id="promptSearchButton"], [data-automation-id="promptIcon"]');
+                const ssIsMoniker = !!(ssWidget?.querySelector('[data-automation-id="monikerSearchBox"]') ||
+                    ssWidget?.querySelector('[data-automation-hiddensearch]'));
                 const typeIntoSearch = async () => {
+                    clickLikeUser(ssInputContainer || ssWidget || ssInput);
+                    await new Promise(r => setTimeout(r, ssIsMoniker ? 200 : 80));
+                    if (ssIsMoniker && ssSearchButton) {
+                        clickLikeUser(ssSearchButton);
+                        await new Promise(r => setTimeout(r, 350));
+                    }
                     ssInput.click();
                     ssInput.focus();
                     ssInput.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
-                    await new Promise(r => setTimeout(r, 100));
+                    await new Promise(r => setTimeout(r, ssIsMoniker ? 200 : 100));
 
                     ssInput.select?.();
                     document.execCommand('delete');
@@ -3049,7 +3789,7 @@
                             await new Promise(r => setTimeout(r, 20));
                         }
                     }
-                    await new Promise(r => setTimeout(r, 500));
+                    await new Promise(r => setTimeout(r, ssIsMoniker ? 700 : 500));
                 };
 
                 const getSingleSelectOptions = () => {
@@ -3087,9 +3827,11 @@
                 await typeIntoSearch();
 
                 let options = getSingleSelectOptions();
-                if (options.length === 0) {
-                    dispatchKey(ssInput, 'Enter', 'Enter', 13);
-                    await new Promise(r => setTimeout(r, 400));
+                // Moniker/taxonomy prompts (school, field of study) debounce and fetch async,
+                // so poll for a few seconds rather than checking only once.
+                for (let i = 0; i < 12 && options.length === 0; i++) {
+                    if (i === 3) dispatchKey(ssInput, 'Enter', 'Enter', 13);
+                    await new Promise(r => setTimeout(r, 250));
                     options = getSingleSelectOptions();
                 }
 
@@ -3657,6 +4399,10 @@
             console.log('[Fillo] Already processing, skipping...');
             return {filled: 0, message: 'Already processing'};
         }
+        if (window.__filloActiveFillRun) {
+            console.log('[Fillo] Another fill run is already active in this tab, skipping...');
+            return {filled: 0, message: 'Another fill run is already active'};
+        }
 
         // On explicit "Fill Form" clicks, reset user-touched tracking
         if (!fromObserver) {
@@ -3664,6 +4410,7 @@
         }
 
         ns.state.isProcessing = true;
+        window.__filloActiveFillRun = true;
         ns.state.resumeDataUri = resumeDataUri;
         ns.state.resumeFileName = resumeFileName;
 
@@ -3698,10 +4445,12 @@
             const fieldTracker = {
                 filledElements: new Set(),
                 platformClaimedElements: new Set(),
+                normalizedFilledIds: new Set(),
+                unknownFieldIds: new Set(),
                 allowRefill: false,
                 // iCIMS revert guard: tracks element → intended value so we can re-fill reversions
                 filledValues: isICIMS ? new Map() : null,
-                strategyStats: { platform: 0, generic: 0, detected: 0, generic_screening: 0 }
+                strategyStats: { platform: 0, classifier: 0, generic: 0, detected: 0, generic_screening: 0 }
             };
 
             // Step 0: If detected fields with profile mappings are available, use them first
@@ -4042,7 +4791,27 @@
                 }
             }
 
-            // Step 2.5: Fill Workday questionnaire/screening questions
+            // Step 2.5: Normalized classifier pass — catches typed/pattern mappings and
+            // logs unknown fields without blindly filling unmatched controls.
+            if (platformFields.length > 0) {
+                try {
+                    const classifierFields = platformFields.filter(f =>
+                        f?.profilePath &&
+                        !f.profilePath.startsWith('work_experience') &&
+                        !f.profilePath.startsWith('education_history') &&
+                        !f.profilePath.startsWith('websites') &&
+                        f.type !== 'file'
+                    );
+                    const classifierFilled = await fillByClassifier(profileData, classifierFields, fieldTracker);
+                    if (classifierFilled > 0) {
+                        relayLog('info', `Filled ${classifierFilled} fields via classifier`);
+                    }
+                } catch (e) {
+                    console.warn('[Fillo] Classifier pass failed:', e);
+                }
+            }
+
+            // Step 2.6: Fill Workday questionnaire/screening questions
             if (platform === 'workday') {
                 try {
                     const qFilled = await fillWorkdayQuestionnaire(profileData, fieldTracker);
@@ -4054,7 +4823,7 @@
                 }
             }
 
-            // Step 2.6: Fill iCIMS company-specific rcf* fields by label text
+            // Step 2.7: Fill iCIMS company-specific rcf* fields by label text
             if (platform === 'icims') {
                 try {
                     const labelFilled = await fillICIMSByLabel(profileData, fieldTracker);
@@ -4193,6 +4962,7 @@
             // Step 8: Calculate and report results
             const detectedFilled = fieldTracker.strategyStats.detected || 0;
             const totalFilled = fieldTracker.strategyStats.platform +
+                               fieldTracker.strategyStats.classifier +
                                fieldTracker.strategyStats.generic +
                                fieldTracker.strategyStats.generic_screening +
                                detectedFilled;
@@ -4225,6 +4995,7 @@
             const summary = {
                 filled: totalFilled,
                 platformFilled: fieldTracker.strategyStats.platform,
+                classifierFilled: fieldTracker.strategyStats.classifier,
                 genericFilled: fieldTracker.strategyStats.generic,
                 screeningFilled: fieldTracker.strategyStats.generic_screening,
                 aiMatches: 0,
@@ -4247,7 +5018,7 @@
                 success: true,
                 filled: totalFilled,
                 ...summary,
-                message: `Manual form filling completed: ${detectedFilled} detected + ${summary.platformFilled} platform + ${summary.genericFilled} generic + ${summary.screeningFilled} screening`
+                message: `Manual form filling completed: ${detectedFilled} detected + ${summary.platformFilled} platform + ${summary.classifierFilled} classifier + ${summary.genericFilled} generic + ${summary.screeningFilled} screening`
             };
         } catch (e) {
             ns.utils.showNotification('❌ Form filling failed: ' + e.message, 'error');
@@ -4255,6 +5026,7 @@
         } finally {
             ns.state.lastFillTime = Date.now();
             ns.state.isProcessing = false;
+            window.__filloActiveFillRun = false;
         }
     };
 
@@ -4266,7 +5038,7 @@
         function onUserInput(e) {
             lastUserInputTime = Date.now();
             const target = e.target;
-            if (target && target.matches && target.matches('input,textarea,select')) {
+            if (target && target.matches && target.matches('input,textarea,select,button[aria-haspopup="listbox"],[role="combobox"]')) {
                 const id = getFieldIdentity(target);
                 if (id) userTouchedFieldIds.add(id);
             }
@@ -4298,16 +5070,28 @@
                 let hasNewFormFields = false;
 
                 for (const m of mutations) {
+                    if (m.type === 'attributes') {
+                        const target = m.target;
+                        if (target?.nodeType === Node.ELEMENT_NODE) {
+                            const el = target;
+                            const isFormField = el.matches?.('input,textarea,select,button[aria-haspopup="listbox"],[role="combobox"],[data-automation-id^="formField-"]');
+                            if (isFormField && isElementVisible(el)) {
+                                hasNewFormFields = true;
+                            }
+                        }
+                    }
+
                     if (m.type === 'childList' && m.addedNodes.length > 0) {
                         m.addedNodes.forEach(node => {
                             if (node.nodeType === Node.ELEMENT_NODE) {
                                 const el = node;
-                                const hasFormFields = el.querySelectorAll?.('input,textarea,select').length > 0;
-                                const isFormField = el.matches?.('input,textarea,select');
+                                const selector = 'input,textarea,select,button[aria-haspopup="listbox"],[role="combobox"]';
+                                const hasFormFields = el.querySelectorAll?.(selector).length > 0;
+                                const isFormField = el.matches?.(selector);
 
                                 if (hasFormFields || isFormField) {
                                     const isActualFormField = isFormField ||
-                                        Array.from(el.querySelectorAll('input,textarea,select')).some(field => {
+                                        Array.from(el.querySelectorAll(selector)).some(field => {
                                             if (field.offsetParent === null || field.value) return false;
                                             const fid = getFieldIdentity(field);
                                             if (fid && userTouchedFieldIds.has(fid)) return false;
@@ -4326,10 +5110,10 @@
                 if (hasNewFormFields) {
                     await ns.engine.handleFillForm(profileData, useAI, { fromObserver: true });
                 }
-            }, 500);
+            }, 300);
         });
 
-        obs.observe(document.body, {childList: true, subtree: true});
+        obs.observe(document.body, {childList: true, subtree: true, attributes: true});
 
         // Wrap disconnect to also clean up user-activity listeners
         const originalDisconnect = obs.disconnect.bind(obs);
