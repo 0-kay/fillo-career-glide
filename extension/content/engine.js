@@ -833,6 +833,33 @@
                     return Array.from(new Set(all)).filter(o => isElementVisible(o));
                 };
 
+                // Pick the option that best matches the requested value. Exact value/text
+                // matches are taken across ALL options FIRST, so a fuzzy substring match
+                // (e.g. "Female" contains "male") can never beat an exact option ("Male")
+                // just because it appears earlier in the list.
+                const pickOption = (options) => {
+                    for (const o of options) {
+                        const optText = o.textContent.trim().toLowerCase();
+                        if (optText === strLower || o.getAttribute('data-value')?.toLowerCase() === strLower) {
+                            return o;
+                        }
+                    }
+                    // No exact option — fall back to fuzzy/semantic matching.
+                    let fuzzy = null;
+                    let bestScore = 0;
+                    for (const o of options) {
+                        const optText = o.textContent.trim().toLowerCase();
+                        if (!optText) continue;
+                        if (selectionTextMatches(optText, strVal)) return o;
+                        const score = calculateSemanticScore(strLower, optText);
+                        if (score > bestScore && score > 0.4) {
+                            bestScore = score;
+                            fuzzy = o;
+                        }
+                    }
+                    return fuzzy;
+                };
+
                 // Poll for the options to appear in the DOM (usually appended to body or adjacent)
                 let optionsDiv = [];
                 for (let i = 0; i < 15; i++) {
@@ -846,24 +873,7 @@
 
                 let selected = false;
                 if (optionsDiv.length > 0) {
-                    let matchedOption = null;
-                    let bestMatchScore = 0;
-
-                    for (const o of optionsDiv) {
-                        const optText = o.textContent.trim().toLowerCase();
-                        if (optText === strLower || o.getAttribute('data-value')?.toLowerCase() === strLower || selectionTextMatches(optText, strVal)) {
-                            matchedOption = o;
-                            break;
-                        }
-
-                        if (optText && strLower) {
-                            const score = calculateSemanticScore(strLower, optText);
-                            if (score > bestMatchScore && score > 0.4) {
-                                bestMatchScore = score;
-                                matchedOption = o;
-                            }
-                        }
-                    }
+                    let matchedOption = pickOption(optionsDiv);
 
                     // If no good local match found, fall back to AI option picking (only if AI enabled)
                     if (!matchedOption && AI_CONFIG.enabled && ns.ai?.matchDropdownOptionWithAI) {
@@ -908,23 +918,7 @@
                     targetEl.focus({ preventScroll: true });
                     targetEl.click();
 
-                    let retryOption = null;
-                    const visibleOptions = getScopedOptions();
-                    for (const o of visibleOptions) {
-                        const optText = o.textContent.trim().toLowerCase();
-                        if (optText === strLower || o.getAttribute('data-value')?.toLowerCase() === strLower || selectionTextMatches(optText, strVal)) {
-                            retryOption = o;
-                            break;
-                        }
-
-                        if (optText && strLower) {
-                            const score = calculateSemanticScore(strLower, optText);
-                            if (score > 0.4) {
-                                retryOption = o;
-                                break;
-                            }
-                        }
-                    }
+                    const retryOption = pickOption(getScopedOptions());
 
                     if (retryOption) {
                         targetEl.focus({ preventScroll: true });
@@ -1699,6 +1693,8 @@
     async function fillByClassifier(profileData, mappings, fieldTracker) {
         if (!Array.isArray(mappings) || mappings.length === 0) return 0;
         const fields = scanNormalizedFields(fieldTracker);
+        // Fill in strict top-to-bottom visual order, matching the rest of the run.
+        fields.sort((a, b) => getVisualOrderKey(a.element) - getVisualOrderKey(b.element));
         let filled = 0;
 
         for (const field of fields) {
@@ -2036,6 +2032,68 @@
         }
 
         return value;
+    }
+
+    // Build a flat lookup of platform-config fields keyed by automation-id name and
+    // label, including array-template fields. Lets the top-to-bottom scan match a DOM
+    // formField container back to its profile mapping.
+    // Returns [{ name, label, profilePath, arrayPath, key, type, field }].
+    function buildPlatformFieldLookup(platformConfig) {
+        const fieldLookup = [];
+        if (!platformConfig) return fieldLookup;
+        for (const f of (platformConfig.fields || [])) {
+            if (f.name || f.label) {
+                fieldLookup.push({ name: (f.name || '').toLowerCase(), label: (f.label || '').toLowerCase(), profilePath: f.profilePath, type: f.type, field: f });
+            }
+        }
+        for (const [arrayPath, arrayCfg] of Object.entries(platformConfig.arrays || {})) {
+            for (const f of (arrayCfg.fields || [])) {
+                if (f.name || f.label) {
+                    fieldLookup.push({ name: (f.name || '').toLowerCase(), label: (f.label || '').toLowerCase(), arrayPath, key: f.key, type: f.type });
+                }
+            }
+        }
+        return fieldLookup;
+    }
+
+    // Per-field resolver: match a Workday formField container to its platform mapping
+    // and resolve the profile value. Returns { def, value, autoId, labelText } or null.
+    // For array fields it advances arrayIndexTracker on each section's "first key"
+    // (company / school) so repeated sections fill entry [0], [1], ... in order.
+    function resolvePlatformUnit(container, fieldLookup, profileData, arrayIndexTracker) {
+        const autoId = (container.getAttribute('data-automation-id') || '').replace(/^formField-/, '').toLowerCase();
+        const labelEl = container.querySelector('[data-automation-id="richText"] p, [data-automation-id="richText"], legend, label');
+        const labelText = (labelEl?.textContent || '').replace(/\*+$/, '').trim().toLowerCase();
+
+        const def = fieldLookup.find(d =>
+            d.name === autoId ||
+            (d.label && d.label === labelText) ||
+            (d.label && labelText && labelText.includes(d.label) && d.label.length > 3) ||
+            (d.label && labelText && d.label.includes(labelText) && labelText.length > 3)
+        );
+        if (!def) return null;
+
+        let value = null;
+        if (def.profilePath) {
+            // Flat field
+            value = getProfileValueForPath(profileData, def.profilePath);
+        } else if (def.arrayPath && def.key) {
+            // Array field — track how many times we've seen fields for this arrayPath
+            const arrayData = profileData[def.arrayPath];
+            if (!Array.isArray(arrayData) || arrayData.length === 0) return null;
+
+            // Increment per-section index when we see a "first key" (e.g., company or school)
+            const firstKeys = { work_experience: 'company', education_history: 'school' };
+            if (def.key === firstKeys[def.arrayPath]) {
+                arrayIndexTracker[def.arrayPath] = (arrayIndexTracker[def.arrayPath] ?? -1) + 1;
+            }
+            const idx = arrayIndexTracker[def.arrayPath] ?? 0;
+            if (idx >= arrayData.length) return null;
+            value = arrayData[idx]?.[def.key];
+        }
+
+        if (value == null || value === '') return null;
+        return { def, value, autoId, labelText };
     }
 
     function getVariantOrderKey(variants) {
@@ -4444,6 +4502,9 @@
             batchAIFields.push(fieldInfo);
         }
 
+        // Answer in strict top-to-bottom visual order so screening questions are never
+        // filled out of order (and the page never scrolls backward to reach one).
+        batchAIFields.sort((a, b) => getVisualOrderKey(a.element) - getVisualOrderKey(b.element));
         return batchAIFields;
     }
 
@@ -4842,21 +4903,7 @@
                 try {
                     const platformConfig = await ns.mapping.loadPlatformConfig(platform);
                     if (platformConfig) {
-                        // Build a unified lookup: fieldName/label → { profilePath, arrayPath, key, type }
-                        const fieldLookup = []; // [{name, label, profilePath, arrayPath, key, type}]
-
-                        for (const f of (platformConfig.fields || [])) {
-                            if (f.name || f.label) {
-                                fieldLookup.push({ name: (f.name || '').toLowerCase(), label: (f.label || '').toLowerCase(), profilePath: f.profilePath, type: f.type, field: f });
-                            }
-                        }
-                        for (const [arrayPath, arrayCfg] of Object.entries(platformConfig.arrays || {})) {
-                            for (const f of (arrayCfg.fields || [])) {
-                                if (f.name || f.label) {
-                                    fieldLookup.push({ name: (f.name || '').toLowerCase(), label: (f.label || '').toLowerCase(), arrayPath, key: f.key, type: f.type });
-                                }
-                            }
-                        }
+                        const fieldLookup = buildPlatformFieldLookup(platformConfig);
 
                         // Collect all visible, unfilled formField containers and sort top-to-bottom
                         const visibleFormFields = Array.from(document.querySelectorAll('[data-automation-id^="formField-"]'))
@@ -4869,40 +4916,10 @@
                         for (const container of visibleFormFields) {
                             if (fieldTracker.filledElements.has(container)) continue;
 
-                            const autoId = (container.getAttribute('data-automation-id') || '').replace(/^formField-/, '').toLowerCase();
-                            const labelEl = container.querySelector('[data-automation-id="richText"] p, [data-automation-id="richText"], legend, label');
-                            const labelText = (labelEl?.textContent || '').replace(/\*+$/, '').trim().toLowerCase();
-
-                            // Find matching field definition
-                            const def = fieldLookup.find(d =>
-                                d.name === autoId ||
-                                (d.label && d.label === labelText) ||
-                                (d.label && labelText && labelText.includes(d.label) && d.label.length > 3) ||
-                                (d.label && labelText && d.label.includes(labelText) && labelText.length > 3)
-                            );
-                            if (!def) continue;
-
-                            let value = null;
-
-                            if (def.profilePath) {
-                                // Flat field
-                                value = getProfileValueForPath(profileData, def.profilePath);
-                            } else if (def.arrayPath && def.key) {
-                                // Array field — track how many times we've seen fields for this arrayPath
-                                const arrayData = profileData[def.arrayPath];
-                                if (!Array.isArray(arrayData) || arrayData.length === 0) continue;
-
-                                // Increment per-section index when we see a "first key" (e.g., company or school)
-                                const firstKeys = { work_experience: 'company', education_history: 'school' };
-                                if (def.key === firstKeys[def.arrayPath]) {
-                                    arrayIndexTracker[def.arrayPath] = (arrayIndexTracker[def.arrayPath] ?? -1) + 1;
-                                }
-                                const idx = arrayIndexTracker[def.arrayPath] ?? 0;
-                                if (idx >= arrayData.length) continue;
-                                value = arrayData[idx]?.[def.key];
-                            }
-
-                            if (value == null || value === '') continue;
+                            // Resolve this container back to its platform mapping + profile value.
+                            const resolved = resolvePlatformUnit(container, fieldLookup, profileData, arrayIndexTracker);
+                            if (!resolved) continue;
+                            const { def, value, autoId, labelText } = resolved;
 
                             if ((def.type === 'multi-select' || def.type === 'single-select') && def.field) {
                                 await processPlatformField(def.field, profileData, fieldTracker);
@@ -5120,8 +5137,12 @@
                 }, 500);
             }
 
-            // Step 7: Set up dynamic observer
-            state.currentObserver = ns.engine.observeDynamic(profileData, mappingConfig, useAI);
+            // Step 7: Set up dynamic observer to auto-fill newly-rendered fields.
+            // Disabled by default so filling only runs when the user clicks the Fill
+            // button. Set ns.config.AUTO_REFILL_ON_MUTATION = true to re-enable.
+            if (ns.config.AUTO_REFILL_ON_MUTATION) {
+                state.currentObserver = ns.engine.observeDynamic(profileData, mappingConfig, useAI);
+            }
 
             // Step 8: Calculate and report results
             const detectedFilled = fieldTracker.strategyStats.detected || 0;

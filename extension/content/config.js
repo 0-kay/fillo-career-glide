@@ -12,6 +12,11 @@
 
   ns.config.MAPPING_SCORE_MIN = 5;
 
+  // When false (default), filling only runs when the user clicks the Fill button.
+  // When true, a MutationObserver re-fills automatically as new fields render
+  // (e.g. dependent Workday fields after selecting a country).
+  ns.config.AUTO_REFILL_ON_MUTATION = false;
+
   // Log extension info on initialization
   console.log(`[Fillo] Extension ID: ${ns.config.EXTENSION_ID}`);
   console.log(`[Fillo] Version: ${chrome.runtime.getManifest().version}`);

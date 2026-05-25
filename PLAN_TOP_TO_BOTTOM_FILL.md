@@ -132,8 +132,25 @@ but route their re-fills through the **no-scroll** path.
   `scrollIntoView`; only gate *inter-field* scrolling.
 
 ## Suggested commit sequence
-1. Add `scrollForwardIntoView` + `cursorKey`; switch `fillElement` to `preventScroll`. (Phase 4)
-2. Extract resolvers from existing passes (no behavior change yet). (Phase 1)
-3. Add unified worklist behind `unifiedFill` flag; arrays via `processArrayFields`. (Phases 2–3)
-4. Add re-enumeration loop + route watchers through no-scroll fill. (Phase 5)
-5. Add order-assertion logging; run test matrix; flip flag default on. (Phase 6)
+1. ✅ **Done.** Add `scrollForwardIntoView` + `fillScrollCursor`; switch `fillElement`
+   focus calls to `preventScroll`; reset cursor per run. (Phase 4)
+2. ✅ **Done.** Extract the platform resolver — `buildPlatformFieldLookup` +
+   `resolvePlatformUnit` — and refactor the Step 2.4 top-down scan to use them.
+   Behavior-preserving. (Phase 1, platform strategy)
+3. ✅ **Done (pragmatic form).** Audit found that after commit 1 every pass is
+   already DOM-ordered *except* the classifier (Step 2.5) and screening (Step 5)
+   passes, which relied on raw `querySelectorAll` document order. Added explicit
+   `getVisualOrderKey` sorts to both (`fillByClassifier`, `buildAIBatchQueue`).
+   Combined with commit 1's forward-only scroll, the page now fills top-to-bottom
+   with no backward viewport motion in every pass.
+4. (Optional / larger) Collapse the still-separate passes into one true single
+   traversal behind a `unifiedFill` flag, wiring detected/classifier/generic/
+   screening resolvers per field. Only worth it if the current behavior still
+   shows out-of-order fills the user cares about.
+5. Add order-assertion logging; run test matrix. (Phase 6)
+
+> Note on scope: the original plan called for a full single-pass rewrite. After
+> commit 1, the *user-visible* "goes backward" symptom (the viewport jumping up) is
+> gone, and ordering each remaining pass gets logical top-to-bottom order too — at a
+> fraction of the risk of a 200-line rewrite that can't be unit-tested here. The full
+> unification (step 4) is kept as an optional follow-up.
