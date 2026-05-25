@@ -2246,6 +2246,21 @@
         if (!searchText) return false;
 
         let searchInput = null;
+        const hasSelectedPromptValue = (input) => {
+            const scope = input?.closest?.('[data-automation-id^="formField-"], [data-automation-id="multiSelectContainer"]');
+            if (!scope) return false;
+            const selectedText = [
+                ...scope.querySelectorAll('[data-automation-id="selectedItem"], [data-automation-id="selectedItemList"], [data-automation-id="promptSelectionLabel"]')
+            ].map(node => node.textContent || '').join(' ').trim();
+            const instruction = scope.querySelector('[data-automation-id="promptAriaInstruction"]')?.textContent?.trim() || '';
+            return !!selectedText || (!!instruction && !/expanded|0 items selected|select one/i.test(instruction));
+        };
+        const isUsableSearchInput = (input) => input?.tagName?.toLowerCase() === 'input' &&
+            !input.disabled &&
+            isElementVisible(input) &&
+            !fieldTracker.filledElements.has(input) &&
+            !fieldTracker.filledElements.has(input.closest?.('[data-automation-id^="formField-"]')) &&
+            !hasSelectedPromptValue(input);
         const findSearchInput = (root) => {
             if (!root?.querySelectorAll) return null;
             const inputSelectors = [
@@ -2257,7 +2272,7 @@
             ];
             for (const selector of inputSelectors) {
                 const candidate = Array.from(root.querySelectorAll(selector))
-                    .find(input => input?.tagName?.toLowerCase() === 'input' && !input.disabled && isElementVisible(input));
+                    .find(isUsableSearchInput);
                 if (candidate) return candidate;
             }
             return null;
@@ -2268,6 +2283,7 @@
                 for (const el of document.querySelectorAll(sel)) {
                     if (!isElementVisible(el)) continue;
                     if (el.tagName?.toLowerCase() === 'input') {
+                        if (!isUsableSearchInput(el)) continue;
                         searchInput = el;
                         break;
                     }
@@ -2450,6 +2466,8 @@
         searchInput.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
         await dismissWorkdayDropdown(searchInput, document.querySelector('[data-automation-id="applyFlowFooter"]') || document.querySelector('main') || document.body);
         markFieldFilled(searchInput, 'platform', fieldTracker);
+        const formField = searchInput.closest?.('[data-automation-id^="formField-"]');
+        if (formField) markFieldFilled(formField, 'platform', fieldTracker);
         console.log(`[Platform] Workday search selected option for ${fieldName}: "${bestRanked?.text}" (score ${bestRanked?.score?.toFixed?.(1)}) for requested "${searchText}"`);
         return true;
     }
@@ -2994,27 +3012,29 @@
                     } else {
                         console.warn(`[Platform] ⚠️ No fields filled for ${arrayPath}[${i}]`);
                     }
-                } else {
-                    // For every subsequent entry:
-                    // 1. Commit the currently-open entry (best-effort — some platforms auto-commit)
-                    // 2. Click Add to open a new blank entry form
-                    // 3. Fill the new form
-                    await commitOpenEntry();
-
-                    if (addButtonFailures >= 3) { console.warn(`[Platform] Add button unavailable, stopping`); break; }
-                    const clicked = await clickAddButtonForSection(sectionType, 2);
-                    if (!clicked) {
-                        addButtonFailures++;
-                        console.warn(`[Platform] Could not open new form for ${arrayPath}[${i}], skipping`);
-                        continue;
-                    }
-
-                    await waitForNewPanel();
-
-                    const fieldsFilled = await tryFillEntry(entry, i);
-                    if (fieldsFilled > 0) {
-                        entriesFilled++;
-                        console.log(`[Platform] ✅ Filled ${fieldsFilled} fields for ${arrayPath}[${i}]`);
+	                } else {
+	                    // For every subsequent entry:
+	                    // 1. Commit the currently-open entry (best-effort — some platforms auto-commit)
+	                    // 2. Fill any already-visible blank entry before adding another
+	                    // 3. Click Add only when no existing blank entry can be filled
+	                    await commitOpenEntry();
+	
+	                    let fieldsFilled = await tryFillEntry(entry, i);
+	                    if (fieldsFilled === 0) {
+	                        if (addButtonFailures >= 3) { console.warn(`[Platform] Add button unavailable, stopping`); break; }
+	                        const clicked = await clickAddButtonForSection(sectionType, 2);
+	                        if (!clicked) {
+	                            addButtonFailures++;
+	                            console.warn(`[Platform] Could not open new form for ${arrayPath}[${i}], skipping`);
+	                            continue;
+	                        }
+	
+	                        await waitForNewPanel();
+	                        fieldsFilled = await tryFillEntry(entry, i);
+	                    }
+	                    if (fieldsFilled > 0) {
+	                        entriesFilled++;
+	                        console.log(`[Platform] ✅ Filled ${fieldsFilled} fields for ${arrayPath}[${i}]`);
                     } else {
                         console.warn(`[Platform] ⚠️ No fields filled for ${arrayPath}[${i}]`);
                     }
@@ -3480,31 +3500,65 @@
                     };
 
                     const waitForSkillOptions = async () => {
-                        let state = getSkillListState();
-                        for (let poll = 0; poll < 60; poll++) {
-                            if (state.options.length > 0 || state.noResults) return state;
+                        const wanted = normalizeSkillText(skill);
+                        const hasRelevantOption = (state) => state.options.some(opt =>
+                            scoreSkillOption(wanted, normalizeSkillText(opt.textContent)) >= 40
+                        );
+                        let latestState = getSkillListState();
+                        if (hasRelevantOption(latestState) || latestState.noResults) return latestState;
 
-                            // If typing did not open the dropdown, press Enter to trigger the search.
-                            if ((poll === 0 || poll === 2) && !state.loading) {
-                                dispatchKey(liveInput, 'ArrowDown', 'ArrowDown', 40);
-                                dispatchKey(liveInput, 'Enter', 'Enter', 13);
-                            }
+                        return await new Promise(resolve => {
+                            let done = false;
+                            let poll = 0;
+                            const finish = (state) => {
+                                if (done) return;
+                                done = true;
+                                observer.disconnect();
+                                clearInterval(intervalId);
+                                clearTimeout(timeoutId);
+                                resolve(state);
+                            };
+                            const check = () => {
+                                latestState = getSkillListState();
+                                if (hasRelevantOption(latestState) || latestState.noResults) {
+                                    finish(latestState);
+                                }
+                            };
+                            const nudgeSearch = async () => {
+                                if (done) return;
+                                latestState = getSkillListState();
 
-                            if (poll === 4 && state.options.length === 0) {
-                                await activateSkillPrompt(liveInput, { clickPromptButton: false });
-                                liveInput.dispatchEvent(new InputEvent('input', { bubbles: true, cancelable: true, inputType: 'insertText', data: skill }));
-                            }
+                                if ((poll === 0 || poll === 2) && !latestState.loading) {
+                                    dispatchKey(liveInput, 'ArrowDown', 'ArrowDown', 40);
+                                    dispatchKey(liveInput, 'Enter', 'Enter', 13);
+                                }
 
-                            // Nudge Workday's controlled input if the loader has been stuck.
-                            if (poll === 16 && state.loading) {
-                                liveInput.dispatchEvent(new InputEvent('input', { bubbles: true, cancelable: true, inputType: 'insertText', data: skill }));
-                                liveInput.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
-                            }
+                                if (poll === 4 && latestState.options.length === 0) {
+                                    await activateSkillPrompt(liveInput, { clickPromptButton: false });
+                                    liveInput.dispatchEvent(new InputEvent('input', { bubbles: true, cancelable: true, inputType: 'insertText', data: skill }));
+                                }
 
-                            await new Promise(r => setTimeout(r, 250));
-                            state = getSkillListState();
-                        }
-                        return state;
+                                if (poll === 16 && latestState.loading) {
+                                    liveInput.dispatchEvent(new InputEvent('input', { bubbles: true, cancelable: true, inputType: 'insertText', data: skill }));
+                                    liveInput.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
+                                }
+
+                                poll++;
+                                check();
+                            };
+
+                            const observer = new MutationObserver(check);
+                            observer.observe(document.body, {
+                                childList: true,
+                                subtree: true,
+                                characterData: true,
+                                attributes: true,
+                                attributeFilter: ['aria-busy', 'aria-selected', 'data-automation-selected', 'data-automation-checked', 'data-uxi-multiselectlistitem-isselected']
+                            });
+                            const intervalId = setInterval(nudgeSearch, 250);
+                            const timeoutId = setTimeout(() => finish(getSkillListState()), 15000);
+                            nudgeSearch();
+                        });
                     };
 
                     const skillPillSelector = [
