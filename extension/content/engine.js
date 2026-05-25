@@ -2509,7 +2509,10 @@
             });
         };
 
-        const minScore = ['school', 'schoolName'].includes(fieldName) ? 95 : 40;
+        // Prefer an exact match; only fall back to a similar one if no exact match
+        // appears. exactMin gates "settle immediately"; similarMin is the fallback bar.
+        const exactMin = ['school', 'schoolName'].includes(fieldName) ? 95 : 40;
+        const similarMin = ['school', 'schoolName'].includes(fieldName) ? 70 : 40;
         const getRankedOptions = () => getOptions()
             .map((opt, idx) => {
                 const text = getWorkdayOptionLabel(opt).trim();
@@ -2518,13 +2521,15 @@
             .sort((a, b) => b.score - a.score || a.idx - b.idx);
 
         const waitForSearchOptions = async () => {
-            const hasStrongMatch = (ranked) => ranked.some(r => r.score >= minScore);
+            const hasExactMatch = (ranked) => ranked.some(r => r.score >= exactMin);
+            const hasSimilarMatch = (ranked) => ranked.some(r => r.score >= similarMin);
             let latestRanked = getRankedOptions();
-            if (hasStrongMatch(latestRanked)) return latestRanked;
+            if (hasExactMatch(latestRanked)) return latestRanked;
 
             return await new Promise(resolve => {
                 let done = false;
                 let poll = 0;
+                let similarSinceTs = null;
                 const finish = (ranked) => {
                     if (done) return;
                     done = true;
@@ -2535,7 +2540,16 @@
                 };
                 const check = () => {
                     latestRanked = getRankedOptions();
-                    if (hasStrongMatch(latestRanked)) finish(latestRanked);
+                    // An exact match wins immediately.
+                    if (hasExactMatch(latestRanked)) { finish(latestRanked); return; }
+                    // Otherwise give an exact match a grace window to load (Workday returns
+                    // results asynchronously) before settling for a similar one.
+                    if (hasSimilarMatch(latestRanked)) {
+                        if (similarSinceTs == null) similarSinceTs = Date.now();
+                        else if (Date.now() - similarSinceTs >= 3000) finish(latestRanked);
+                    } else {
+                        similarSinceTs = null;
+                    }
                 };
                 const nudgeSearch = () => {
                     if (done) return;
@@ -2566,7 +2580,9 @@
 
         const rankedOptions = await waitForSearchOptions();
 
-        const bestRanked = rankedOptions.find(r => r.score >= minScore);
+        // Exact match first; only fall back to the best similar match if no exact exists.
+        const bestRanked = rankedOptions.find(r => r.score >= exactMin)
+            || rankedOptions.find(r => r.score >= similarMin);
         const firstOption = bestRanked?.opt;
         if (!firstOption) {
             const bestWeak = rankedOptions[0];
@@ -2585,21 +2601,29 @@
                 row
             ].filter(Boolean);
 
+            // Click the SPECIFIC matched option directly. Do NOT press ArrowDown+Enter
+            // first — that commits whichever option is highlighted at the top of the
+            // list (usually a similar match), not the exact one we located further down.
             row.scrollIntoView({ block: 'nearest' });
-            searchInput.focus();
-            dispatchKey(searchInput, 'ArrowDown', 'ArrowDown', 40);
-            if (listbox) {
-                listbox.focus?.();
-                dispatchKey(listbox, 'Enter', 'Enter', 13);
-                await new Promise(r => setTimeout(r, 150));
-            }
-
             for (const target of targets) {
                 target.scrollIntoView?.({ block: 'nearest' });
                 clickLikeUser(target);
                 target.dispatchEvent?.(new Event('change', { bubbles: true, cancelable: true }));
                 await new Promise(r => setTimeout(r, 200));
-                if (getOpenWorkdayDropdowns().length === 0) break;
+                if (getOpenWorkdayDropdowns().length === 0) return;
+            }
+
+            // Keyboard fallback only if clicking didn't commit: step down to THIS option's
+            // position in the list (not blindly to the first), then Enter.
+            if (listbox && getOpenWorkdayDropdowns().length > 0) {
+                searchInput.focus();
+                const steps = Math.max(1, (bestRanked?.idx ?? 0) + 1);
+                for (let s = 0; s < steps; s++) {
+                    dispatchKey(searchInput, 'ArrowDown', 'ArrowDown', 40);
+                    await new Promise(r => setTimeout(r, 30));
+                }
+                dispatchKey(searchInput, 'Enter', 'Enter', 13);
+                await new Promise(r => setTimeout(r, 150));
             }
         };
 
@@ -3658,6 +3682,9 @@
 
                     const waitForSkillOptions = async () => {
                         const wanted = normalizeSkillText(skill);
+                        const hasExactOption = (state) => state.options.some(opt =>
+                            scoreSkillOption(wanted, normalizeSkillText(opt.textContent)) >= 95
+                        );
                         const hasRelevantOption = (state) => state.options.some(opt =>
                             scoreSkillOption(wanted, normalizeSkillText(opt.textContent)) >= 40
                         );
@@ -3666,6 +3693,12 @@
                             const inputText = normalizeSkillText(liveInput.value || '');
                             return inputText === wanted || inputText.includes(wanted) || wanted.includes(inputText);
                         };
+                        // Settle for a similar (non-exact) option only after a short grace
+                        // window, so an exact match that loads slightly later still wins.
+                        const canSettleSimilar = (state) =>
+                            hasRelevantOption(state) &&
+                            !state.loading &&
+                            Date.now() - startedAt >= 1500;
                         const canTrustNoResults = (state) =>
                             state.noResults &&
                             !state.loading &&
@@ -3677,7 +3710,7 @@
                             inputHasRequestedSkill() &&
                             Date.now() - startedAt >= 3500;
                         let latestState = getSkillListState();
-                        if (hasRelevantOption(latestState)) return latestState;
+                        if (hasExactOption(latestState)) return latestState;
 
                         return await new Promise(resolve => {
                             let done = false;
@@ -3693,7 +3726,8 @@
                             const check = () => {
                                 latestState = getSkillListState();
                                 if (
-                                    hasRelevantOption(latestState) ||
+                                    hasExactOption(latestState) ||
+                                    canSettleSimilar(latestState) ||
                                     canTrustNoResults(latestState) ||
                                     canTrustIrrelevantResults(latestState)
                                 ) {
@@ -3802,15 +3836,12 @@
                             row
                         ].filter(Boolean);
 
+                        // Click the SPECIFIC matched option directly. Do NOT press
+                        // ArrowDown+Enter first — that commits whichever option is
+                        // highlighted at the top of the list (usually a similar match),
+                        // not the exact one. (Index-based keyboard nav remains as the
+                        // outer Try 3 fallback below.)
                         row.scrollIntoView({ block: 'nearest' });
-                        liveInput.focus();
-                        dispatchKey(liveInput, 'ArrowDown', 'ArrowDown', 40);
-                        if (listbox) {
-                            listbox.focus?.();
-                            dispatchKey(listbox, 'Enter', 'Enter', 13);
-                            if (await waitForPill(4, 100)) return true;
-                        }
-
                         for (const target of targets) {
                             target.scrollIntoView?.({ block: 'nearest' });
                             clickLikeUser(target);
@@ -3854,9 +3885,11 @@
                                 confirmed = await clickWorkdaySkillOption(best.opt);
                             }
 
-                            // Try 2: press Enter on the search INPUT — this selects the
-                            // already-highlighted first result in UXI multiselects.
-                            if (!confirmed && best?.score >= 40) {
+                            // Try 2: press Enter on the search INPUT — selects the
+                            // already-highlighted first result. Only safe when our best
+                            // match IS that first result; otherwise it would commit the
+                            // wrong (similar) option, so fall through to Try 3's nav.
+                            if (!confirmed && best?.score >= 40 && best.idx === 0) {
                                 liveInput.focus();
                                 dispatchKey(liveInput, 'Enter', 'Enter', 13);
                                 confirmed = await waitForPill(10, 100);
