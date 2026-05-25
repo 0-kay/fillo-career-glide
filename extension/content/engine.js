@@ -13,6 +13,12 @@
     const unknownFieldLogIds = new Set();
     let lastUserInputTime = 0;
 
+    // Furthest absolute Y position the fill has scrolled to in the current run.
+    // scrollForwardIntoView() uses this to guarantee the viewport only ever moves
+    // downward, so the page fills strictly top-to-bottom and never jumps back up.
+    // Reset to -Infinity at the start of every fill run.
+    let fillScrollCursor = Number.NEGATIVE_INFINITY;
+
     const workdayDropdownSelector = [
         '[data-automation-id="multiselectListBox"]',
         '[data-automation-id="listBox"]',
@@ -36,6 +42,28 @@
         target.dispatchEvent(new Pointer('pointerup', { bubbles: true, cancelable: true }));
         target.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
         target.click?.();
+    }
+
+    // Bring an element into view WITHOUT ever scrolling the viewport upward. Tracks
+    // the furthest point reached in fillScrollCursor; any target above that point is
+    // left where it is (filled in place, no scroll) so the page advances strictly
+    // top-to-bottom. Only scrolls when the target sits below the current viewport.
+    function scrollForwardIntoView(el) {
+        try {
+            if (!el?.getBoundingClientRect) return;
+            const rect = el.getBoundingClientRect();
+            if (!rect || (rect.width === 0 && rect.height === 0)) return;
+            const absoluteTop = rect.top + window.scrollY;
+            // Never go backward: skip anything above the furthest point reached.
+            if (absoluteTop < fillScrollCursor) return;
+            fillScrollCursor = absoluteTop;
+            // Scroll down only when the field is below the fold; keep a little context
+            // above it. Math.max(window.scrollY, ...) guarantees we never scroll up.
+            const margin = 120;
+            if (rect.bottom > window.innerHeight) {
+                window.scrollTo({ top: Math.max(window.scrollY, absoluteTop - margin), behavior: 'auto' });
+            }
+        } catch (_) {}
     }
 
     function getOpenWorkdayDropdowns() {
@@ -74,6 +102,38 @@
         const actualDialCode = actualNorm.match(/\+\d+/)?.[0];
         const expectedDialCode = expectedNorm.match(/\+\d+/)?.[0];
         return !!actualDialCode && actualDialCode === expectedDialCode;
+    }
+
+    function getWorkdayOptionLabel(optionEl) {
+        if (!optionEl) return '';
+        return optionEl.getAttribute?.('data-automation-label') ||
+            optionEl.querySelector?.('[data-automation-id="promptOption"]')?.getAttribute?.('data-automation-label') ||
+            optionEl.querySelector?.('[data-automation-id="promptOption"]')?.textContent ||
+            optionEl.getAttribute?.('aria-label')?.replace(/\s+(not checked|checked|selected)$/i, '') ||
+            optionEl.textContent ||
+            '';
+    }
+
+    function scoreExactFirstOption(optionText, wantedValue) {
+        const option = normalizeSelectText(optionText);
+        const wanted = normalizeSelectText(wantedValue);
+        if (!option || !wanted || /^(select one|select|choose one|none)$/.test(option)) return -1;
+        if (option === wanted) return 100;
+        if (canonicalCountryText(optionText) === canonicalCountryText(wantedValue)) return 98;
+
+        const optionDialCode = option.match(/\+\d+/)?.[0];
+        const wantedDialCode = wanted.match(/\+\d+/)?.[0];
+        if (optionDialCode && wantedDialCode && optionDialCode === wantedDialCode) return 96;
+
+        if (option.startsWith(wanted)) return 85;
+        if (option.includes(wanted)) return 70;
+        if (wanted.includes(option) && option.length > 2) return 45;
+
+        const wantedWords = wanted.split(/\s+/).filter(w => w.length > 1);
+        if (!wantedWords.length) return 0;
+        const optionWords = option.split(/\s+/);
+        const hits = wantedWords.filter(w => optionWords.some(ow => ow === w || ow.includes(w) || w.includes(ow))).length;
+        return Math.floor((hits / wantedWords.length) * 60);
     }
 
     function flattenSkillValues(value) {
@@ -577,6 +637,10 @@
         try {
             if (!element || value == null) return false;
 
+            // Bring the field into view top-to-bottom before interacting. Forward-only:
+            // if this field sits above where we've already filled, it stays put (no jump).
+            scrollForwardIntoView(element);
+
             // Deep search helper to find fillable controls inside nested Shadow DOMs.
             // Include listbox/combobox buttons so Workday wrapper divs do not get filled directly.
             function findRealInput(root) {
@@ -655,7 +719,7 @@
                 const strLower = strVal.toLowerCase();
 
                 // Full pointer + mouse event chain to trigger "open" on framework-driven selects
-                targetEl.focus();
+                targetEl.focus({ preventScroll: true });
                 targetEl.dispatchEvent(new PointerEvent('pointerover',  { bubbles: true, cancelable: true }));
                 targetEl.dispatchEvent(new PointerEvent('pointerenter', { bubbles: true, cancelable: true }));
                 targetEl.dispatchEvent(new MouseEvent('mouseover',      { bubbles: true, cancelable: true }));
@@ -752,7 +816,7 @@
                 };
 
                 // Click button to open the listbox
-                targetEl.focus();
+                targetEl.focus({ preventScroll: true });
                 targetEl.click();
 
                 const getScopedOptions = () => {
@@ -811,7 +875,7 @@
 
                     if (matchedOption) {
                         // Workday needs focus before clicking
-                        targetEl.focus();
+                        targetEl.focus({ preventScroll: true });
                         clickOptionWithPointerSequence(matchedOption);
                         // Also fire enter key just in case
                         targetEl.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'Enter', code: 'Enter', keyCode: 13, which: 13 }));
@@ -841,7 +905,7 @@
                 if (finalText === initialText || !finalText || finalText.toLowerCase().includes('select')) {
                     console.warn('[Fillo] Dropdown selection did not stick:', strVal);
 
-                    targetEl.focus();
+                    targetEl.focus({ preventScroll: true });
                     targetEl.click();
 
                     let retryOption = null;
@@ -863,7 +927,7 @@
                     }
 
                     if (retryOption) {
-                        targetEl.focus();
+                        targetEl.focus({ preventScroll: true });
                         clickOptionWithPointerSequence(retryOption);
                         targetEl.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'Enter', code: 'Enter', keyCode: 13, which: 13 }));
                         targetEl.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, cancelable: true, key: 'Enter', code: 'Enter', keyCode: 13, which: 13 }));
@@ -917,7 +981,7 @@
                     if (targetEl.checked) return true;
                 }
 
-                targetEl.focus();
+                targetEl.focus({ preventScroll: true });
                 targetEl.click();
                 targetEl.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
                 mirror('change', Event, { bubbles: true });
@@ -933,7 +997,7 @@
                 // Full focus sequence — Workday marks the field "touched" on focusin
                 targetEl.dispatchEvent(new FocusEvent('focusin', { bubbles: true, cancelable: true }));
                 targetEl.dispatchEvent(new FocusEvent('focus', { bubbles: false, cancelable: true }));
-                targetEl.focus();
+                targetEl.focus({ preventScroll: true });
 
                 if (nativeSetter) nativeSetter.call(targetEl, strValue);
                 else targetEl.value = strValue;
@@ -977,7 +1041,7 @@
                 // Full focus sequence — Workday listens on focusin to mark field as "touched"
                 targetEl.dispatchEvent(new FocusEvent('focusin', { bubbles: true, cancelable: true }));
                 targetEl.dispatchEvent(new FocusEvent('focus', { bubbles: false, cancelable: true }));
-                targetEl.focus();
+                targetEl.focus({ preventScroll: true });
 
                 const nativeSetter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(targetEl), 'value')?.set;
 
@@ -2387,46 +2451,69 @@
             });
         };
 
-        let options = getOptions();
-        for (let poll = 0; poll < 20 && options.length === 0; poll++) {
-            if (poll === 2) dispatchKey(searchInput, 'Enter', 'Enter', 13);
-            await new Promise(r => setTimeout(r, 250));
-            options = getOptions();
-        }
-
-        // Rank options by how well they match the requested value rather than blindly
-        // taking options[0] — the first result is often a sub-entry (e.g. "Cockrell School
-        // of Engineering, The University of Texas at Austin" for "University of Texas at
-        // Austin") or a leftover placeholder ("Select One").
-        const wantedNorm = normalizeSelectText(searchText);
-        const wantedTokens = wantedNorm.split(' ').filter(Boolean);
-        const scoreSearchOption = (rawText) => {
-            const cand = normalizeSelectText(rawText || '');
-            if (!cand || /^(select one|select\.\.\.|choose one|none)$/.test(cand)) return -1;
-            if (cand === wantedNorm) return 100;
-            if (selectionTextMatches(rawText, searchText)) {
-                // Among includes-style hits, prefer the option closest in length to the
-                // requested value so "...University of Texas at Austin" beats a longer parent.
-                const lengthPenalty = Math.min(40, Math.abs(cand.length - wantedNorm.length));
-                return (cand.startsWith(wantedNorm) ? 90 : 75) - lengthPenalty * 0.2;
-            }
-            const candTokens = cand.split(' ').filter(Boolean);
-            if (!wantedTokens.length || !candTokens.length) return 0;
-            let hits = 0;
-            for (const w of wantedTokens) {
-                if (candTokens.some(c => c === w || c.includes(w) || w.includes(c))) hits++;
-            }
-            return Math.floor((hits / wantedTokens.length) * 60);
-        };
-        const rankedOptions = options
-            .map((opt, idx) => ({ opt, idx, text: opt.textContent?.trim() || '', score: scoreSearchOption(opt.textContent) }))
+        const minScore = ['school', 'schoolName'].includes(fieldName) ? 95 : 40;
+        const getRankedOptions = () => getOptions()
+            .map((opt, idx) => {
+                const text = getWorkdayOptionLabel(opt).trim();
+                return { opt, idx, text, score: scoreExactFirstOption(text, searchText) };
+            })
             .sort((a, b) => b.score - a.score || a.idx - b.idx);
-        // Best match by value; fall back to the first non-placeholder option only when
-        // nothing matches the requested value at all.
-        const bestRanked = rankedOptions.find(r => r.score > 0) || rankedOptions.find(r => r.score >= 0);
+
+        const waitForSearchOptions = async () => {
+            const hasStrongMatch = (ranked) => ranked.some(r => r.score >= minScore);
+            let latestRanked = getRankedOptions();
+            if (hasStrongMatch(latestRanked)) return latestRanked;
+
+            return await new Promise(resolve => {
+                let done = false;
+                let poll = 0;
+                const finish = (ranked) => {
+                    if (done) return;
+                    done = true;
+                    observer.disconnect();
+                    clearInterval(intervalId);
+                    clearTimeout(timeoutId);
+                    resolve(ranked);
+                };
+                const check = () => {
+                    latestRanked = getRankedOptions();
+                    if (hasStrongMatch(latestRanked)) finish(latestRanked);
+                };
+                const nudgeSearch = () => {
+                    if (done) return;
+                    if (poll === 0 || poll === 2 || poll === 8 || poll === 16) {
+                        searchInput.focus();
+                        dispatchKey(searchInput, 'ArrowDown', 'ArrowDown', 40);
+                        dispatchKey(searchInput, 'Enter', 'Enter', 13);
+                        searchInput.dispatchEvent(new InputEvent('input', { bubbles: true, cancelable: true, inputType: 'insertText', data: searchText }));
+                        searchInput.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
+                    }
+                    poll++;
+                    check();
+                };
+
+                const observer = new MutationObserver(check);
+                observer.observe(document.body, {
+                    childList: true,
+                    subtree: true,
+                    characterData: true,
+                    attributes: true,
+                    attributeFilter: ['aria-busy', 'aria-selected', 'data-automation-selected', 'data-automation-label']
+                });
+                const intervalId = setInterval(nudgeSearch, 250);
+                const timeoutId = setTimeout(() => finish(getRankedOptions()), 15000);
+                nudgeSearch();
+            });
+        };
+
+        const rankedOptions = await waitForSearchOptions();
+
+        const bestRanked = rankedOptions.find(r => r.score >= minScore);
         const firstOption = bestRanked?.opt;
         if (!firstOption) {
-            console.log(`[Platform] No Workday search option appeared for ${fieldName}: ${searchText}`);
+            const bestWeak = rankedOptions[0];
+            console.log(`[Platform] No exact/strong Workday option for ${fieldName}: "${searchText}"` +
+                (bestWeak ? ` (best weak match: "${bestWeak.text}" score ${bestWeak.score})` : ''));
             return false;
         }
 
@@ -2462,9 +2549,21 @@
         await selectWorkdayPromptOption(firstOption);
         await new Promise(r => setTimeout(r, 400));
 
+        // Click out of the school input so Workday commits the typeahead selection and
+        // collapses the prompt. A real pointer click on a neutral region outside the
+        // widget blurs the input the way a user clicking away would — synthetic blur
+        // events alone don't reliably move DOM focus off the field.
+        const clickOutTarget = document.querySelector('[data-automation-id="applyFlowFooter"]') ||
+            document.querySelector('main') ||
+            document.body;
+        if (clickOutTarget) {
+            clickLikeUser(clickOutTarget);
+            await new Promise(r => setTimeout(r, 150));
+        }
+
         searchInput.dispatchEvent(new FocusEvent('blur', { bubbles: true }));
         searchInput.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
-        await dismissWorkdayDropdown(searchInput, document.querySelector('[data-automation-id="applyFlowFooter"]') || document.querySelector('main') || document.body);
+        await dismissWorkdayDropdown(searchInput, clickOutTarget);
         markFieldFilled(searchInput, 'platform', fieldTracker);
         const formField = searchInput.closest?.('[data-automation-id^="formField-"]');
         if (formField) markFieldFilled(formField, 'platform', fieldTracker);
@@ -3504,8 +3603,23 @@
                         const hasRelevantOption = (state) => state.options.some(opt =>
                             scoreSkillOption(wanted, normalizeSkillText(opt.textContent)) >= 40
                         );
+                        const startedAt = Date.now();
+                        const inputHasRequestedSkill = () => {
+                            const inputText = normalizeSkillText(liveInput.value || '');
+                            return inputText === wanted || inputText.includes(wanted) || wanted.includes(inputText);
+                        };
+                        const canTrustNoResults = (state) =>
+                            state.noResults &&
+                            !state.loading &&
+                            inputHasRequestedSkill() &&
+                            Date.now() - startedAt >= 2500;
+                        const canTrustIrrelevantResults = (state) =>
+                            state.options.length > 0 &&
+                            !state.loading &&
+                            inputHasRequestedSkill() &&
+                            Date.now() - startedAt >= 3500;
                         let latestState = getSkillListState();
-                        if (hasRelevantOption(latestState) || latestState.noResults) return latestState;
+                        if (hasRelevantOption(latestState)) return latestState;
 
                         return await new Promise(resolve => {
                             let done = false;
@@ -3520,7 +3634,11 @@
                             };
                             const check = () => {
                                 latestState = getSkillListState();
-                                if (hasRelevantOption(latestState) || latestState.noResults) {
+                                if (
+                                    hasRelevantOption(latestState) ||
+                                    canTrustNoResults(latestState) ||
+                                    canTrustIrrelevantResults(latestState)
+                                ) {
                                     finish(latestState);
                                 }
                             };
@@ -3528,7 +3646,7 @@
                                 if (done) return;
                                 latestState = getSkillListState();
 
-                                if ((poll === 0 || poll === 2) && !latestState.loading) {
+                                if (poll === 2 && !latestState.loading) {
                                     dispatchKey(liveInput, 'ArrowDown', 'ArrowDown', 40);
                                     dispatchKey(liveInput, 'Enter', 'Enter', 13);
                                 }
@@ -3791,7 +3909,6 @@
                 const ssContainer = ssInput.closest('[data-automation-id="multiSelectContainer"]') || ssInput.closest('[data-automation-id^="formField-"]');
                 const promptInstruction = ssContainer?.querySelector('[data-automation-id="promptAriaInstruction"]');
                 const alreadySelected = (promptInstruction?.textContent || '').toLowerCase();
-                const termLower = searchTerm.toLowerCase();
                 if (alreadySelected && selectionTextMatches(alreadySelected, searchTerm)) {
                     console.log(`[Platform] [${field.name}] already shows "${alreadySelected}", skipping`);
                     await dismissWorkdayDropdown(ssInput, document.querySelector('[data-automation-id="applyFlowFooter"]') || document.querySelector('main') || document.body);
@@ -3861,21 +3978,7 @@
                         );
                 };
 
-                const scoreSingleSelectOption = (candidateText) => {
-                    if (selectionTextMatches(candidateText, searchTerm)) return 100;
-                    const txt = String(candidateText || '').toLowerCase().replace(/[^a-z0-9]/g, ' ').trim();
-                    const termNorm = termLower.replace(/[^a-z0-9]/g, ' ').trim();
-                    if (!txt || !termNorm) return 0;
-                    if (txt === termNorm) return 100;
-                    if (txt.startsWith(termNorm)) return 85;
-                    if (txt.includes(termNorm)) return 70;
-                    if (termNorm.includes(txt) && txt.length > 2) return 45;
-
-                    const termWords = termNorm.split(/\s+/).filter(w => w.length > 1);
-                    if (!termWords.length) return 0;
-                    const hits = termWords.filter(w => txt.split(/\s+/).some(tw => tw === w || tw.includes(w) || w.includes(tw))).length;
-                    return Math.floor((hits / termWords.length) * 60);
-                };
+                const scoreSingleSelectOption = (candidateText) => scoreExactFirstOption(candidateText, searchTerm);
 
                 await dismissWorkdayDropdown(ssInput);
                 await typeIntoSearch();
@@ -3890,14 +3993,17 @@
                 }
 
                 const ranked = options
-                    .map((opt, idx) => ({ opt, idx, score: scoreSingleSelectOption(opt.textContent) }))
+                    .map((opt, idx) => {
+                        const text = getWorkdayOptionLabel(opt).trim();
+                        return { opt, idx, text, score: scoreSingleSelectOption(text) };
+                    })
                     .sort((a, b) => b.score - a.score || a.idx - b.idx);
                 const best = ranked[0];
 
                 if (best && best.score >= 40) {
                     clickLikeUser(best.opt);
                     await new Promise(r => setTimeout(r, 400));
-                    console.log(`[Platform] Single-select [${field.name}]="${searchTerm}" -> "${best.opt.textContent?.trim()}"`);
+                    console.log(`[Platform] Single-select [${field.name}]="${searchTerm}" -> "${best.text}" (score ${best.score})`);
 
                     ssInput.dispatchEvent(new FocusEvent('blur', { bubbles: true }));
                     ssInput.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
@@ -4462,6 +4568,10 @@
         if (!fromObserver) {
             userTouchedFieldIds.clear();
         }
+
+        // Reset the forward-only scroll cursor so this run fills top-to-bottom from
+        // the top of the page (see scrollForwardIntoView / fillScrollCursor).
+        fillScrollCursor = Number.NEGATIVE_INFINITY;
 
         ns.state.isProcessing = true;
         window.__filloActiveFillRun = true;
