@@ -61,16 +61,8 @@ RETURN THIS EXACT JSON STRUCTURE:
     "firstName": "Extract first namen from the full name",
     "lastName": "Extract last name from the full name",
     "email": "Extract email address",
-    "phone": "Phone number with country code, no spaces or extension (e.g. +12125551234)",
-    "address": {
-      "line1": "Street address / house number (e.g. 123 Main St)",
-      "line2": "Apartment, suite, unit, floor (e.g. Apt 4B)",
-      "city": "City name",
-      "state": "State or province",
-      "postalCode": "Zip or postal code",
-      "country": "Country name or code"
-    },
-    "phoneExtension": "Phone extension number if present, otherwise return \"\"",
+    "phone": "Extract phone with country code if present",
+    "address": "Extract city, state/country",
     "linkedin": "Extract full LinkedIn URL (https://linkedin.com/in/username or linkedin.com/in/username)",
     "github": "Extract full GitHub URL (https://github.com/username or github.com/username)", 
     "portfolio": "Extract portfolio/website URL",
@@ -96,8 +88,8 @@ RETURN THIS EXACT JSON STRUCTURE:
       "jobTitle": "Exact job title",
       "company": "Company name",
       "location": "City, State/Country if mentioned",
-             "startDate": "Start date as MM/YYYY (e.g. 08/2023). If only year found, use 01/YYYY",
-       "endDate": "End date as MM/YYYY (e.g. 12/2024), or 'Present' if current",
+             "startDate": "Start date in any format found",
+       "endDate": "End date or 'Present'/'Current'",
        "description": "COMPLETE description - all bullet points, achievements, responsibilities. Include numbers, metrics, technologies used. Examples: 'Managed over 10,000+ tickets', 'Achieved 99% uptime', 'Improved efficiency by 35%', 'Led development using Java and React'"
     }
   ],
@@ -106,10 +98,9 @@ RETURN THIS EXACT JSON STRUCTURE:
       "degree": "Full degree name (Bachelor of Science, Master of Arts, etc)",
       "school": "Full institution name",
       "location": "City, State/Country if mentioned", 
-      "startDate": {"year": "Start year as YYYY (e.g. 2019)", "month": "Start month as MM (e.g. 09). Use empty string if not mentioned"},
-      "endDate": {"year": "End/graduation year as YYYY (e.g. 2023)", "month": "Graduation month as MM (e.g. 05). Use empty string if not mentioned"},
-      "gpa": "GPA if mentioned (e.g. 3.8)",
-      "description": "Honors, relevant coursework, thesis, etc"
+      "startDate": "Start date if found",
+      "endDate": "Graduation date or expected",
+      "description": "GPA, honors, relevant coursework, thesis, etc"
     }
   ],
   "certifications": [

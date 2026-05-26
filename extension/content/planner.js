@@ -29,11 +29,6 @@
     };
 
     ns.planner.requestFillPlan = async function (pageCtx, {profileId, useAI = true} = {}) {
-        // Disabled: Placeholder API endpoint removed
-        console.log('[Fillo] LLM fill plan disabled - no API endpoint configured');
-        return {mapping: []};
-
-        /* Original implementation with placeholder URL - DISABLED
         const {FILLO_AUTH_TOKEN} = await chrome.storage.local.get('FILLO_AUTH_TOKEN');
         const r = await fetch('https://api.yourapp.com/llm/fill-plan', {
             method: 'POST',
@@ -42,7 +37,6 @@
         });
         if (!r.ok) throw new Error('plan_failed');
         return r.json();
-        */
     };
 
     ns.planner.indexInputs = function () {

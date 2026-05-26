@@ -8,7 +8,6 @@
       },
       config: {},
       utils: {},
-      domainDetector: {},
       mapping: {},
       ai: {},
       planner: {},

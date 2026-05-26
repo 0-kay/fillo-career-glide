@@ -35,19 +35,6 @@ const ProfileForm = ({ initialData, onSave, onBack }: ProfileFormProps) => {
     }));
   };
 
-  const handleAddressChange = (field: string, value: string) => {
-    setFormData(prev => ({
-      ...prev,
-      personalInfo: {
-        ...prev.personalInfo,
-        address: {
-          ...(prev.personalInfo.address || {}),
-          [field]: value
-        }
-      }
-    }));
-  };
-
   const addSkill = () => {
     if (newSkill.trim() && !formData.skills.includes(newSkill.trim())) {
       setFormData(prev => ({
@@ -125,63 +112,11 @@ const ProfileForm = ({ initialData, onSave, onBack }: ProfileFormProps) => {
               />
             </div>
             <div>
-              <Label htmlFor="phoneExtension">Phone Extension</Label>
+              <Label htmlFor="address">Address</Label>
               <Input
-                id="phoneExtension"
-                value={formData.personalInfo.phoneExtension || ''}
-                onChange={(e) => handlePersonalInfoChange('phoneExtension', e.target.value)}
-              />
-            </div>
-          </div>
-
-          <h4 className="font-semibold text-gray-900 mt-4 mb-2">Address</h4>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <Label htmlFor="addressLine1">Address Line 1</Label>
-              <Input
-                id="addressLine1"
-                value={formData.personalInfo.address?.line1 || ''}
-                onChange={(e) => handleAddressChange('line1', e.target.value)}
-              />
-            </div>
-            <div>
-              <Label htmlFor="addressLine2">Address Line 2</Label>
-              <Input
-                id="addressLine2"
-                value={formData.personalInfo.address?.line2 || ''}
-                onChange={(e) => handleAddressChange('line2', e.target.value)}
-              />
-            </div>
-            <div>
-              <Label htmlFor="city">City</Label>
-              <Input
-                id="city"
-                value={formData.personalInfo.address?.city || ''}
-                onChange={(e) => handleAddressChange('city', e.target.value)}
-              />
-            </div>
-            <div>
-              <Label htmlFor="state">State / Province</Label>
-              <Input
-                id="state"
-                value={formData.personalInfo.address?.state || ''}
-                onChange={(e) => handleAddressChange('state', e.target.value)}
-              />
-            </div>
-            <div>
-              <Label htmlFor="postalCode">Postal Code</Label>
-              <Input
-                id="postalCode"
-                value={formData.personalInfo.address?.postalCode || ''}
-                onChange={(e) => handleAddressChange('postalCode', e.target.value)}
-              />
-            </div>
-            <div>
-              <Label htmlFor="country">Country</Label>
-              <Input
-                id="country"
-                value={formData.personalInfo.address?.country || ''}
-                onChange={(e) => handleAddressChange('country', e.target.value)}
+                id="address"
+                value={formData.personalInfo.address || ''}
+                onChange={(e) => handlePersonalInfoChange('address', e.target.value)}
               />
             </div>
           </div>

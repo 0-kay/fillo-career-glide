@@ -1,8 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { FileText, Edit, Trash2, Clock, Plus, Briefcase, GraduationCap, Code, User, Award, Loader2 } from 'lucide-react';
+import { FileText, Edit, Trash2, Clock, Plus, Briefcase, GraduationCap, Code, User, Award } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useProfiles } from '@/hooks/useProfiles';
 import { useToast } from '@/hooks/use-toast';
@@ -11,24 +11,9 @@ import ResumeUpload from './ResumeUpload';
 
 const ProfileList = () => {
   const navigate = useNavigate();
-  const { profiles, loading, deleteProfile, refetch } = useProfiles();
+  const { profiles, loading, deleteProfile } = useProfiles();
   const { toast } = useToast();
   const [showUpload, setShowUpload] = useState(false);
-  
-  useEffect(() => {
-    // Poll every 3 seconds if any profile is currently parsing in the background
-    const hasPending = profiles.some(p => {
-      const status = (p.resume_metadata as any)?.parsing_status;
-      return status === 'Pending' || status === 'Uploading' || status === 'Processing';
-    });
-    if (hasPending) {
-      const interval = setInterval(() => {
-        refetch();
-      }, 3000);
-      return () => clearInterval(interval);
-    }
-  }, [profiles, refetch]);
-
   const [deleteDialog, setDeleteDialog] = useState<{ isOpen: boolean; profileId: string; profileName: string }>({
     isOpen: false,
     profileId: '',
@@ -108,7 +93,10 @@ const ProfileList = () => {
     const personalDetails = profile.personal_details || {};
     const workExp = profile.work_experience?.[0]; // Most recent experience
     
-    const fullName = personalDetails.full_name || personalDetails.fullName || profile.name || 'Unknown User';
+    // Construct full name from individual components
+    const fullName = [profile.first_name, profile.middle_name, profile.last_name]
+      .filter(part => part && part.trim())
+      .join(' ') || personalDetails.fullName || 'Unknown User';
     
     return {
       name: fullName,
@@ -282,29 +270,16 @@ const ProfileList = () => {
                 </div>
                 
                 <div className="flex items-start space-x-2">
-                  {(() => {
-                    const status = (profile.resume_metadata as any)?.parsing_status;
-                    if (status === 'Pending' || status === 'Uploading' || status === 'Processing') {
-                      const label = status === 'Uploading' ? 'Uploading...' : 'Processing...';
-                      return <Badge className="bg-blue-100 text-blue-800 border-blue-200 flex items-center"><Loader2 className="h-3 w-3 mr-1 animate-spin" />{label}</Badge>;
-                    }
-                    if (status === 'Failed') {
-                      return <Badge variant="destructive">Failed</Badge>;
-                    }
-                    return (
-                      <Badge 
-                        variant={profile.completeness >= 90 ? "default" : "secondary"}
-                        className={profile.completeness >= 90 ? "bg-green-100 text-green-800" : ""}
-                      >
-                        {profile.completeness}% complete
-                      </Badge>
-                    );
-                  })()}
+                  <Badge 
+                    variant={profile.completeness >= 90 ? "default" : "secondary"}
+                    className={profile.completeness >= 90 ? "bg-green-100 text-green-800" : ""}
+                  >
+                    {profile.completeness}% complete
+                  </Badge>
                   <Button 
                     variant="ghost" 
                     size="sm"
                     onClick={() => handleEdit(profile.id)}
-                    disabled={['Pending', 'Uploading', 'Processing'].includes((profile.resume_metadata as any)?.parsing_status)}
                   >
                     <Edit className="h-4 w-4" />
                   </Button>

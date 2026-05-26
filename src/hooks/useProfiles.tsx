@@ -123,7 +123,6 @@ export function useProfiles() {
     try {
       const { data, error } = await supabase
         .from('application_profiles')
-        // @ts-ignore - Supabase type schema cache is out of sync with actual database
         .insert([{
           first_name: profileData.first_name,
           middle_name: profileData.middle_name || null,
@@ -165,9 +164,7 @@ export function useProfiles() {
   }, [user?.id, fetchProfiles]);
 
   const updateProfile = useCallback(async (id: string, profileData: Partial<{
-    first_name: string;
-    middle_name: string;
-    last_name: string;
+    full_name: string;
     personal_details: Json;
     education_history: Json;
     work_experience: Json;
@@ -190,7 +187,6 @@ export function useProfiles() {
     try {
       const { data, error } = await supabase
         .from('application_profiles')
-        // @ts-ignore - Supabase type schema cache is out of sync with actual database
         .update(profileData)
         .eq('id', id)
         .eq('user_id', user.id)
@@ -211,34 +207,13 @@ export function useProfiles() {
     if (!user) return { error: 'Not authenticated' };
 
     try {
-      // 1. Delete the profile and return the deleted row to get the metadata
-      const { data: deletedRows, error } = await supabase
+      const { error } = await supabase
         .from('application_profiles')
         .delete()
         .eq('id', id)
-        .eq('user_id', user.id)
-        .select();
+        .eq('user_id', user.id);
 
       if (error) throw error;
-
-      // 2. Identify if there was a linked resume file in the metadata
-      const deletedProfile = deletedRows?.[0];
-      const resumeMetadata = deletedProfile?.resume_metadata as Record<string, unknown> | undefined;
-      const linkedFilePath = resumeMetadata?.file_path as string | undefined;
-
-      // 3. Delete the file from the 'resumes' bucket
-      if (linkedFilePath) {
-        console.log(`🗑️ Removing linked resume file from storage: ${linkedFilePath}`);
-        const { error: storageError } = await supabase.storage
-          .from('resumes')
-          .remove([linkedFilePath]);
-
-        if (storageError) {
-          console.error(`⚠️ Profile deleted, but failed to delete file ${linkedFilePath}:`, storageError);
-        } else {
-          console.log(`✅ Linked file ${linkedFilePath} successfully deleted.`);
-        }
-      }
       
       await fetchProfiles(); // This won't cause infinite loop now
       return { error: null };
