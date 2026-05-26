@@ -61,6 +61,8 @@ class FilloPopup {
     this.selectedProfileId = null;
     this.detectedFields = null;
     this.elements = {};
+    this.isFilling = false;
+    this.fillBtnDefaultText = "";
   }
 
   async initialize() {
@@ -93,6 +95,7 @@ class FilloPopup {
       detectedFieldsSection: document.getElementById("detected-fields-section"),
       detectedFieldsToggle: document.getElementById("detected-fields-toggle"),
     };
+    this.fillBtnDefaultText = this.elements.fillBtn?.textContent || "Fill Application Form";
   }
 
   attachListeners() {
@@ -188,7 +191,7 @@ class FilloPopup {
       const profile = this.profiles.find((p) => p.id === profileId);
       if (profile) {
         this.updateProfilePreview(profile);
-        this.elements.fillBtn.disabled = false;
+        this.elements.fillBtn.disabled = this.isFilling;
       }
     } else {
       this.clearProfilePreview();
@@ -215,9 +218,14 @@ class FilloPopup {
   // ---------- Fill Logic ----------
   async fillForm() {
     console.log("🔄 Starting fillForm...");
+    if (this.isFilling) return;
     if (!this.selectedProfileId) return this.showStatus("Please select a profile first", "error");
 
     try {
+      this.isFilling = true;
+      this.elements.fillBtn.disabled = true;
+      this.elements.fillBtn.textContent = "Filling...";
+
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
       if (!tab?.id) return this.showStatus("No active tab found", "error");
       if (isForbiddenUrl(tab.url))
@@ -352,6 +360,10 @@ class FilloPopup {
       if (err.message.includes("Cannot access"))
         this.showStatus("❌ Cannot access this page. Try a different site.", "error");
       else this.showStatus("❌ Fill failed. Please refresh the page and retry.", "error");
+    } finally {
+      this.isFilling = false;
+      this.elements.fillBtn.textContent = this.fillBtnDefaultText;
+      this.elements.fillBtn.disabled = !this.selectedProfileId;
     }
   }
 
