@@ -1,0 +1,355 @@
+- generic [active] [ref=e1]:
+  - navigation "link navigation":
+    - link "Skip to Main Content" [ref=e2] [cursor=pointer]
+  - main [ref=e3]:
+    - navigation [ref=e4]:
+      - generic [ref=e6]:
+        - link "logo" [ref=e8] [cursor=pointer]:
+          - /url: /careers-home
+          - img "logo" [ref=e9]
+        - button "Toggle navigation" [ref=e10] [cursor=pointer]:
+          - generic [ref=e11]: Toggle navigation
+        - list [ref=e15]:
+          - listitem [ref=e16]:
+            - link "Careers" [ref=e17] [cursor=pointer]:
+              - /url: /careers-home
+            - button [ref=e18] [cursor=pointer]:
+              - generic [ref=e19]: 
+          - listitem [ref=e20]:
+            - link "Culture" [ref=e21] [cursor=pointer]:
+              - /url: /culture
+          - listitem [ref=e22]:
+            - link "DEI" [ref=e23] [cursor=pointer]:
+              - /url: /diversity
+          - listitem [ref=e24]:
+            - link "Benefits" [ref=e25] [cursor=pointer]:
+              - /url: /benefits
+          - listitem [ref=e26]:
+            - link "Locations" [ref=e27] [cursor=pointer]:
+              - /url: /our-locations
+    - main "Career Portal" [ref=e29]:
+      - iframe [ref=e30]:
+        - generic [active] [ref=f15e1]:
+          - text: 
+          - generic [ref=f15e3]:
+            - generic [ref=f15e7]:
+              - generic [ref=f15e8]: Returning Candidate?
+              - link "Log back in!" [ref=f15e10] [cursor=pointer]:
+                - /url: https://globalcareers-customer0.icims.com/jobs/6319/sr.-engineer%2c-devops/login?loginOnly=1&redirect=candidate&in_iframe=1&hashed=-625947470
+            - generic [ref=f15e12]:
+              - heading "Sr. Engineer, DevOps" [level=1] [ref=f15e15]
+              - generic [ref=f15e16]:
+                - generic [ref=f15e17]: Job Locations
+                - text: IE-Dublin-Dublin 2
+              - generic [ref=f15e18]:
+                - generic [ref=f15e19]: "Requisition Post Information* : Posted Date"
+                - generic "2/17/2026 3:50 AM" [ref=f15e20]:
+                  - text: 2 months ago
+                  - generic [ref=f15e21]: (2/17/2026 3:50 AM)
+            - alert [ref=f15e23]:
+              - text: " Error: Invalid Data Error. Please check all information before trying again."
+              - list [ref=f15e24]:
+                - listitem [ref=f15e25]: "Please upload your resume (max size: 5 MB): required."
+            - status
+            - separator [ref=f15e26]
+            - generic:
+              - list:
+                - listitem "Candidate Profile (Current Step)" [ref=f15e27]:
+                  - generic "Candidate Profile (Current Step)" [ref=f15e28]: Step 1 of 2. Candidate Profile(Current Step)
+                - listitem "Candidate Questions" [ref=f15e29]:
+                  - generic "Candidate Questions" [ref=f15e30]: Step 2 of 2. Candidate Questions(Incomplete Step)
+            - generic [ref=f15e31]: Candidate Profile
+            - separator [ref=f15e32]
+            - generic [ref=f15e33]:
+              - heading "Candidate Profile" [level=2] [ref=f15e34]
+              - generic [ref=f15e35]:
+                - generic [ref=f15e36]: Please be sure to fill out all required fields
+                - text: "* indicates a required field."
+              - generic [ref=f15e38]:
+                - generic [ref=f15e40]: Connect your account
+                - generic [ref=f15e42]:
+                  - button "Connect your account facebook" [ref=f15e43] [cursor=pointer]:
+                    - img "facebook" [ref=f15e44]
+                  - button "Connect your account google-plus" [ref=f15e45] [cursor=pointer]:
+                    - img "google-plus" [ref=f15e46]
+                  - button "Connect your account linked-in" [ref=f15e47] [cursor=pointer]:
+                    - img "linked-in" [ref=f15e48]
+                  - button "" [ref=f15e49] [cursor=pointer]:
+                    - generic "Social Account Information Icon" [ref=f15e50]: 
+              - group [ref=f15e51]:
+                - heading "Resume" [level=2] [ref=f15e52]
+                - list [ref=f15e54]:
+                  - listitem [ref=f15e55]: "Provide your resume below to pre-fill your profile. Existing data in the form will be replaced:"
+                - generic [ref=f15e56]:
+                  - generic [ref=f15e59]: " Please upload your resume (max size: 5 MB): required."
+                  - generic [ref=f15e60]:
+                    - generic [ref=f15e61]:
+                      - generic [ref=f15e62]: 
+                      - generic [ref=f15e63]:
+                        - generic [ref=f15e64]: "Error:"
+                        - text: "Please upload your resume (max size: 5 MB)"
+                      - generic [ref=f15e65]: "*"
+                    - generic [ref=f15e68]:
+                      - generic [ref=f15e70] [cursor=pointer]:
+                        - generic [ref=f15e71]: My Computer (Opens new window)
+                        - 'button "My Computer (Opens new window) Error: Please upload your resume (max size: 5 MB)" [ref=f15e72]'
+                        - generic [ref=f15e73]:
+                          - generic [ref=f15e74]: 
+                          - text: 
+                        - text: My Computer
+                      - generic [ref=f15e75]:
+                        - generic [ref=f15e76]: Google Drive (Opens new window)
+                        - 'button "Google Drive (Opens new window) Error: Please upload your resume (max size: 5 MB)" [ref=f15e77] [cursor=pointer]':
+                          - generic [ref=f15e79]: 
+                          - text: Google Drive 
+                      - generic [ref=f15e80]:
+                        - generic [ref=f15e81]: Dropbox (Opens new window)
+                        - 'button "Dropbox (Opens new window) Error: Please upload your resume (max size: 5 MB)" [ref=f15e82] [cursor=pointer]':
+                          - generic [ref=f15e84]: 
+                          - text: Dropbox 
+                      - generic [ref=f15e85]:
+                        - generic [ref=f15e86]: OneDrive (Opens new window)
+                        - 'button "OneDrive (Opens new window) Error: Please upload your resume (max size: 5 MB)" [ref=f15e87] [cursor=pointer]':
+                          - generic [ref=f15e89]: 
+                          - text: OneDrive 
+              - group [ref=f15e90]:
+                - heading "Create a login" [level=2] [ref=f15e91]
+                - generic [ref=f15e92]:
+                  - generic [ref=f15e93]:
+                    - generic [ref=f15e94]:
+                      - text: Login
+                      - generic [ref=f15e95]: "*"
+                    - textbox "Login" [ref=f15e97]
+                  - generic [ref=f15e98]:
+                    - generic [ref=f15e99]:
+                      - text: Password
+                      - generic [ref=f15e100]: "*"
+                    - generic [ref=f15e101]:
+                      - 'textbox "Password: Minimum 8 characters, 1 alphabetic, 1 lowercase, 1 uppercase, 1 numeric, 1 special character(s)" [ref=f15e102]'
+                      - text:  
+                  - generic [ref=f15e103]:
+                    - generic [ref=f15e104]:
+                      - text: Password (Re-enter)
+                      - generic [ref=f15e105]: "*"
+                    - generic [ref=f15e106]:
+                      - 'textbox "Password (Re-enter): Minimum 8 characters, 1 alphabetic, 1 lowercase, 1 uppercase, 1 numeric, 1 special character(s)" [ref=f15e107]'
+                      - text: 
+              - group [ref=f15e108]:
+                - heading "Enter your information" [level=2] [ref=f15e109]
+                - generic [ref=f15e110]:
+                  - generic [ref=f15e111]:
+                    - generic [ref=f15e112]:
+                      - text: First Name
+                      - generic [ref=f15e113]: "*"
+                    - textbox "First Name" [ref=f15e115]
+                  - generic [ref=f15e116]:
+                    - generic [ref=f15e117]: Preferred First Name
+                    - textbox "Preferred First Name" [ref=f15e119]
+                  - generic [ref=f15e120]:
+                    - generic [ref=f15e121]:
+                      - text: Last Name
+                      - generic [ref=f15e122]: "*"
+                    - textbox "Last Name" [ref=f15e124]
+                  - generic [ref=f15e125]:
+                    - generic [ref=f15e126]:
+                      - text: Full Legal Name for Offer and Onboarding Documents
+                      - generic [ref=f15e127]: "*"
+                    - textbox "Full Legal Name for Offer and Onboarding Documents" [ref=f15e129]
+                  - generic [ref=f15e130]:
+                    - generic [ref=f15e131]:
+                      - text: Email
+                      - generic [ref=f15e132]: "*"
+                    - textbox "Email" [ref=f15e134]
+                  - generic [ref=f15e135]:
+                    - generic [ref=f15e136]: Personal Email
+                    - textbox "Personal Email" [ref=f15e138]
+                  - generic [ref=f15e139]:
+                    - group "Phones (1)* required." [ref=f15e140]:
+                      - generic [ref=f15e142]:
+                        - text: Phones (1)
+                        - generic [ref=f15e143]:
+                          - text: "*"
+                          - generic [ref=f15e144]: required.
+                      - generic [ref=f15e145]:
+                        - generic [ref=f15e146]:
+                          - generic [ref=f15e147]: Type
+                          - generic [ref=f15e148]:
+                            - text: "*"
+                            - generic [ref=f15e149]: required.
+                        - combobox "Type" [ref=f15e151]:
+                          - option [selected]
+                          - option "Mobile"
+                      - generic [ref=f15e152]:
+                        - generic [ref=f15e153]:
+                          - generic [ref=f15e154]: Number
+                          - generic [ref=f15e155]:
+                            - text: "*"
+                            - generic [ref=f15e156]: required.
+                        - textbox "Number" [ref=f15e158]
+                    - button "Add More (Phones)" [ref=f15e162] [cursor=pointer]
+                  - generic [ref=f15e163]:
+                    - group "Addresses (1)* required." [ref=f15e164]:
+                      - generic [ref=f15e166]:
+                        - text: Addresses (1)
+                        - generic [ref=f15e167]:
+                          - text: "*"
+                          - generic [ref=f15e168]: required.
+                      - generic [ref=f15e169]:
+                        - generic [ref=f15e170]:
+                          - generic [ref=f15e171]: Type
+                          - generic [ref=f15e172]:
+                            - text: "*"
+                            - generic [ref=f15e173]: required.
+                        - combobox "Type" [ref=f15e175]:
+                          - option [selected]
+                          - option "Work"
+                          - option "Home"
+                          - option "Other"
+                      - generic [ref=f15e176]:
+                        - generic [ref=f15e177]:
+                          - generic [ref=f15e178]: Address
+                          - generic [ref=f15e179]:
+                            - text: "*"
+                            - generic [ref=f15e180]: required.
+                        - textbox "Address" [ref=f15e182]
+                      - generic [ref=f15e183]:
+                        - generic [ref=f15e185]: Address 2
+                        - textbox "Address 2" [ref=f15e187]
+                      - generic [ref=f15e188]:
+                        - generic [ref=f15e189]:
+                          - generic [ref=f15e190]: City
+                          - generic [ref=f15e191]:
+                            - text: "*"
+                            - generic [ref=f15e192]: required.
+                        - textbox "City" [ref=f15e194]
+                      - generic [ref=f15e195]:
+                        - generic [ref=f15e196]:
+                          - generic [ref=f15e197]: Zip/Postal Code
+                          - generic [ref=f15e198]:
+                            - text: "*"
+                            - generic [ref=f15e199]: required.
+                        - textbox "Zip/Postal Code" [ref=f15e201]
+                      - generic [ref=f15e202]:
+                        - generic [ref=f15e203]:
+                          - generic [ref=f15e204]: Country
+                          - generic [ref=f15e205]:
+                            - text: "*"
+                            - generic [ref=f15e206]: required.
+                        - generic [ref=f15e207]:
+                          - option [selected]
+                          - combobox "Country" [ref=f15e208] [cursor=pointer]:
+                            - generic [ref=f15e209]: — Make a Selection —
+                      - generic [ref=f15e212]:
+                        - generic [ref=f15e213]:
+                          - generic [ref=f15e214]: State/Province
+                          - generic [ref=f15e215]:
+                            - text: "*"
+                            - generic [ref=f15e216]: required.
+                        - generic [ref=f15e217]:
+                          - option [selected]
+                          - combobox "State/Province" [ref=f15e218] [cursor=pointer]:
+                            - generic [ref=f15e219]: Loading...
+                    - button "Add More (Addresses)" [ref=f15e225] [cursor=pointer]
+                  - generic [ref=f15e226]:
+                    - generic [ref=f15e227]:
+                      - text: How did you hear about us?
+                      - generic [ref=f15e228]: "*"
+                    - combobox "How did you hear about us?" [ref=f15e230]:
+                      - option "— Make a Selection —" [selected]
+                      - option "abilityJOBS"
+                      - option "Campus Event"
+                      - option "iCIMS Event"
+                      - option "INROADS"
+                  - generic [ref=f15e231]:
+                    - generic [ref=f15e232]: Please specify further
+                    - textbox "Please specify further" [ref=f15e234]
+              - generic [ref=f15e235]:
+                - generic [ref=f15e238]:
+                  - text: By proceeding you agree to iCIMS
+                  - link "Privacy Policy" [ref=f15e239] [cursor=pointer]:
+                    - /url: http://www.icims.com/content/privacy.asp
+                  - text: .
+                - button "Submit Profile" [ref=f15e242] [cursor=pointer]
+            - generic [ref=f15e243]:
+              - link "Application FAQs" [ref=f15e244] [cursor=pointer]:
+                - /url: https://icims.help/candidate-faq
+              - img "Powered by the iCIMS Talent Platform (Opens new window)"
+              - paragraph [ref=f15e245]:
+                - text: Software Powered by ICIMS
+                - link "www.icims.com" [ref=f15e246] [cursor=pointer]:
+                  - /url: http://www.icims.com/platform_help?utm_source=platform&utm_medium=link&utm_content=page1&utm_campaign=platform%20help
+          - generic [ref=f15e247]:
+            - button "Close hCaptcha attribution notice" [ref=f15e248] [cursor=pointer]: 
+            - generic [ref=f15e249]:
+              - text: Protected by hCaptcha
+              - link "Privacy" [ref=f15e250] [cursor=pointer]:
+                - /url: https://www.hcaptcha.com/privacy
+              - text: "|"
+              - link "Terms" [ref=f15e251] [cursor=pointer]:
+                - /url: https://www.hcaptcha.com/terms
+    - generic [ref=e33]:
+      - img "LP.AWARDS.NAME_1" [ref=e35]
+      - img "LP.AWARDS.NAME_5" [ref=e37]
+      - img "LP.AWARDS.NAME_2" [ref=e39]
+      - img "LP.AWARDS.NAME_10" [ref=e41]
+      - img "LP.AWARDS.NAME_3" [ref=e43]
+      - img "LP.AWARDS.NAME_4" [ref=e45]
+      - img "LP.AWARDS.NAME_9" [ref=e47]
+      - img "LP.AWARDS.NAME_6" [ref=e49]
+      - img "LP.AWARDS.NAME_7" [ref=e51]
+      - img "LP.AWARDS.NAME_8" [ref=e53]
+    - generic [ref=e55]:
+      - link "logo" [ref=e57] [cursor=pointer]:
+        - /url: https://www.icims.com/
+        - img "logo" [ref=e58]
+      - list [ref=e59]:
+        - listitem [ref=e60]:
+          - link "Facebook Link" [ref=e61] [cursor=pointer]:
+            - /url: http://www.facebook.com/iCIMS
+            - img [ref=e62]
+        - listitem [ref=e64]:
+          - link "Linkedin Link" [ref=e65] [cursor=pointer]:
+            - /url: https://www.linkedin.com/company/icims/
+            - img [ref=e66]
+        - listitem [ref=e68]:
+          - link "Twitter Link" [ref=e69] [cursor=pointer]:
+            - /url: https://twitter.com/icims
+            - img [ref=e70]
+        - listitem [ref=e72]:
+          - link "Instagram Link" [ref=e73] [cursor=pointer]:
+            - /url: https://www.instagram.com/icims_inc/
+            - img [ref=e74]
+        - listitem [ref=e76]:
+          - link "Youtube Link" [ref=e77] [cursor=pointer]:
+            - /url: https://www.youtube.com/user/iCIMS
+            - img [ref=e78]
+        - listitem [ref=e80]:
+          - link "Glassdoor Link" [ref=e81] [cursor=pointer]:
+            - /url: https://www.glassdoor.com/Overview/Working-at-iCIMS-EI_IE34908.11,16.htm
+            - img [ref=e82]
+      - generic [ref=e84]:
+        - paragraph [ref=e85]:
+          - text: ICIMS is a place where everyone belongs. We celebrate diversity and are committed to creating an inclusive environment for all employees. Our approach helps us to build a winning team that represents a variety of backgrounds, perspectives, and abilities. So, regardless of how your diversity expresses itself, you can find a home here at ICIMS.
+          - text: We are proud to be an equal opportunity and affirmative action employer. We prohibit discrimination and harassment of any kind based on race, color, religion, national origin, sex (including pregnancy), sexual orientation, gender identity, gender expression, age, veteran status, genetic information, disability, or other applicable legally protected characteristics. If you would like to request an accommodation due to a disability, please contact us at
+          - link "careers@icims.com" [ref=e86] [cursor=pointer]:
+            - /url: mailto:careers@icims.com
+        - paragraph [ref=e87]:
+          - text: 101 Crawfords Corner Road
+          - text: Suite 3-100
+          - text: Holmdel, NJ 07733 USA
+          - text: (800) 889-4422
+        - paragraph [ref=e88]: © Copyright 2026 ICIMS, Inc. All rights reserved.
+        - list [ref=e89]:
+          - listitem [ref=e90]:
+            - link "ICIMS, Inc." [ref=e91] [cursor=pointer]:
+              - /url: https://www.icims.com/
+          - listitem [ref=e92]:
+            - link "Privacy Notice" [ref=e93] [cursor=pointer]:
+              - /url: https://www.icims.com/legal/talent-acquisition-privacy-notice/?_sp=59ebd1d4-01fd-4d7a-a101-03deb2b6a80c.1673377452359
+          - listitem [ref=e94]: Cookie Settings
+          - listitem [ref=e95]:
+            - link "Terms of Use" [ref=e96] [cursor=pointer]:
+              - /url: https://www.icims.com/legal/terms-of-use
+          - listitem [ref=e97]:
+            - link "Transparency in Coverage" [ref=e98] [cursor=pointer]:
+              - /url: https://horizonblue.sapphiremrfhub.com/tocs/current/icims

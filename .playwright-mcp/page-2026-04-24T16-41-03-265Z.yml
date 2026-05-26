@@ -1,0 +1,96 @@
+- generic [ref=e2]:
+  - region "Notifications (F8)":
+    - list
+  - generic [ref=e3]:
+    - navigation [ref=e4]:
+      - generic [ref=e6]:
+        - generic [ref=e7]:
+          - generic [ref=e9]: F
+          - generic [ref=e10]: Fillo
+        - generic [ref=e11]:
+          - link "Sign In" [ref=e12] [cursor=pointer]:
+            - /url: /auth
+            - button "Sign In" [ref=e13]
+          - link "Get Started" [ref=e14] [cursor=pointer]:
+            - /url: /auth
+            - button "Get Started" [ref=e15]:
+              - text: Get Started
+              - img
+    - generic [ref=e17]:
+      - generic [ref=e18]: 🚀 Now supporting Workday & ICIMS
+      - heading "Fill the gap between effort and opportunity" [level=1] [ref=e19]
+      - paragraph [ref=e20]: Stop wasting hours on repetitive job applications. Fillo is the smart autofill assistant that makes applying to jobs effortless—starting with the platforms you already use.
+      - generic [ref=e21]:
+        - link "Start Applying Smarter" [ref=e22] [cursor=pointer]:
+          - /url: /auth
+          - button "Start Applying Smarter" [ref=e23]:
+            - text: Start Applying Smarter
+            - img
+        - button "Install Extension" [ref=e24] [cursor=pointer]:
+          - img
+          - text: Install Extension
+      - generic [ref=e25]:
+        - generic [ref=e26]:
+          - generic [ref=e27]: 95%
+          - generic [ref=e28]: Time Saved
+        - generic [ref=e29]:
+          - generic [ref=e30]: 50+
+          - generic [ref=e31]: Supported Platforms
+        - generic [ref=e32]:
+          - generic [ref=e33]: 10k+
+          - generic [ref=e34]: Applications Filled
+    - generic [ref=e36]:
+      - generic [ref=e37]:
+        - heading "How Fillo Works" [level=2] [ref=e38]
+        - paragraph [ref=e39]: Three simple steps to transform your job application experience
+      - generic [ref=e40]:
+        - generic [ref=e41]:
+          - img [ref=e43]
+          - heading "1. Upload Your Resume" [level=3] [ref=e46]
+          - paragraph [ref=e47]: Upload your resume once and let our AI parse all your information automatically.
+        - generic [ref=e48]:
+          - img [ref=e50]
+          - heading "2. Install Extension" [level=3] [ref=e55]
+          - paragraph [ref=e56]: Add our Chrome extension and create reusable profiles for different job types.
+        - generic [ref=e57]:
+          - img [ref=e59]
+          - heading "3. Auto-Fill Applications" [level=3] [ref=e62]
+          - paragraph [ref=e63]: Click once to fill any job application form on Workday, ICIMS, and more.
+    - generic [ref=e66]:
+      - generic [ref=e67]:
+        - heading "Tired of filling the same forms over and over?" [level=2] [ref=e68]
+        - paragraph [ref=e69]: Every job seeker knows the pain. Workday, ICIMS, and other enterprise platforms make you re-enter the same information repeatedly. It's frustrating, time-consuming, and outdated.
+        - generic [ref=e70]:
+          - generic [ref=e71]:
+            - img [ref=e72]
+            - generic [ref=e75]: Hours wasted on repetitive form filling
+          - generic [ref=e76]:
+            - img [ref=e77]
+            - generic [ref=e82]: Different login for every application
+          - generic [ref=e83]:
+            - img [ref=e84]
+            - generic [ref=e88]: Outdated UX that discourages applications
+      - generic [ref=e89]:
+        - generic [ref=e90]:
+          - paragraph [ref=e92]: "\"If I see a job application served by Workday I immediately skip it.\""
+          - paragraph [ref=e94]: "\"You need a different login for every iCIMS application. My password manager is crying.\""
+          - paragraph [ref=e96]: "\"It's 2025. Why is autofill still not a thing?\""
+        - paragraph [ref=e97]: — Actual tweets from job seekers, 2025
+    - generic [ref=e99]:
+      - heading "Ready to apply smarter, not harder?" [level=2] [ref=e100]
+      - paragraph [ref=e101]: Join thousands of job seekers who've already made their application process effortless with Fillo.
+      - generic [ref=e102]:
+        - link "Get Started Free" [ref=e103] [cursor=pointer]:
+          - /url: /auth
+          - button "Get Started Free" [ref=e104]:
+            - text: Get Started Free
+            - img
+        - button "Install Extension" [ref=e105] [cursor=pointer]:
+          - img
+          - text: Install Extension
+    - contentinfo [ref=e106]:
+      - generic [ref=e108]:
+        - generic [ref=e109]:
+          - generic [ref=e111]: F
+          - generic [ref=e112]: Fillo
+        - paragraph [ref=e113]: © 2025 Fillo. All rights reserved.

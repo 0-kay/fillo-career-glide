@@ -17,8 +17,7 @@
     "http://127.0.0.1:*/*"
   ],
   "background": {
-    "service_worker": "background.js",
-    "type": "module"
+    "service_worker": "background.js"
   },
   "content_scripts": [
     {
@@ -31,6 +30,7 @@
         "content/namespace.js",
         "content/config.js",
         "content/utils.js",
+        "content/domain-detector.js",
         "content/mapping.js",
         "content/ai.js",
         "content/planner.js",
@@ -44,17 +44,18 @@
     },
     {
       "matches": [
-        "http://localhost:8080/*",
-        "http://127.0.0.1:8080/*"
+        "http://localhost:*/*",
+        "http://127.0.0.1:*/*"
       ],
       "js": [
-        "content/auth-sync.js"
+        "content/auth-listener.js"
       ],
       "run_at": "document_start"
     }
   ],
   "externally_connectable": {
     "matches": [
+      "http://localhost:5173/*",
       "http://localhost:*/*"
     ]
   },
@@ -71,16 +72,5 @@
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"
-  },
-  "web_accessible_resources": [
-    {
-      "resources": [
-        "matching_fields.json"
-      ],
-      "matches": [
-        "https://*/*",
-        "http://*/*"
-      ]
-    }
-  ]
+  }
 }
