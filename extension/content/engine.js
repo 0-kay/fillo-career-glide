@@ -114,6 +114,20 @@
             '';
     }
 
+    function cleanChoiceOptions(options) {
+        const seen = new Set();
+        const cleaned = [];
+        for (const option of options || []) {
+            const text = String(option || '').replace(/\s+/g, ' ').trim();
+            if (!text || /^(select|choose|please|make a selection)\b/i.test(text)) continue;
+            const key = text.toLowerCase();
+            if (seen.has(key)) continue;
+            seen.add(key);
+            cleaned.push(text);
+        }
+        return cleaned;
+    }
+
     function scoreExactFirstOption(optionText, wantedValue) {
         const option = normalizeSelectText(optionText);
         const wanted = normalizeSelectText(wantedValue);
@@ -255,7 +269,8 @@
             const radioInputs = Array.from(field.querySelectorAll('input[type="radio"]'));
 
             if (radioInputs.length > 0) {
-                questions.push({ questionText, elements: radioInputs, type: 'radio' });
+                const options = cleanChoiceOptions(radioInputs.map(r => getFieldLabel(r) || r.value || ''));
+                questions.push({ questionText, elements: radioInputs, type: 'radio', options });
             } else if (dropdownBtn) {
                 questions.push({ questionText, element: dropdownBtn, type: 'dropdown' });
             } else if (textInput) {
@@ -350,15 +365,396 @@
         return bestMatch;
     }
 
+    // True when an option label is a real choice rather than a placeholder.
+    function isRealChoiceText(text) {
+        const s = String(text || '').trim().toLowerCase();
+        return !!s && !/^(select|choose|please|pick|none|--)\b/.test(s);
+    }
+
+    // True when a set of option labels is clearly a binary Yes/No set (ignoring any
+    // placeholder). Used so the screening fallback only fires on real yes/no questions.
+    // Matches options that START with yes/no so long phrasings like "Yes, I am legally
+    // authorized..." / "No, I am not..." still count.
+    const startsWithYes = (t) => /^(yes|y|true)\b/.test(String(t || '').trim().toLowerCase());
+    const startsWithNo = (t) => /^(no|n|false)\b/.test(String(t || '').trim().toLowerCase());
+    function looksLikeYesNoOptions(texts) {
+        const real = texts.map(t => String(t || '').trim().toLowerCase()).filter(isRealChoiceText);
+        if (real.length < 2 || real.length > 3) return false;
+        return real.some(startsWithYes) && real.some(startsWithNo);
+    }
+
+    function getWorkdayQuestionText(field) {
+        if (!field) return '';
+        const source =
+            field.querySelector('legend div[data-automation-id="richText"] p span') ||
+            field.querySelector('legend div[data-automation-id="richText"] p') ||
+            field.querySelector('legend div[data-automation-id="richText"]') ||
+            field.querySelector('[data-automation-id="richText"]') ||
+            field.querySelector('legend') ||
+            field.querySelector('label');
+        let text = source?.textContent || '';
+
+        if (!text) {
+            const labelledBy = field.querySelector('[aria-labelledby]')?.getAttribute('aria-labelledby') ||
+                field.getAttribute?.('aria-labelledby');
+            text = labelledBy
+                ? labelledBy.split(/\s+/).map(id => document.getElementById(id)?.textContent || '').join(' ')
+                : '';
+        }
+
+        return String(text || '').replace(/\*/g, '').replace(/\s+/g, ' ').trim();
+    }
+
+    async function fillDateInputWrapper(wrapper, value, fieldTracker, strategy = 'generic_screening') {
+        if (!wrapper) return false;
+        const parts = normalizeDateValue(value);
+        if (!parts.year || !parts.month || !parts.day) return false;
+
+        const monthInput = wrapper.querySelector('[data-automation-id="dateSectionMonth-input"], input[aria-label*="month" i]');
+        const dayInput = wrapper.querySelector('[data-automation-id="dateSectionDay-input"], input[aria-label*="day" i]');
+        const yearInput = wrapper.querySelector('[data-automation-id="dateSectionYear-input"], input[aria-label*="year" i]');
+        if (!monthInput || !dayInput || !yearInput) return false;
+
+        await fillElement(monthInput, String(parseInt(parts.month, 10)));
+        await fillElement(dayInput, String(parseInt(parts.day, 10)));
+        await fillElement(yearInput, parts.year);
+        markFieldFilled(wrapper, strategy, fieldTracker);
+        fieldTracker?.filledElements?.add(monthInput);
+        fieldTracker?.filledElements?.add(dayInput);
+        fieldTracker?.filledElements?.add(yearInput);
+        fieldTracker?.filledValues?.set?.(monthInput, monthInput.value);
+        fieldTracker?.filledValues?.set?.(dayInput, dayInput.value);
+        fieldTracker?.filledValues?.set?.(yearInput, yearInput.value);
+        return true;
+    }
+
+    async function fillWorkdayTodayDateQuestions(container, fieldTracker) {
+        let filled = 0;
+        const dateWrappers = Array.from(container.querySelectorAll('[data-automation-id="dateInputWrapper"]'))
+            .filter(isElementVisible)
+            .sort((a, b) => getVisualOrderKey(a) - getVisualOrderKey(b));
+
+        for (const dateWrapper of dateWrappers) {
+            if (fieldTracker.filledElements.has(dateWrapper)) continue;
+
+            const field = dateWrapper.closest('[data-automation-id^="formField-"]') ||
+                dateWrapper.closest('fieldset') ||
+                dateWrapper.parentElement ||
+                dateWrapper;
+            const questionText = getWorkdayQuestionText(field) || getWorkdayQuestionText(dateWrapper);
+            if (!/please\s+enter\s+today'?s\s+date\b/i.test(questionText)) continue;
+
+            if (await fillDateInputWrapper(dateWrapper, new Date(), fieldTracker, 'generic_screening')) {
+                console.log(`[Fillo] Filled today's date question: "${questionText.substring(0, 60)}"`);
+                filled++;
+                await new Promise(r => setTimeout(r, 120));
+            }
+        }
+
+        return filled;
+    }
+
+    async function fillWorkdayDisabilityDateSigned(fieldTracker) {
+        const fieldId = 'selfIdentifiedDisabilityData--dateSignedOn';
+        const exact = document.getElementById(fieldId);
+        const wrapper = exact?.matches?.('[data-automation-id="dateInputWrapper"]')
+            ? exact
+            : exact?.closest?.('[data-automation-id="dateInputWrapper"]') ||
+                document.querySelector(`#${CSS.escape(fieldId)} [data-automation-id="dateInputWrapper"]`) ||
+                document.querySelector(`[id^="${CSS.escape(fieldId)}-dateSection"]`)?.closest?.('[data-automation-id="dateInputWrapper"]');
+
+        if (wrapper && isElementVisible(wrapper) && !fieldTracker.filledElements.has(wrapper)) {
+            const ok = await fillDateInputWrapper(wrapper, new Date(), fieldTracker, 'generic_screening');
+            if (ok) {
+                console.log('[Fillo] Filled Workday disability Date Signed with today');
+                return 1;
+            }
+        }
+
+        if (exact && isElementVisible(exact) && !fieldTracker.filledElements.has(exact)) {
+            const parts = normalizeDateValue(new Date());
+            const value = exact.type === 'date' ? parts.iso : `${parts.month}/${parts.day}/${parts.year}`;
+            if (await fillElement(exact, value)) {
+                markFieldFilled(exact, 'generic_screening', fieldTracker);
+                console.log('[Fillo] Filled Workday disability Date Signed with today');
+                return 1;
+            }
+        }
+
+        return 0;
+    }
+
+    function isPlaceholderDisclosureText(text) {
+        const s = String(text || '').trim().toLowerCase();
+        return !s || /^(select|choose|please|make a selection)\b/.test(s);
+    }
+
+    const WORKDAY_VETERAN_NOT_PROTECTED_OPTION = 'I IDENTIFY AS A VETERAN, JUST NOT A PROTECTED VETERAN';
+
+    function normalizeVoluntaryDisclosureAnswer(fieldName, value) {
+        const raw = String(value || '').trim();
+        const lower = raw.toLowerCase();
+        if (!raw) return '';
+
+        if (/veteran/i.test(fieldName)) {
+            if (/prefer|decline|do not wish|don't wish|not answer|do not want/.test(lower)) return "I don't wish to answer";
+            if (/just not.*protected veteran|not (a )?protected veteran|notprotectedveteran/.test(lower)) return WORKDAY_VETERAN_NOT_PROTECTED_OPTION;
+            if (/^(no|false|n|0)\b/.test(lower)) return 'I am not a protected veteran';
+            if (/^(yes|true|y|1)\b/.test(lower) || /protected veteran|disabled veteran|recently separated|armed forces|campaign badge/.test(lower)) {
+                return 'I identify as one or more classifications of protected veteran';
+            }
+        }
+
+        if (/ethnicity|race/i.test(fieldName)) {
+            if (/prefer|decline|do not wish|don't wish|not answer|do not want/.test(lower)) return 'I do not wish to answer';
+        }
+
+        if (/gender/i.test(fieldName)) {
+            if (/prefer|decline|do not wish|don't wish|not answer|do not want/.test(lower)) return 'I do not wish to answer';
+        }
+
+        return raw;
+    }
+
+    function getDisclosureScreeningAnswer(screeningAnswers, config, fieldLabel = '') {
+        if (!Array.isArray(screeningAnswers)) return null;
+        const wanted = (config.screeningKeys || []).map(k => normalizeFieldText(k)).filter(Boolean);
+        const blocked = (config.blockedScreeningKeys || []).map(k => normalizeFieldText(k)).filter(Boolean);
+        const targetText = normalizeFieldText([
+            config.label,
+            fieldLabel,
+            ...(config.screeningKeys || [])
+        ].filter(Boolean).join(' '));
+        const hasWantedKey = (text) => wanted.some(key => text.includes(key));
+        const hasBlockedKey = (text) => blocked.some(key => text.includes(key));
+
+        // Exact/keyed match first: this is the safest mapping when the stored
+        // screening answer has a useful question/key/keyword.
+        for (const answer of screeningAnswers) {
+            if (!answer?.enabled || answer.answer == null || answer.answer === '') continue;
+            const haystack = [
+                answer.key,
+                answer.question,
+                ...(Array.isArray(answer.keywords) ? answer.keywords : [])
+            ].filter(Boolean).join(' ');
+            if (hasWantedKey(normalizeFieldText(haystack))) return answer.answer;
+        }
+
+        // Scoped similar search: useful when user data has "Please select your race..."
+        // but no explicit key. It still rejects unrelated domains such as work auth.
+        let best = null;
+        let bestScore = 0;
+        for (const answer of screeningAnswers) {
+            if (!answer?.enabled || answer.answer == null || answer.answer === '') continue;
+            const candidateText = normalizeFieldText([
+                answer.key,
+                answer.question,
+                ...(Array.isArray(answer.keywords) ? answer.keywords : [])
+            ].filter(Boolean).join(' '));
+            if (!candidateText || hasBlockedKey(candidateText)) continue;
+
+            const score = semanticScore(targetText, candidateText);
+            if (score > bestScore && score >= 0.55) {
+                best = answer;
+                bestScore = score;
+            }
+        }
+
+        if (best) {
+            console.log(`[Fillo] Disclosure similar match "${config.name}" -> "${String(best.question || '').substring(0, 50)}" (score ${bestScore.toFixed(2)})`);
+            return best.answer;
+        }
+
+        return null;
+    }
+
+    function getFirstProfileValue(profileData, paths) {
+        for (const path of paths) {
+            const value = getProfileValueForPath(profileData, path);
+            if (value != null && value !== '') return value;
+        }
+        return null;
+    }
+
+    async function fillWorkdayVoluntaryDisclosures(profileData, fieldTracker) {
+        const container = document.querySelector('[data-automation-id="applyFlowVoluntaryDisclosuresPage"]');
+        if (!container || !isElementVisible(container)) return 0;
+
+        const screeningAnswers = profileData?.job_preferences?.screening_answers;
+        const fields = [
+            {
+                name: 'gender',
+                label: 'Gender',
+                paths: ['job_preferences.eeo.gender', 'job_preferences.gender', 'personal_details.gender'],
+                screeningKeys: ['gender', 'sex'],
+                blockedScreeningKeys: ['sexual orientation', 'gender identity', 'work authorization', 'authorized to work', 'visa', 'sponsor', 'veteran', 'race', 'ethnicity'],
+                fallback: null,
+                fallbackOptions: []
+            },
+            {
+                name: 'ethnicity',
+                label: 'Ethnicity race',
+                paths: [
+                    'job_preferences.eeo.race_ethnicity',
+                    'job_preferences.race_ethnicity',
+                    'personal_details.race_ethnicity',
+                    'personal_details.ethnicity',
+                    'personal_details.race'
+                ],
+                screeningKeys: ['ethnicity', 'race', 'race ethnicity', 'hispanic', 'latino', 'black', 'asian', 'white', 'native american', 'pacific islander'],
+                blockedScreeningKeys: ['work authorization', 'authorized to work', 'visa', 'sponsor', 'veteran', 'gender', 'disability'],
+                fallback: 'I do not wish to answer',
+                fallbackOptions: [
+                    'I do not wish to answer',
+                    'I do not wish to self-identify',
+                    'Decline to Self Identify',
+                    'Prefer not to answer'
+                ]
+            },
+            {
+                name: 'veteranStatus',
+                label: 'Veterans Status protected veteran',
+                paths: [
+                    'job_preferences.eeo.protected_veteran',
+                    'job_preferences.protected_veteran',
+                    'job_preferences.veteran_status',
+                    'personal_details.veteran_status'
+                ],
+                screeningKeys: ['veteran', 'veteran status', 'veterans status', 'protected veteran', 'vevraa', 'military service'],
+                blockedScreeningKeys: ['work authorization', 'authorized to work', 'lawfully', 'visa', 'sponsor', 'sponsorship', 'h-1b', 'gender', 'race', 'ethnicity', 'disability'],
+                fallback: "I don't wish to answer",
+                fallbackOptions: [
+                    "I don't wish to answer",
+                    'I do not wish to answer',
+                    'I do not wish to self-identify',
+                    'Decline to Self Identify',
+                    'Prefer not to answer'
+                ]
+            }
+        ];
+        let filled = 0;
+
+        for (const config of fields) {
+            const field = container.querySelector(`[data-automation-id="formField-${config.name}"]`);
+            const button = field?.querySelector('button[aria-haspopup="listbox"]');
+            if (!field || !button || fieldTracker.filledElements.has(button)) continue;
+            if (!fieldTracker.allowRefill && !isPlaceholderDisclosureText(button.textContent)) continue;
+
+            const labelText = getWorkdayQuestionText(field) || config.label;
+            const profileAnswer = getFirstProfileValue(profileData, config.paths);
+            const directScreeningAnswer = getDisclosureScreeningAnswer(screeningAnswers, config, labelText);
+            const hasProvidedAnswer = profileAnswer != null || directScreeningAnswer != null;
+            const rawAnswer = profileAnswer ?? directScreeningAnswer ?? config.fallback;
+            const answer = normalizeVoluntaryDisclosureAnswer(config.name, rawAnswer);
+            if (!answer) continue;
+
+            let ok = await fillElement(button, answer);
+            if (
+                !ok &&
+                /veteran/i.test(config.name) &&
+                /just not.*protected veteran|not (a )?protected veteran|notprotectedveteran/.test(String(rawAnswer || '').toLowerCase()) &&
+                answer !== WORKDAY_VETERAN_NOT_PROTECTED_OPTION
+            ) {
+                ok = await fillElement(button, WORKDAY_VETERAN_NOT_PROTECTED_OPTION);
+            }
+            if (!ok && !hasProvidedAnswer && Array.isArray(config.fallbackOptions)) {
+                for (const fallbackOption of config.fallbackOptions) {
+                    if (!fallbackOption || fallbackOption === answer) continue;
+                    ok = await fillElement(button, fallbackOption);
+                    if (ok) break;
+                }
+            }
+
+            if (ok) {
+                markFieldFilled(button, 'generic_screening', fieldTracker);
+                console.log(`[Fillo] Filled voluntary disclosure ${config.name}: "${answer}"`);
+                filled++;
+                await new Promise(r => setTimeout(r, 160));
+            }
+        }
+
+        const termsField = container.querySelector('[data-automation-id="formField-acceptTermsAndAgreements"]');
+        const termsCheckbox = termsField?.querySelector('input[type="checkbox"]') ||
+            container.querySelector('input[name="acceptTermsAndAgreements"][type="checkbox"], input[id$="--acceptTermsAndAgreements"][type="checkbox"]');
+        if (termsCheckbox && !fieldTracker.filledElements.has(termsCheckbox) && !termsCheckbox.checked) {
+            const termsText = (getWorkdayQuestionText(termsField) || termsField?.textContent || '').toLowerCase();
+            if (/acknowledge|privacy statement|terms|agreement|vibe/.test(termsText)) {
+                if (await fillElement(termsCheckbox, true)) {
+                    markFieldFilled(termsCheckbox, 'generic_screening', fieldTracker);
+                    console.log('[Fillo] Accepted Workday terms and agreements checkbox');
+                    filled++;
+                }
+            }
+        }
+
+        return filled;
+    }
+
+    // Screening fallback: when a yes/no question's dropdown has no stored answer, pick
+    // the first Yes/No-style option. Handles native <select> and Workday listbox buttons.
+    // Returns true only when it acted on a genuine yes/no dropdown.
+    async function fillScreeningYesNoFallback(element, fieldTracker) {
+        if (!element) return false;
+        if (fieldTracker?.skippedScreeningElements?.has(element) ||
+            fieldTracker?.skippedScreeningElements?.has(element.closest?.('[data-automation-id^="formField-"]'))) {
+            console.log('[Fillo] Skipping Yes/No fallback because AI returned low confidence/null for this screening field');
+            return false;
+        }
+        const tag = element.tagName?.toLowerCase();
+
+        if (tag === 'select') {
+            const opts = Array.from(element.options || []);
+            if (!looksLikeYesNoOptions(opts.map(o => o.textContent))) return false;
+            const first = opts.find(o => isRealChoiceText(o.textContent));
+            if (!first) return false;
+            const ok = await fillElement(element, first.textContent.trim());
+            if (ok) {
+                markFieldFilled(element, 'generic_screening', fieldTracker);
+                console.log(`[Fillo] Yes/No screening fallback → "${first.textContent.trim()}"`);
+            }
+            return ok;
+        }
+
+        const isCombo = tag === 'button' &&
+            (element.getAttribute('aria-haspopup') === 'listbox' || element.getAttribute('role') === 'combobox');
+        if (isCombo) {
+            element.focus({ preventScroll: true });
+            element.click();
+            let opts = [];
+            for (let i = 0; i < 12; i++) {
+                await new Promise(r => setTimeout(r, 150));
+                opts = Array.from(document.querySelectorAll('[role="option"]')).filter(isElementVisible);
+                if (opts.length) break;
+            }
+            if (!looksLikeYesNoOptions(opts.map(o => o.textContent))) {
+                await dismissWorkdayDropdown(element);
+                return false;
+            }
+            const first = opts.find(o => isRealChoiceText(o.textContent));
+            if (!first) { await dismissWorkdayDropdown(element); return false; }
+            clickLikeUser(first);
+            element.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
+            await new Promise(r => setTimeout(r, 200));
+            await dismissWorkdayDropdown(element);
+            markFieldFilled(element, 'generic_screening', fieldTracker);
+            console.log(`[Fillo] Yes/No screening fallback → "${(first.textContent || '').trim()}"`);
+            return true;
+        }
+
+        return false;
+    }
+
     /** Fill Workday questionnaire / screening questions from stored answers. */
     async function fillWorkdayQuestionnaire(profileData, fieldTracker) {
         const container = detectWorkdayQuestionnairePage();
         if (!container) return 0;
 
+        let filled = await fillWorkdayTodayDateQuestions(container, fieldTracker);
+
         const screeningAnswers = profileData?.job_preferences?.screening_answers;
         if (!screeningAnswers || screeningAnswers.length === 0) {
             console.log('[Fillo] No screening answers configured');
-            return 0;
+            return filled;
         }
 
         // Load screening question patterns from the database config for pattern-first matching
@@ -372,75 +768,372 @@
 
         const questions = extractWorkdayQuestions(container);
         console.log(`[Fillo] Found ${questions.length} questionnaire questions, ${questionPatterns.length} patterns loaded`);
-        let filled = 0;
 
-        for (const q of questions) {
-            // Skip "How did you hear about this position?" — not answered from profile data.
+        // Filter out questions we can't or shouldn't fill
+        function isSkippable(q) {
             if (/how did you (hear|find|learn|know) about/i.test(q.questionText) ||
-                /source of (hire|application|referral)/i.test(q.questionText)) {
-                console.log(`[Fillo] Skipping "how did you hear" question: "${q.questionText.substring(0, 60)}"`);
-                continue;
-            }
-
-            // Check element availability (radio uses q.elements array, others use q.element)
+                /source of (hire|application|referral)/i.test(q.questionText)) return true;
             if (q.type === 'radio') {
-                if (!q.elements || q.elements.length === 0) continue;
-                if (q.elements.every(r => fieldTracker.filledElements.has(r))) continue;
+                if (!q.elements || q.elements.length === 0) return true;
+                if (q.elements.every(r => fieldTracker.filledElements.has(r))) return true;
+                if (!fieldTracker.allowRefill && q.elements.some(r => r.checked)) return true;
             } else {
-                if (!q.element) continue;
-                if (fieldTracker.filledElements.has(q.element)) continue;
+                if (!q.element) return true;
+                if (fieldTracker.filledElements.has(q.element)) return true;
+                if (!fieldTracker.allowRefill && q.type === 'dropdown') {
+                    const btnText = q.element.textContent.trim().toLowerCase();
+                    if (btnText && !btnText.includes('select') && !btnText.includes('choose') && !btnText.includes('please')) return true;
+                }
+                if (!fieldTracker.allowRefill && q.type === 'text' && q.element.value?.trim()) return true;
+            }
+            return false;
+        }
+
+        // Direct text match: normalize and compare page question against stored question text only.
+        // No semantic/keyword scoring — if the text doesn't match directly, it goes to AI.
+        function directMatch(pageQuestion, answers) {
+            if (!Array.isArray(answers)) return null;
+            const norm = s => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, ' ').replace(/\s+/g, ' ').trim();
+            const qNorm = norm(pageQuestion);
+            for (const sa of answers) {
+                if (!sa.enabled || !sa.answer) continue;
+                const saNorm = norm(sa.question);
+                if (!saNorm) continue;
+                if (qNorm === saNorm || qNorm.includes(saNorm) || saNorm.includes(qNorm)) return sa;
+            }
+            return null;
+        }
+
+        function getScreeningOptionsForQuestion(pageQuestion, answers) {
+            if (!Array.isArray(answers)) return [];
+            const qLower = String(pageQuestion || '').toLowerCase();
+            const options = [];
+            const add = values => {
+                for (const value of values || []) {
+                    const text = String(value || '').trim();
+                    if (text) options.push(text);
+                }
+            };
+
+            for (const sa of answers) {
+                if (!sa?.enabled) continue;
+                const haystack = [
+                    sa.question,
+                    ...(Array.isArray(sa.keywords) ? sa.keywords : [])
+                ].filter(Boolean).join(' ');
+                const keywordHit = Array.isArray(sa.keywords) && sa.keywords.some(kw => qLower.includes(String(kw || '').toLowerCase()));
+                if (keywordHit || semanticScore(pageQuestion, haystack) >= 0.25) {
+                    if (Array.isArray(sa.answerOptions) && sa.answerOptions.length > 0) {
+                        add(sa.answerOptions);
+                    } else if (sa.answerType === 'yes_no') {
+                        add(['Yes', 'No']);
+                    }
+                    if (sa.answer) add([sa.answer]);
+                }
             }
 
-            // Skip questions the user has already answered in observer mode only.
-            if (!fieldTracker.allowRefill && q.type === 'radio') {
-                if (q.elements.some(r => r.checked)) {
-                    console.log(`[Fillo] Skipping already-answered radio: "${q.questionText.substring(0, 50)}"`);
-                    continue;
-                }
-            } else if (!fieldTracker.allowRefill && q.type === 'dropdown') {
-                const btnText = q.element.textContent.trim().toLowerCase();
-                const isPlaceholder = !btnText || btnText.includes('select') || btnText.includes('choose') || btnText.includes('please');
-                if (!isPlaceholder) {
-                    console.log(`[Fillo] Skipping pre-filled dropdown: "${q.questionText.substring(0, 50)}"`);
-                    continue;
-                }
-            } else if (!fieldTracker.allowRefill && q.type === 'text') {
-                if (q.element.value?.trim()) {
-                    console.log(`[Fillo] Skipping pre-filled text: "${q.questionText.substring(0, 50)}"`);
-                    continue;
-                }
+            return cleanChoiceOptions(options);
+        }
+
+        function buildScreeningFillCandidates(resolved) {
+            const candidates = [];
+            const add = value => {
+                const text = String(value || '').replace(/_/g, ' ').trim();
+                if (text) candidates.push(text);
+            };
+            const intent = String(resolved?.intent || '').toLowerCase();
+            const value = String(resolved?.value || '').toLowerCase();
+            add(resolved?.answerText);
+            add(resolved?.answer);
+            add(value);
+
+            if (value === 'yes') add('Yes');
+            if (value === 'no') add('No');
+            if (value === 'decline' || value === 'opt_out') {
+                add('I do not wish to answer');
+                add('I do not want to answer');
+                add('Prefer not to answer');
+                add('Opt Out');
+                add('Decline to Self Identify');
+            }
+            if (value === 'no_disability') {
+                add('No, I do not have a disability and have not had one in the past');
+                add('No');
+            }
+            if (value === 'has_disability') {
+                add('Yes, I have a disability, or have had one in the past');
+                add('Yes');
+            }
+            if (value === 'not_protected_veteran') {
+                add('I am not a protected veteran');
+                add('I IDENTIFY AS A VETERAN, JUST NOT A PROTECTED VETERAN');
+            }
+            if (value === 'protected_veteran') {
+                add('I identify as one or more of the classifications of protected veteran listed above');
+                add('I identify as one or more classifications of protected veteran');
+            }
+            if (intent === 'race_ethnicity' && (value === 'decline' || value === 'opt_out')) add('Opt Out');
+            if (intent === 'gender' && (value === 'decline' || value === 'opt_out')) add('I do not wish to answer');
+
+            return cleanChoiceOptions(candidates);
+        }
+
+        function scoreScreeningChoice(optionText, resolved) {
+            const optionRaw = String(optionText || '').trim();
+            const optionLower = optionRaw.toLowerCase();
+            const optionNorm = normalizeSelectText(optionRaw);
+            if (!optionNorm || /^(select|choose|please|make a selection)\b/i.test(optionRaw)) return -1;
+
+            const intent = String(resolved?.intent || '').toLowerCase();
+            const value = String(resolved?.value || '').toLowerCase();
+            const candidates = buildScreeningFillCandidates(resolved);
+            let best = 0;
+
+            for (const candidate of candidates) {
+                const candidateNorm = normalizeSelectText(candidate);
+                const candidateLower = String(candidate || '').toLowerCase();
+                if (!candidateNorm) continue;
+                if (optionNorm === candidateNorm || optionLower === candidateLower) best = Math.max(best, 100);
+                else if (selectionTextMatches(optionRaw, candidate)) best = Math.max(best, 90);
+                else if (optionNorm.includes(candidateNorm) || candidateNorm.includes(optionNorm)) best = Math.max(best, 75);
+                else best = Math.max(best, Math.round(semanticScore(candidateNorm, optionNorm) * 70));
             }
 
-            const match = matchQuestionToAnswer(q.questionText, screeningAnswers, questionPatterns, q.type);
-            if (!match) {
-                console.log(`[Fillo] No match for: "${q.questionText.substring(0, 60)}"`);
+            const optOut = /do not wish|don't wish|do not want|prefer not|not answer|decline|self[- ]?identify|opt out/i;
+            if (value === 'decline' || value === 'opt_out') {
+                if (optOut.test(optionRaw)) best = Math.max(best, 100);
+                if (intent === 'race_ethnicity' && /opt out/i.test(optionRaw)) best = Math.max(best, 100);
+            }
+            if (value === 'no_disability') {
+                if (/^no\b|do not have.*disability|have not had.*disability|not disabled/i.test(optionRaw)) best = Math.max(best, 100);
+                if (optOut.test(optionRaw)) best = Math.min(best, 20);
+            }
+            if (value === 'has_disability') {
+                if (/^yes\b|have.*disability|had.*disability|disabled/i.test(optionRaw) &&
+                    !/do not have|have not had|not disabled|do not want|not answer/i.test(optionRaw)) best = Math.max(best, 100);
+            }
+            if (value === 'not_protected_veteran') {
+                if (/not (a )?protected veteran/i.test(optionRaw)) best = Math.max(best, /just not/i.test(optionRaw) ? 100 : 92);
+                if (/protected veteran/i.test(optionRaw) && !/not/i.test(optionRaw)) best = Math.min(best, 20);
+            }
+            if (value === 'protected_veteran') {
+                if (/one or more.*protected veteran|classifications of protected veteran|identify as.*protected veteran/i.test(optionRaw) &&
+                    !/not|do not wish|not answer/i.test(optionRaw)) best = Math.max(best, 100);
+            }
+            if (value === 'yes' && /^(yes|y)\b/i.test(optionRaw)) best = Math.max(best, 100);
+            if (value === 'no' && /^(no|n)\b/i.test(optionRaw)) best = Math.max(best, 100);
+
+            return best;
+        }
+
+        function pickScreeningChoice(options, resolved) {
+            const ranked = (options || [])
+                .map((text, idx) => ({ text, idx, score: scoreScreeningChoice(text, resolved) }))
+                .filter(item => item.score >= 60)
+                .sort((a, b) => b.score - a.score || a.idx - b.idx);
+            return ranked[0]?.text || null;
+        }
+
+        // Open a Workday dropdown, collect visible option texts, then close it.
+        async function extractDropdownOptions(btn) {
+            try {
+                if (!btn) return [];
+
+                const isVisibleOption = (el) => {
+                    if (!el) return false;
+                    const style = window.getComputedStyle(el);
+                    if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+                    const rect = el.getBoundingClientRect?.();
+                    return !!rect && rect.width > 0 && rect.height > 0;
+                };
+
+                const getVisibleOptionElements = () => {
+                    const controlledId = btn.getAttribute?.('aria-controls');
+                    const controlled = controlledId ? document.getElementById(controlledId) : null;
+                    const roots = [
+                        controlled,
+                        ...getOpenWorkdayDropdowns(),
+                        document.body
+                    ].filter(Boolean);
+                    const seen = new Set();
+                    const optionEls = [];
+
+                    for (const root of roots) {
+                        const selector = root === document.body
+                            ? '[role="option"], [data-automation-id="promptOption"], [data-automation-id*="promptOption"]'
+                            : '[role="option"], [data-automation-id="promptOption"], [data-automation-id*="promptOption"], [data-automation-label]';
+                        const candidates = Array.from(root.querySelectorAll(selector));
+                        for (const el of candidates) {
+                            if (seen.has(el) || btn.contains?.(el)) continue;
+                            seen.add(el);
+                            if (!isVisibleOption(el)) continue;
+                            const text = getWorkdayOptionLabel(el).trim();
+                            if (!text) continue;
+                            optionEls.push(el);
+                        }
+                    }
+
+                    return optionEls;
+                };
+
+                const openDropdown = async () => {
+                    btn.focus?.({ preventScroll: true });
+                    clickLikeUser(btn);
+                    await new Promise(r => setTimeout(r, 120));
+                    if (getVisibleOptionElements().length > 0) return;
+                    dispatchKey(btn, 'ArrowDown', 'ArrowDown', 40);
+                    await new Promise(r => setTimeout(r, 120));
+                    if (getVisibleOptionElements().length > 0) return;
+                    btn.click?.();
+                };
+
+                await openDropdown();
+
+                let optionEls = [];
+                for (let i = 0; i < 14; i++) {
+                    await new Promise(r => setTimeout(r, 120));
+                    optionEls = getVisibleOptionElements();
+                    if (optionEls.length > 0) break;
+                }
+
+                const opts = cleanChoiceOptions(optionEls.map(el => getWorkdayOptionLabel(el)));
+                await dismissWorkdayDropdown(btn);
+                console.log(`[Fillo] Extracted ${opts.length} page options for "${String(btn.textContent || '').trim().substring(0, 40)}"`, opts);
+                return opts;
+            } catch (e) {
+                try { await dismissWorkdayDropdown(btn); } catch (_) {}
+                console.warn('[Fillo] Failed to extract page options:', e?.message || e);
+                return [];
+            }
+        }
+
+        // Pass 1: resolve stored answers via direct match, collect unmatched for AI batch
+        const answerMap = new Map(); // question index → normalized fill decision
+        const aiBatch = [];          // { batchIndex, questionIndex }
+
+        function markScreeningQuestionSkipped(q, reason = 'ai_low_confidence') {
+            if (!fieldTracker?.skippedScreeningElements || !q) return;
+            if (q.element) {
+                fieldTracker.skippedScreeningElements.add(q.element);
+                const formField = q.element.closest?.('[data-automation-id^="formField-"]');
+                if (formField) fieldTracker.skippedScreeningElements.add(formField);
+            }
+            if (Array.isArray(q.elements)) {
+                for (const el of q.elements) {
+                    fieldTracker.skippedScreeningElements.add(el);
+                    const formField = el.closest?.('[data-automation-id^="formField-"]');
+                    if (formField) fieldTracker.skippedScreeningElements.add(formField);
+                }
+            }
+            console.log(`[Fillo] Screening question skipped (${reason}): "${String(q.questionText || '').substring(0, 80)}"`);
+        }
+
+        for (let i = 0; i < questions.length; i++) {
+            const q = questions[i];
+            if (isSkippable(q)) continue;
+            const match = directMatch(q.questionText, screeningAnswers);
+            if (match?.answer) {
+                answerMap.set(i, {
+                    answer: match.answer,
+                    answerText: match.answer,
+                    value: match.answer,
+                    intent: null,
+                    confidence: 100
+                });
+            } else {
+                let pageOptions = [];
+                if (q.type === 'radio') {
+                    pageOptions = cleanChoiceOptions(q.options && q.options.length
+                        ? q.options
+                        : q.elements.map(r => getFieldLabel(r) || r.value || ''));
+                } else if (q.type === 'dropdown') {
+                    pageOptions = await extractDropdownOptions(q.element);
+                    q.options = pageOptions;
+                }
+                const screeningOptions = getScreeningOptionsForQuestion(q.questionText, screeningAnswers);
+                aiBatch.push({
+                    batchIndex: aiBatch.length,
+                    questionIndex: i,
+                    questionText: q.questionText,
+                    elementType: q.type,
+                    pageOptions,
+                    screeningOptions,
+                    options: cleanChoiceOptions([...pageOptions, ...screeningOptions])
+                });
+            }
+        }
+
+        // Pass 2: single AI batch call for all unmatched questions
+        if (aiBatch.length > 0) {
+            console.log(`[Fillo] Sending ${aiBatch.length} unmatched questions to AI`);
+            const aiResults = await ns.ai.answerScreeningQuestionsBatch(
+                aiBatch.map(b => ({
+                    questionText: b.questionText,
+                    elementType: b.elementType,
+                    pageOptions: b.pageOptions ?? [],
+                    screeningOptions: b.screeningOptions ?? [],
+                    options: b.options ?? []
+                })),
+                profileData?.job_preferences?.screening_answers ?? []
+            );
+            for (const result of aiResults) {
+                // Prefer mapping by echoed question text; fall back to index
+                const entry = result.question
+                    ? aiBatch.find(b => b.questionText.trim() === String(result.question).trim()) ?? aiBatch[result.index]
+                    : aiBatch[result.index];
+                if (entry) {
+                    if (!result?.answer && !result?.answerText && !result?.value) {
+                        markScreeningQuestionSkipped(questions[entry.questionIndex], 'ai_low_confidence');
+                    } else {
+                        answerMap.set(entry.questionIndex, result);
+                    }
+                }
+            }
+        }
+
+        // Pass 3: fill all resolved answers
+        for (let i = 0; i < questions.length; i++) {
+            const q = questions[i];
+            const resolvedAnswer = answerMap.get(i);
+            if (!resolvedAnswer) {
+                if (!isSkippable(q)) console.log(`[Fillo] No answer for: "${q.questionText.substring(0, 60)}"`);
                 continue;
             }
-
-            console.log(`[Fillo] Matched "${q.questionText.substring(0, 50)}" -> "${match.answer}"`);
+            const candidates = buildScreeningFillCandidates(resolvedAnswer);
+            const answerText = pickScreeningChoice(q.options || [], resolvedAnswer) || candidates[0];
+            if (!answerText) continue;
+            console.log(`[Fillo] Filling "${q.questionText.substring(0, 50)}" -> "${answerText}"`);
 
             if (q.type === 'radio') {
-                // Click the radio button whose label text matches the stored answer
                 let picked = false;
-                const answerLower = match.answer.toLowerCase();
-                for (const radio of q.elements) {
-                    if (fieldTracker.filledElements.has(radio)) continue;
-                    const labelText = (getFieldLabel(radio) || radio.value || '').trim().toLowerCase();
-                    if (labelText === answerLower || labelText.startsWith(answerLower)) {
-                        radio.focus();
+                const rankedRadios = q.elements
+                    .filter(radio => !fieldTracker.filledElements.has(radio))
+                    .map((radio, idx) => {
+                        const labelText = (getFieldLabel(radio) || radio.value || '').trim();
+                        return { radio, idx, score: scoreScreeningChoice(labelText, resolvedAnswer), labelText };
+                    })
+                    .filter(item => item.score >= 60)
+                    .sort((a, b) => b.score - a.score || a.idx - b.idx);
+                for (const { radio, labelText } of rankedRadios) {
+                        radio.focus({ preventScroll: true });
                         radio.click();
                         radio.dispatchEvent(new Event('change', { bubbles: true }));
                         markFieldFilled(radio, 'platform', fieldTracker);
+                        console.log(`[Fillo] Radio intent match: "${labelText}"`);
                         filled++;
                         picked = true;
                         break;
-                    }
                 }
                 if (!picked) {
-                    console.log(`[Fillo] No radio option matched "${match.answer}" for "${q.questionText.substring(0, 40)}"`);
+                    console.log(`[Fillo] No radio option matched "${answerText}" for "${q.questionText.substring(0, 40)}"`);
                 }
             } else {
-                const success = await fillElement(q.element, match.answer);
+                let success = false;
+                const candidateValues = cleanChoiceOptions([answerText, ...candidates]);
+                for (const candidate of candidateValues) {
+                    success = await fillElement(q.element, candidate);
+                    if (success) break;
+                }
                 if (success) {
                     markFieldFilled(q.element, 'platform', fieldTracker);
                     filled++;
@@ -674,6 +1367,20 @@
             const tag = targetEl.tagName.toLowerCase();
             const type = (targetEl.type || '').toLowerCase();
 
+            // Degree dropdowns should fall back to an "Other" option when the profile's
+            // degree value isn't one of the listed choices. Detect the field by its
+            // name / id / automation-id / label so this works for Workday and generic forms.
+            const degreeProbeText = [
+                element.getAttribute?.('name'), element.getAttribute?.('id'), element.getAttribute?.('data-automation-id'),
+                targetEl.getAttribute?.('name'), targetEl.getAttribute?.('id'), targetEl.getAttribute?.('data-automation-id'),
+                (element.closest?.('[data-automation-id^="formField-"]') || targetEl.closest?.('[data-automation-id^="formField-"]'))?.getAttribute?.('data-automation-id'),
+                (() => { try { return getFieldLabel?.(element); } catch (_) { return ''; } })()
+            ].filter(Boolean).join(' ').toLowerCase();
+            const isDegreeField = /degree/.test(degreeProbeText);
+            // Match an "Other" choice (e.g. "Other", "Others", "Other (please specify)")
+            // without matching unrelated options that merely contain the substring.
+            const isOtherOptionText = (txt) => /\bothers?\b/.test(String(txt || '').trim().toLowerCase());
+
             // Helper to mirror events on the wrapper element if it differs from the target
             const mirror = (evName, Cls, opts) => {
                 if (targetEl !== element) element.dispatchEvent(new Cls(evName, opts));
@@ -769,6 +1476,18 @@
                     }
                 }
 
+                // Degree field with no matching option → select "Other".
+                if (!matchedOption && isDegreeField) {
+                    for (let idx = 0; idx < targetEl.options.length; idx++) {
+                        if (isOtherOptionText(targetEl.options[idx].textContent)) {
+                            matchedOption = targetEl.options[idx];
+                            bestMatchIdx = idx;
+                            console.log(`[Fillo] Degree "${strVal}" not in options — selecting "Other"`);
+                            break;
+                        }
+                    }
+                }
+
                 if (matchedOption) {
                     targetEl.selectedIndex = bestMatchIdx;
 
@@ -805,6 +1524,50 @@
                 const strVal = String(value);
                 const strLower = strVal.toLowerCase();
                 const initialText = (targetEl.textContent || '').trim();
+                const scoreOptionAgainstAnswer = (optionText) => {
+                    const optionRaw = String(optionText || '').trim();
+                    const answerRaw = String(strVal || '').trim();
+                    const optionLower = optionRaw.toLowerCase();
+                    const answerLower = answerRaw.toLowerCase();
+                    const optionNorm = normalizeSelectText(optionRaw);
+                    const answerNorm = normalizeSelectText(answerRaw);
+                    if (!optionNorm || !answerNorm) return -1;
+                    if (/^(select|choose|please|make a selection)\b/i.test(optionRaw)) return -1;
+                    if (optionNorm === answerNorm || optionLower === answerLower) return 100;
+
+                    const answerOptOut = /do not wish|don't wish|self-identify|self identify|decline|prefer not|not answer/i.test(answerRaw);
+                    const optionOptOut = /do not wish|don't wish|self-identify|self identify|decline|prefer not|not answer/i.test(optionRaw);
+                    if (answerOptOut || optionOptOut) return answerOptOut === optionOptOut ? 96 : 0;
+
+                    const answerNotProtectedVeteran = /just not.*protected veteran|not (a )?protected veteran|notprotectedveteran/i.test(answerRaw);
+                    if (answerNotProtectedVeteran) {
+                        if (/identify as a veteran.*not a protected veteran|just not.*protected veteran/i.test(optionRaw)) return 100;
+                        if (/not (a )?protected veteran/i.test(optionRaw) && /veteran/i.test(optionRaw)) return 90;
+                        return 0;
+                    }
+
+                    const answerNotVeteran = /\bnot a veteran\b|\bnot veteran\b/i.test(answerRaw);
+                    if (answerNotVeteran) {
+                        if (/\bnot a veteran\b|\bnot veteran\b/i.test(optionRaw)) return 100;
+                        if (/not (a )?protected veteran/i.test(optionRaw)) return 35;
+                        return 0;
+                    }
+
+                    const answerProtectedVeteran = /one or more classifications of protected veteran|identify as.*protected veteran|disabled veteran|recently separated|armed forces|campaign badge/i.test(answerRaw);
+                    if (answerProtectedVeteran) {
+                        if (/one or more.*protected veterans?|classifications of protected veterans?|identify as.*protected veteran/i.test(optionRaw) &&
+                            !/not (a )?protected veteran|not a veteran|do not wish|self-identify/i.test(optionRaw)) {
+                            return 100;
+                        }
+                        return 0;
+                    }
+
+                    if (optionNorm.includes(answerNorm) || answerNorm.includes(optionNorm)) return 85;
+                    return Math.round(calculateSemanticScore(answerNorm, optionNorm) * 100);
+                };
+                const selectedTextMatchesRequest = (text) => {
+                    return scoreOptionAgainstAnswer(text) >= 60;
+                };
                 const clickOptionWithPointerSequence = (optionEl) => {
                     if (!optionEl) return;
                     optionEl.scrollIntoView({ block: 'nearest' });
@@ -838,26 +1601,23 @@
                 // (e.g. "Female" contains "male") can never beat an exact option ("Male")
                 // just because it appears earlier in the list.
                 const pickOption = (options) => {
-                    for (const o of options) {
-                        const optText = o.textContent.trim().toLowerCase();
-                        if (optText === strLower || o.getAttribute('data-value')?.toLowerCase() === strLower) {
-                            return o;
-                        }
+                    const ranked = options
+                        .map((o, idx) => ({
+                            o,
+                            idx,
+                            text: o.textContent?.trim() || '',
+                            score: Math.max(
+                                scoreOptionAgainstAnswer(o.textContent || ''),
+                                o.getAttribute('data-value')?.toLowerCase() === strLower ? 100 : -1
+                            )
+                        }))
+                        .filter(item => item.score >= 60)
+                        .sort((a, b) => b.score - a.score || a.idx - b.idx);
+                    if (ranked[0]) {
+                        console.log(`[Fillo] Dropdown semantic option match: "${ranked[0].text}" for "${strVal}" (score ${ranked[0].score})`);
+                        return ranked[0].o;
                     }
-                    // No exact option — fall back to fuzzy/semantic matching.
-                    let fuzzy = null;
-                    let bestScore = 0;
-                    for (const o of options) {
-                        const optText = o.textContent.trim().toLowerCase();
-                        if (!optText) continue;
-                        if (selectionTextMatches(optText, strVal)) return o;
-                        const score = calculateSemanticScore(strLower, optText);
-                        if (score > bestScore && score > 0.4) {
-                            bestScore = score;
-                            fuzzy = o;
-                        }
-                    }
-                    return fuzzy;
+                    return null;
                 };
 
                 // Poll for the options to appear in the DOM (usually appended to body or adjacent)
@@ -883,13 +1643,16 @@
                         }
                     }
 
+                    // Degree field with no matching option → select "Other".
+                    if (!matchedOption && isDegreeField) {
+                        matchedOption = optionsDiv.find(o => isOtherOptionText(o.textContent)) || null;
+                        if (matchedOption) console.log(`[Fillo] Degree "${strVal}" not in options — selecting "Other"`);
+                    }
+
                     if (matchedOption) {
                         // Workday needs focus before clicking
                         targetEl.focus({ preventScroll: true });
                         clickOptionWithPointerSequence(matchedOption);
-                        // Also fire enter key just in case
-                        targetEl.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'Enter', code: 'Enter', keyCode: 13, which: 13 }));
-                        targetEl.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, cancelable: true, key: 'Enter', code: 'Enter', keyCode: 13, which: 13 }));
                         selected = true;
                     } else {
                         console.warn('[Fillo] No dropdown option matched for listbox/combo:', strVal);
@@ -912,19 +1675,21 @@
                 await new Promise(r => setTimeout(r, 600));
 
                 const finalText = (targetEl.textContent || '').trim();
-                if (finalText === initialText || !finalText || finalText.toLowerCase().includes('select')) {
+                if (finalText === initialText || !selectedTextMatchesRequest(finalText)) {
                     console.warn('[Fillo] Dropdown selection did not stick:', strVal);
 
                     targetEl.focus({ preventScroll: true });
                     targetEl.click();
 
-                    const retryOption = pickOption(getScopedOptions());
+                    const retryScoped = getScopedOptions();
+                    let retryOption = pickOption(retryScoped);
+                    if (!retryOption && isDegreeField) {
+                        retryOption = retryScoped.find(o => isOtherOptionText(o.textContent)) || null;
+                    }
 
                     if (retryOption) {
                         targetEl.focus({ preventScroll: true });
                         clickOptionWithPointerSequence(retryOption);
-                        targetEl.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'Enter', code: 'Enter', keyCode: 13, which: 13 }));
-                        targetEl.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, cancelable: true, key: 'Enter', code: 'Enter', keyCode: 13, which: 13 }));
 
                         targetEl.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
                         mirror('change', Event, { bubbles: true });
@@ -936,7 +1701,8 @@
                     }
 
                     const retriedText = (targetEl.textContent || '').trim();
-                    if (retriedText === initialText || !retriedText || retriedText.toLowerCase().includes('select')) {
+                    if (retriedText === initialText || !selectedTextMatchesRequest(retriedText)) {
+                        console.warn(`[Fillo] Dropdown selected "${retriedText}" but expected "${strVal}"`);
                         return false;
                     }
                 }
@@ -1573,6 +2339,47 @@
         return Object.prototype.hasOwnProperty.call(mapping, 'default') ? mapping.default : null;
     }
 
+    function getBuiltInClassifierMappings(platform) {
+        if (platform !== 'workday') return [];
+        return [
+            {
+                key: 'dateSignedOn',
+                name: 'dateSignedOn',
+                label: 'Disability Date Signed On',
+                type: 'date',
+                profilePath: '__today',
+                patterns: [
+                    'selfidentifieddisabilitydata datesignedon',
+                    'self identified disability date signed on',
+                    'date signed on',
+                    'datesignedon'
+                ]
+            },
+            {
+                key: 'disability_status',
+                name: 'disabilityStatus',
+                label: 'Please check one of the boxes below:',
+                type: 'single_choice',
+                profilePath: 'job_preferences.eeo.disability_status',
+                patterns: [
+                    'formfield disabilitystatus',
+                    'disabilitystatus checkboxgroup',
+                    'selfidentifieddisabilitydata disabilitystatus',
+                    'self identified disability',
+                    'disability status',
+                    'please check one of the boxes below',
+                    'ofccp'
+                ],
+                options: [
+                    'Yes, I have a disability, or have had one in the past',
+                    'No, I do not have a disability and have not had one in the past',
+                    'I do not want to answer'
+                ],
+                default: 'I do not want to answer'
+            }
+        ];
+    }
+
     function normalizeDateValue(value) {
         const date = value instanceof Date ? value : null;
         if (date && !Number.isNaN(date.getTime())) {
@@ -1638,6 +2445,27 @@
         const option = normalizeSelectText(optionText);
         const wanted = normalizeSelectText(wantedValue);
         if (!option || !wanted) return 0;
+
+        const optionRaw = String(optionText || '').toLowerCase();
+        const wantedRaw = String(wantedValue || '').toLowerCase();
+        const wantsOptOut = /do not want|do not wish|don't wish|prefer not|decline|not answer/.test(wantedRaw);
+        if (wantsOptOut) {
+            return /do not want|do not wish|don't wish|prefer not|decline|not answer/.test(optionRaw) ? 100 : 0;
+        }
+        const wantsNo = /^(no|false|n|0)\b/.test(wantedRaw) ||
+            /do not have.*disability|have not had.*disability|not disabled|no disability/.test(wantedRaw);
+        if (wantsNo) {
+            if (/^no\b|do not have.*disability|have not had.*disability|not disabled|no disability/.test(optionRaw)) return 100;
+            if (/do not want|do not wish|not answer/.test(optionRaw)) return 0;
+        }
+        const wantsYes = /^(yes|true|y|1)\b/.test(wantedRaw) ||
+            /have.*disability|had.*disability|disabled/.test(wantedRaw);
+        if (wantsYes) {
+            if (/^yes\b|have.*disability|had.*disability|disabled/.test(optionRaw) &&
+                !/do not have|have not had|not disabled|do not want|not answer/.test(optionRaw)) return 100;
+            if (/do not have|have not had|not disabled|do not want|not answer/.test(optionRaw)) return 0;
+        }
+
         if (selectionTextMatches(optionText, wantedValue)) return 100;
         if (option.startsWith(wanted)) return 85;
         if (option.includes(wanted)) return 75;
@@ -2020,6 +2848,24 @@
         return null;
     }
 
+    function getScreeningAnswerValue(profileData, keys) {
+        const screeningAnswers = profileData?.job_preferences?.screening_answers;
+        if (!Array.isArray(screeningAnswers)) return null;
+        const wanted = keys.map(k => normalizeFieldText(k)).filter(Boolean);
+
+        for (const answer of screeningAnswers) {
+            if (!answer?.enabled || answer.answer == null || answer.answer === '') continue;
+            const haystack = normalizeFieldText([
+                answer.key,
+                answer.question,
+                ...(Array.isArray(answer.keywords) ? answer.keywords : [])
+            ].filter(Boolean).join(' '));
+            if (wanted.some(key => haystack.includes(key))) return answer.answer;
+        }
+
+        return null;
+    }
+
     function getProfileValueForPath(profileData, path) {
         const keys = Array.isArray(path) ? path : String(path || '').split('.');
         if (keys.length === 1 && keys[0] === '__today') return new Date();
@@ -2029,6 +2875,15 @@
         const normalizedPath = keys.join('.').toLowerCase();
         if (/job_preferences\.(salaryexpectation|salary_expectations|expectedsalary|expected_salary|expectedcompensation|expected_compensation|desiredsalary|desired_salary)$/.test(normalizedPath)) {
             return getSalaryExpectationValue(profileData);
+        }
+        if (/job_preferences\.eeo\.disability_status$/.test(normalizedPath)) {
+            return getScreeningAnswerValue(profileData, [
+                'disability_status',
+                'disability status',
+                'self identified disability',
+                'please check one of the boxes below',
+                'ofccp'
+            ]);
         }
 
         return value;
@@ -2436,7 +3291,7 @@
             await new Promise(r => setTimeout(r, 250));
         }
 
-        searchInput.focus();
+        searchInput.focus({ preventScroll: true });
         searchInput.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
         searchInput.select?.();
         document.execCommand('delete');
@@ -2554,7 +3409,7 @@
                 const nudgeSearch = () => {
                     if (done) return;
                     if (poll === 0 || poll === 2 || poll === 8 || poll === 16) {
-                        searchInput.focus();
+                        searchInput.focus({ preventScroll: true });
                         dispatchKey(searchInput, 'ArrowDown', 'ArrowDown', 40);
                         dispatchKey(searchInput, 'Enter', 'Enter', 13);
                         searchInput.dispatchEvent(new InputEvent('input', { bubbles: true, cancelable: true, inputType: 'insertText', data: searchText }));
@@ -2616,7 +3471,7 @@
             // Keyboard fallback only if clicking didn't commit: step down to THIS option's
             // position in the list (not blindly to the first), then Enter.
             if (listbox && getOpenWorkdayDropdowns().length > 0) {
-                searchInput.focus();
+                searchInput.focus({ preventScroll: true });
                 const steps = Math.max(1, (bestRanked?.idx ?? 0) + 1);
                 for (let s = 0; s < steps; s++) {
                     dispatchKey(searchInput, 'ArrowDown', 'ArrowDown', 40);
@@ -3566,7 +4421,7 @@
 
                     // Clear current value: Ctrl+A then Delete, then reset via setter fallback.
                     const clearLiveInput = () => {
-                        liveInput.focus();
+                        liveInput.focus({ preventScroll: true });
                         liveInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', code: 'KeyA', keyCode: 65, ctrlKey: true, bubbles: true, cancelable: true }));
                         liveInput.dispatchEvent(new KeyboardEvent('keyup',   { key: 'a', code: 'KeyA', keyCode: 65, ctrlKey: true, bubbles: true, cancelable: true }));
                         liveInput.select?.();
@@ -3890,7 +4745,7 @@
                             // match IS that first result; otherwise it would commit the
                             // wrong (similar) option, so fall through to Try 3's nav.
                             if (!confirmed && best?.score >= 40 && best.idx === 0) {
-                                liveInput.focus();
+                                liveInput.focus({ preventScroll: true });
                                 dispatchKey(liveInput, 'Enter', 'Enter', 13);
                                 confirmed = await waitForPill(10, 100);
                             }
@@ -3898,7 +4753,7 @@
                             // Try 3: ArrowDown to highlight best option, then Enter on the input.
                             if (!confirmed && best?.score >= 40) {
                                 const downCount = Math.max(1, (best?.idx ?? 0) + 1);
-                                liveInput.focus();
+                                liveInput.focus({ preventScroll: true });
                                 for (let step = 0; step < downCount; step++) {
                                     dispatchKey(liveInput, 'ArrowDown', 'ArrowDown', 40);
                                     await new Promise(r => setTimeout(r, 30));
@@ -3926,7 +4781,7 @@
                             console.log(`[Platform] No Workday skill results for "${skill}", skipping`);
                         } else {
                             attemptedSelection = true;
-                            liveInput.focus();
+                            liveInput.focus({ preventScroll: true });
                             dispatchKey(liveInput, 'Enter', 'Enter', 13);
                             const confirmed = await waitForPill(8, 100);
                             if (confirmed) {
@@ -4027,7 +4882,7 @@
                         await new Promise(r => setTimeout(r, 350));
                     }
                     ssInput.click();
-                    ssInput.focus();
+                    ssInput.focus({ preventScroll: true });
                     ssInput.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
                     await new Promise(r => setTimeout(r, ssIsMoniker ? 200 : 100));
 
@@ -4074,21 +4929,36 @@
                 await dismissWorkdayDropdown(ssInput);
                 await typeIntoSearch();
 
-                let options = getSingleSelectOptions();
-                // Moniker/taxonomy prompts (school, field of study) debounce and fetch async,
-                // so poll for a few seconds rather than checking only once.
-                for (let i = 0; i < 12 && options.length === 0; i++) {
-                    if (i === 3) dispatchKey(ssInput, 'Enter', 'Enter', 13);
-                    await new Promise(r => setTimeout(r, 250));
-                    options = getSingleSelectOptions();
-                }
-
-                const ranked = options
+                // Skills-style exact-first wait: keep polling for an EXACT option to load
+                // before settling (Workday/moniker prompts fetch results asynchronously, so
+                // the exact match often arrives after some similar ones). Only fall back to
+                // the best similar option after a grace window passes with no exact match.
+                const exactMin = 95;
+                const similarMin = 40;
+                const rankOptionsNow = () => getSingleSelectOptions()
                     .map((opt, idx) => {
                         const text = getWorkdayOptionLabel(opt).trim();
                         return { opt, idx, text, score: scoreSingleSelectOption(text) };
                     })
                     .sort((a, b) => b.score - a.score || a.idx - b.idx);
+
+                let ranked = rankOptionsNow();
+                let similarSinceTs = null;
+                for (let i = 0; i < 24; i++) {
+                    ranked = rankOptionsNow();
+                    if (ranked.some(r => r.score >= exactMin)) break;          // exact match → settle now
+                    if (ranked.some(r => r.score >= similarMin)) {             // only similar so far
+                        if (similarSinceTs == null) similarSinceTs = Date.now();
+                        else if (Date.now() - similarSinceTs >= 2500) break;   // grace elapsed → accept similar
+                    } else {
+                        similarSinceTs = null;
+                    }
+                    if (i === 3 && ranked.length === 0) dispatchKey(ssInput, 'Enter', 'Enter', 13);
+                    await new Promise(r => setTimeout(r, 250));
+                }
+
+                // ranked is sorted by score desc, so ranked[0] is the exact match when one
+                // loaded, otherwise the best similar option.
                 const best = ranked[0];
 
                 if (best && best.score >= 40) {
@@ -4102,6 +4972,35 @@
                     await dismissWorkdayDropdown(ssInput, document.querySelector('[data-automation-id="applyFlowFooter"]') || document.querySelector('main') || document.body);
                     markFieldFilled(ssInput, 'platform', fieldTracker);
                     return true;
+                }
+
+                // Degree field with no matching option → select "Other". Clear the typed
+                // term first so the full option list (which includes "Other") reappears,
+                // since the search filters out anything not matching what was typed.
+                if (/degree/i.test(`${field.name || ''} ${field.label || ''}`)) {
+                    ssInput.focus({ preventScroll: true });
+                    ssInput.select?.();
+                    document.execCommand('delete');
+                    if (setter) setter.call(ssInput, ''); else ssInput.value = '';
+                    ssInput.dispatchEvent(new InputEvent('input', { bubbles: true, cancelable: true, inputType: 'deleteContentBackward' }));
+                    await new Promise(r => setTimeout(r, 300));
+                    let allOpts = getSingleSelectOptions();
+                    for (let i = 0; i < 8 && allOpts.length === 0; i++) {
+                        await new Promise(r => setTimeout(r, 200));
+                        allOpts = getSingleSelectOptions();
+                    }
+                    const otherOpt = allOpts.find(o => /\bothers?\b/.test(getWorkdayOptionLabel(o).trim().toLowerCase()));
+                    if (otherOpt) {
+                        clickLikeUser(otherOpt);
+                        await new Promise(r => setTimeout(r, 400));
+                        console.log(`[Platform] Degree "${searchTerm}" not in options — selecting "Other"`);
+                        ssInput.dispatchEvent(new FocusEvent('blur', { bubbles: true }));
+                        ssInput.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
+                        dispatchKey(ssInput, 'Escape', 'Escape', 27);
+                        await dismissWorkdayDropdown(ssInput, document.querySelector('[data-automation-id="applyFlowFooter"]') || document.querySelector('main') || document.body);
+                        markFieldFilled(ssInput, 'platform', fieldTracker);
+                        return true;
+                    }
                 }
 
                 dispatchKey(ssInput, 'Escape', 'Escape', 27);
@@ -4179,7 +5078,7 @@
                 }
 
                 // Type character by character (iCIMS uses jQuery keyup to filter via AJAX)
-                searchInput.focus();
+                searchInput.focus({ preventScroll: true });
                 searchInput.value = '';
                 searchInput.dispatchEvent(new Event('input', { bubbles: true }));
                 await new Promise(r => setTimeout(r, 100));
@@ -4487,6 +5386,8 @@
         for (const el of formEls) {
             if (!isElementVisible(el)) continue;
             if (fieldTracker.filledElements.has(el)) continue;
+            if (fieldTracker.skippedScreeningElements?.has(el) ||
+                fieldTracker.skippedScreeningElements?.has(el.closest?.('[data-automation-id^="formField-"]'))) continue;
             if (isCountyLikeField(el)) continue;
 
             const tag = el.tagName.toLowerCase();
@@ -4705,6 +5606,7 @@
                 platformClaimedElements: new Set(),
                 normalizedFilledIds: new Set(),
                 unknownFieldIds: new Set(),
+                skippedScreeningElements: new Set(),
                 allowRefill: false,
                 // iCIMS revert guard: tracks element → intended value so we can re-fill reversions
                 filledValues: isICIMS ? new Map() : null,
@@ -5016,7 +5918,11 @@
                         !f.profilePath.startsWith('websites') &&
                         f.type !== 'file'
                     );
-                    const classifierFilled = await fillByClassifier(profileData, classifierFields, fieldTracker);
+                    const classifierFilled = await fillByClassifier(
+                        profileData,
+                        [...getBuiltInClassifierMappings(platform), ...classifierFields],
+                        fieldTracker
+                    );
                     if (classifierFilled > 0) {
                         relayLog('info', `Filled ${classifierFilled} fields via classifier`);
                     }
@@ -5028,9 +5934,17 @@
             // Step 2.6: Fill Workday questionnaire/screening questions
             if (platform === 'workday') {
                 try {
+                    const disabilityDateFilled = await fillWorkdayDisabilityDateSigned(fieldTracker);
+                    if (disabilityDateFilled > 0) {
+                        relayLog('info', 'Filled Workday disability Date Signed');
+                    }
                     const qFilled = await fillWorkdayQuestionnaire(profileData, fieldTracker);
                     if (qFilled > 0) {
                         relayLog('info', `Filled ${qFilled} questionnaire answers`);
+                    }
+                    const voluntaryFilled = await fillWorkdayVoluntaryDisclosures(profileData, fieldTracker);
+                    if (voluntaryFilled > 0) {
+                        relayLog('info', `Filled ${voluntaryFilled} voluntary disclosure fields`);
                     }
                 } catch (e) {
                     console.warn('[Fillo] Questionnaire fill failed:', e);
@@ -5133,6 +6047,19 @@
                             }
                         } catch (e) {
                             console.warn('[Fillo] Generic screening fill failed:', e);
+                        }
+                    } else {
+                        // Fallback: an unanswered Yes/No-style screening dropdown gets the
+                        // first option. Gated to genuine yes/no dropdowns by the helper, so
+                        // real multi-choice fields are left untouched.
+                        const isDropdown = fieldInfo.type === 'dropdown' || fieldInfo.type === 'select-one' ||
+                            fieldInfo.element?.tagName?.toLowerCase() === 'select';
+                        if (isDropdown) {
+                            try {
+                                if (await fillScreeningYesNoFallback(fieldInfo.element, fieldTracker)) sqFilled++;
+                            } catch (e) {
+                                console.warn('[Fillo] Yes/No screening fallback failed:', e);
+                            }
                         }
                     }
                 }

@@ -14,11 +14,11 @@
           placeholder: f.placeholder,
           label: f.label,
           className: f.className || '',
-          // Ensure context is a string so the Edge Function can safely substring it
+
           context: typeof f.context === 'string' ? f.context : JSON.stringify(f.context || {}),
           required: Boolean(f.required),
           maxLength: typeof f.maxLength === 'number' ? f.maxLength : null,
-          // Keep a local index reference just in case (not required by the function)
+          
           _clientIndex: idx
         })),
         profileData,
@@ -116,6 +116,56 @@
     } catch(e) {
       console.error('Option Match AI failed:', e.message);
       return null;
+    }
+  };
+
+  // questions: [{ questionText, elementType, pageOptions, screeningOptions }]
+  // returns: [{ index, answer }] — answer is null if AI couldn't answer with >= 60 confidence
+  ns.ai.answerScreeningQuestionsBatch = async function(questions, profileData){
+    try {
+      if (!questions || questions.length === 0) return [];
+      relayLog('log', `🧠 AI screening batch: ${questions.length} unmatched questions`);
+      const cleanOptions = options => Array.isArray(options)
+        ? options.map(o => String(o || '').trim()).filter(Boolean)
+        : [];
+      const normalizedQuestions = questions.map(q => ({
+        questionText: q.questionText,
+        elementType: q.elementType || q.type || null,
+        pageOptions: cleanOptions(q.pageOptions || q.options),
+        screeningOptions: cleanOptions(q.screeningOptions),
+        options: [
+          ...cleanOptions(q.pageOptions || q.options),
+          ...cleanOptions(q.screeningOptions)
+        ]
+      }));
+      const payload = { questions: normalizedQuestions, profileData };
+      try {
+        console.log('🧠 AI screening request body:', {
+          questions: normalizedQuestions.map(q => ({
+            questionText: q.questionText,
+            elementType: q.elementType,
+            pageOptions: q.pageOptions,
+            screeningOptions: q.screeningOptions,
+            options: q.options
+          })),
+          profileAnswersCount: Array.isArray(profileData) ? profileData.length : 0
+        });
+      } catch (_) {}
+      const r = await fetchWithTimeout(`${AI_CONFIG.supabaseUrl}/functions/v1/ai-screening-answer`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${AI_CONFIG.supabaseKey}` },
+        body: JSON.stringify(payload)
+      }, 15000);
+      if (!r.ok) throw new Error(`AI Screening Batch HTTP ${r.status}`);
+      const data = await r.json();
+      if (data && data.success && Array.isArray(data.answers)) {
+        console.log('🧠 AI Screening Batch answers:', data.answers);
+        return data.answers;
+      }
+      return [];
+    } catch(e) {
+      console.error('AI Screening Batch failed:', e.message);
+      return [];
     }
   };
 })(window.__Fillo);

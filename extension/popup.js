@@ -885,7 +885,7 @@ class FilloPopup {
 
     // Skip noisy controls that should not map to profile data.
     if (field.type === "checkbox" || field.type === "radio") {
-      const consentPatterns = /background check|drug test|criminal|conviction|acknowledge|truthful|work authorization|visa sponsorship|authorized to work|relocat|citizenship|permanent residency|non-compete|non-solicitation|government employee|export control|sanctioned|protected veteran|veteran status|vevraa|veteran|how did you hear|education/i;
+      const consentPatterns = /background check|drug test|criminal|conviction|acknowledge|truthful|work authorization|visa sponsorship|authorized to work|relocat|citizenship|permanent residency|non-compete|non-solicitation|government employee|export control|sanctioned|protected veteran|veteran status|vevraa|veteran|disability|self identified disability|ofccp|please check one of the boxes below|how did you hear|education/i;
       if (!consentPatterns.test(textParts)) return null;
     }
 
@@ -1023,6 +1023,11 @@ class FilloPopup {
         "gender": "job_preferences.screening_answers",
         "race": "job_preferences.screening_answers",
         "ethnicity": "job_preferences.screening_answers",
+        "disability": "job_preferences.screening_answers",
+        "disability status": "job_preferences.screening_answers",
+        "self identified disability": "job_preferences.screening_answers",
+        "ofccp": "job_preferences.screening_answers",
+        "please check one of the boxes below": "job_preferences.screening_answers",
       };
 
       for (const [labelPattern, path] of Object.entries(labelMap)) {

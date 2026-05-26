@@ -126,6 +126,11 @@
             "ofccp",
             "please check one of the boxes below"
           ],
+          "options": [
+            "Yes, I have a disability, or have had one in the past",
+            "No, I do not have a disability and have not had one in the past",
+            "I do not want to answer"
+          ],
           "default": "I do not want to answer"
         },
         {
@@ -422,6 +427,36 @@
           "pattern": "highest level of education",
           "key": "education_level",
           "answerType": "text"
+        },
+        {
+          "pattern": "please check one of the boxes below",
+          "key": "disability_status",
+          "answerType": "text",
+          "options": [
+            "Yes, I have a disability, or have had one in the past",
+            "No, I do not have a disability and have not had one in the past",
+            "I do not want to answer"
+          ]
+        },
+        {
+          "pattern": "disability status",
+          "key": "disability_status",
+          "answerType": "text",
+          "options": [
+            "Yes, I have a disability, or have had one in the past",
+            "No, I do not have a disability and have not had one in the past",
+            "I do not want to answer"
+          ]
+        },
+        {
+          "pattern": "self identified disability",
+          "key": "disability_status",
+          "answerType": "text",
+          "options": [
+            "Yes, I have a disability, or have had one in the past",
+            "No, I do not have a disability and have not had one in the past",
+            "I do not want to answer"
+          ]
         }
       ]
     },

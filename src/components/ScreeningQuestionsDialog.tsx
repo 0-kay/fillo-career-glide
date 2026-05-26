@@ -29,6 +29,19 @@ export interface ScreeningAnswer {
   enabled: boolean;
 }
 
+const PROTECTED_VETERAN_OPTIONS = [
+  "I identify as one or more of the classifications of protected veteran listed above",
+  "I IDENTIFY AS A VETERAN, JUST NOT A PROTECTED VETERAN",
+  "I am not a protected veteran",
+  "I don't wish to answer",
+];
+
+const DISABILITY_STATUS_OPTIONS = [
+  "Yes, I have a disability, or have had one in the past",
+  "No, I do not have a disability and have not had one in the past",
+  "I do not want to answer",
+];
+
 const DEFAULT_SCREENING_QUESTIONS: Omit<ScreeningAnswer, 'id'>[] = [
   {
     question: "Are you authorized to work lawfully in the United States?",
@@ -48,12 +61,16 @@ const DEFAULT_SCREENING_QUESTIONS: Omit<ScreeningAnswer, 'id'>[] = [
     question: "Please select your protected veteran status.",
     answer: "",
     answerType: "select",
-    answerOptions: [
-      "I identify as one or more of the classifications of protected veteran listed above",
-      "I am not a protected veteran",
-      "I don't wish to answer",
-    ],
-    keywords: ["veteran", "protected veteran", "vevraa", "disabled veteran", "recently separated veteran", "campaign badge", "armed forces service medal", "opt out"],
+    answerOptions: PROTECTED_VETERAN_OPTIONS,
+    keywords: ["veteran", "protected veteran", "not protected veteran", "vevraa", "disabled veteran", "recently separated veteran", "campaign badge", "armed forces service medal", "opt out"],
+    enabled: true,
+  },
+  {
+    question: "Please check one of the boxes below:",
+    answer: "",
+    answerType: "select",
+    answerOptions: DISABILITY_STATUS_OPTIONS,
+    keywords: ["disability", "disability status", "self identified disability", "ofccp", "please check one of the boxes below", "do not want to answer"],
     enabled: true,
   },
   {
@@ -154,11 +171,19 @@ function normalizeScreeningAnswer(answer: ScreeningAnswer): ScreeningAnswer {
     return {
       ...answer,
       answerType: "select",
-      answerOptions: [
-        "I identify as one or more of the classifications of protected veteran listed above",
-        "I am not a protected veteran",
-        "I don't wish to answer",
-      ],
+      answerOptions: PROTECTED_VETERAN_OPTIONS,
+    };
+  }
+  const normalizedQuestion = answer.question.trim().toLowerCase();
+  if (
+    normalizedQuestion === "please check one of the boxes below:" ||
+    normalizedQuestion.includes("disability status") ||
+    normalizedQuestion.includes("self identified disability")
+  ) {
+    return {
+      ...answer,
+      answerType: "select",
+      answerOptions: DISABILITY_STATUS_OPTIONS,
     };
   }
   if (answer.question.trim().toLowerCase() === "please select your race or ethnicity.") {
