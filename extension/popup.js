@@ -4,6 +4,7 @@
 const SUPABASE_URL = "https://yuojrygcrcpajiglbekd.supabase.co";
 const SUPABASE_ANON_KEY =
     "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inl1b2pyeWdjcmNwYWppZ2xiZWtkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTEyMzAzMjksImV4cCI6MjA2NjgwNjMyOX0.9dYnQRjtSocxmb9gCw0fOf4GfPk2mUQNcrkOqwu8Rck";
+const MATCH_CONFIG_ENDPOINT = `${SUPABASE_URL}/functions/v1/match-config`;
 
 // ---------- Helpers ----------
 function isForbiddenUrl(urlStr) {
@@ -710,6 +711,21 @@ class FilloPopup {
       Authorization: `Bearer ${this.authToken || SUPABASE_ANON_KEY}`,
       "Content-Type": "application/json",
     };
+
+    try {
+      const apiRes = await fetch(MATCH_CONFIG_ENDPOINT, { headers });
+      if (apiRes.ok) {
+        const payload = await apiRes.json();
+        if (payload?.success && payload.config) {
+          console.log(`📡 Loaded match config from Edge Function`);
+          return { data: payload.config };
+        }
+      } else {
+        console.warn(`⚠️ Failed to load match config API: ${apiRes.status} ${apiRes.statusText}`);
+      }
+    } catch (error) {
+      console.warn(`⚠️ Failed to load match config API:`, error);
+    }
 
     try {
       const res = await fetch(`${SUPABASE_URL}/rest/v1/matches?select=*&limit=1`, { headers });

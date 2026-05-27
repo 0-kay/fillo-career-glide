@@ -8,6 +8,8 @@
     supabaseKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inl1b2pyeWdjcmNwYWppZ2xiZWtkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTEyMzAzMjksImV4cCI6MjA2NjgwNjMyOX0.9dYnQRjtSocxmb9gCw0fOf4GfPk2mUQNcrkOqwu8Rck'
   };
 
+  ns.config.MATCH_CONFIG_ENDPOINT = `${ns.config.AI_CONFIG.supabaseUrl}/functions/v1/match-config`;
+
   ns.config.ENABLE_LLM_PLAN_FLAG_NAME = '__ENABLE_LLM_PLAN';
 
   ns.config.MAPPING_SCORE_MIN = 5;

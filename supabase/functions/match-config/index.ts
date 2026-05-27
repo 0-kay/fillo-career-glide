@@ -1,4 +1,13 @@
-{
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers":
+    "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "GET, OPTIONS",
+};
+
+const MATCH_CONFIG = {
   "domains": {
     "*.myworkdayjobs.com": {
       "platform": "workday",
@@ -233,7 +242,7 @@
             {
               "name": "fieldOfStudy",
               "label": "Field of Study",
-              "type": "text",
+              "type": "single-select",
               "key": "fieldOfStudy",
               "selector": "[data-automation-id='formField-field-of-study'] input, [data-automation-id='formField-fieldOfStudy'] input"
             },
@@ -1497,4 +1506,36 @@
       ]
     }
   }
-}
+};
+
+serve(async (req: Request) => {
+  if (req.method === "OPTIONS") {
+    return new Response(null, { headers: corsHeaders });
+  }
+
+  if (req.method !== "GET") {
+    return new Response(
+      JSON.stringify({ success: false, error: "Method not allowed" }),
+      {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        status: 405,
+      },
+    );
+  }
+
+  return new Response(
+    JSON.stringify({
+      success: true,
+      config: MATCH_CONFIG,
+      source: "inline-match-config",
+    }),
+    {
+      headers: {
+        ...corsHeaders,
+        "Content-Type": "application/json",
+        "Cache-Control": "public, max-age=300",
+      },
+      status: 200,
+    },
+  );
+});

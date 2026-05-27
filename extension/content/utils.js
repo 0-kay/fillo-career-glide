@@ -51,7 +51,43 @@
     return null;
   };
 
+  utils.fetchMatchConfigFromApi = async function({ limit = 25, authToken = null } = {}){
+    const endpoint = ns.config?.MATCH_CONFIG_ENDPOINT;
+    const supabaseKey = ns.config?.AI_CONFIG?.supabaseKey;
+    if (!endpoint || !supabaseKey) return null;
+
+    try {
+      const res = await fetch(`${endpoint}?limit=${encodeURIComponent(limit)}`, {
+        headers: {
+          apikey: supabaseKey,
+          Authorization: `Bearer ${authToken || supabaseKey}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!res.ok) {
+        console.warn(`[Fillo] Failed to load match config API: ${res.status} ${res.statusText}`);
+        return null;
+      }
+
+      const payload = await res.json();
+      if (payload?.success && payload.config) {
+        console.log(`[Fillo] Loaded match config from Edge Function (${payload.rowCount || 0} row(s))`);
+        return payload.config;
+      }
+
+      console.warn('[Fillo] Match config API returned no config:', payload);
+    } catch (error) {
+      console.warn('[Fillo] Failed to load match config API:', error);
+    }
+
+    return null;
+  };
+
   utils.fetchMatchTableRows = async function({ tableName = 'matches', limit = 1, authToken = null } = {}){
+    const apiConfig = await utils.fetchMatchConfigFromApi({ limit, authToken });
+    if (apiConfig) return [{ data: apiConfig }];
+
     const supabaseUrl = ns.config?.AI_CONFIG?.supabaseUrl;
     const headers = utils.getSupabaseHeaders(authToken);
     if (!supabaseUrl || !headers) return [];

@@ -110,6 +110,114 @@
         }
     }
 
+    function callWorkdayReactClick(element) {
+        const props = getWorkdayReactProps(element);
+        const handler = props?.onClick;
+        if (typeof handler !== 'function') return false;
+        try {
+            handler({
+                target: element,
+                currentTarget: element,
+                preventDefault: () => {},
+                stopPropagation: () => {}
+            });
+            return true;
+        } catch (error) {
+            console.warn('[Fillo] Workday React onClick handler failed:', error);
+            return false;
+        }
+    }
+
+    function getAssociatedLabelElement(input) {
+        if (!input) return null;
+        if (input.id) {
+            try {
+                const explicit = document.querySelector(`label[for="${CSS.escape(input.id)}"]`);
+                if (explicit) return explicit;
+            } catch (_) {}
+        }
+        return input.closest?.('label') ||
+            input.closest?.('[data-automation-id*="radio"], [data-automation-id*="checkbox"], span, div')?.querySelector?.('label') ||
+            null;
+    }
+
+    function clickWorkdayChoice(input) {
+        const label = getAssociatedLabelElement(input);
+        const target = label || input;
+        clickLikeUser(target);
+        input.dispatchEvent?.(new Event('change', { bubbles: true, cancelable: true }));
+    }
+
+    async function fillWorkdaySpinbuttonByArrowUp(input, value) {
+        if (!input || !window.location.hostname.endsWith('.myworkdayjobs.com')) return false;
+        const numeric = parseInt(String(value), 10);
+        if (Number.isNaN(numeric)) return false;
+
+        const seedValue = String(numeric - 1);
+        const nativeSetter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input), 'value')?.set;
+        input.dispatchEvent(new FocusEvent('focusin', { bubbles: true, cancelable: true }));
+        input.dispatchEvent(new FocusEvent('focus', { bubbles: false, cancelable: true }));
+        input.focus({ preventScroll: true });
+        if (nativeSetter) nativeSetter.call(input, seedValue);
+        else input.value = seedValue;
+        input.setAttribute('aria-valuenow', seedValue);
+        input.dispatchEvent(new InputEvent('input', { bubbles: true, cancelable: true, inputType: 'insertText', data: seedValue }));
+        dispatchKey(input, 'ArrowUp', 'ArrowUp', 38);
+        input.click();
+        await new Promise(r => setTimeout(r, 80));
+        if (String(input.value || '').trim() !== String(numeric)) {
+            if (nativeSetter) nativeSetter.call(input, String(numeric));
+            else input.value = String(numeric);
+        }
+        input.setAttribute('aria-valuenow', String(numeric));
+        input.setAttribute('aria-valuetext', String(numeric));
+        input.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
+        input.dispatchEvent(new FocusEvent('blur', { bubbles: false, cancelable: true }));
+        input.dispatchEvent(new FocusEvent('focusout', { bubbles: true, cancelable: true }));
+        return true;
+    }
+
+    async function fillWorkdaySingleCheckboxGroup(input, value) {
+        if (!input || !window.location.hostname.endsWith('.myworkdayjobs.com')) return false;
+        const group = input.closest?.('[data-automation-id^="formField-"], fieldset');
+        if (!group) return false;
+        const checkboxes = Array.from(group.querySelectorAll('input[type="checkbox"]')).filter(isElementVisible);
+        if (checkboxes.length <= 1) return false;
+
+        const requested = normalizeSelectText(value);
+        if (!requested) return false;
+
+        const ranked = checkboxes
+            .map((checkbox, idx) => {
+                const labelText = getFieldLabel(checkbox) || checkbox.value || checkbox.closest('label, div, span')?.textContent || '';
+                const labelNorm = normalizeSelectText(labelText);
+                let score = 0;
+                if (labelNorm === requested) score = 100;
+                else if (labelNorm.includes(requested) || requested.includes(labelNorm)) score = 85;
+                else score = Math.round(semanticScore(labelNorm, requested) * 80);
+                return { checkbox, idx, labelText, score };
+            })
+            .filter(item => item.score >= 55)
+            .sort((a, b) => b.score - a.score || a.idx - b.idx);
+
+        const best = ranked[0];
+        if (!best) return false;
+
+        for (const checkbox of checkboxes) {
+            if (checkbox.checked && checkbox !== best.checkbox) {
+                clickWorkdayChoice(checkbox);
+                await new Promise(r => setTimeout(r, 80));
+            }
+        }
+
+        if (!best.checkbox.checked) {
+            clickWorkdayChoice(best.checkbox);
+            await new Promise(r => setTimeout(r, 120));
+        }
+
+        return best.checkbox.checked;
+    }
+
     // Bring an element into view WITHOUT ever scrolling the viewport upward. Tracks
     // the furthest point reached in fillScrollCursor; any target above that point is
     // left where it is (filled in place, no scroll) so the page advances strictly
@@ -168,6 +276,104 @@
         const actualDialCode = actualNorm.match(/\+\d+/)?.[0];
         const expectedDialCode = expectedNorm.match(/\+\d+/)?.[0];
         return !!actualDialCode && actualDialCode === expectedDialCode;
+    }
+
+    function hasWorkdayPromptSelection(input, expectedValue = '') {
+        const scope = input?.closest?.('[data-automation-id^="formField-"], [data-automation-id="multiSelectContainer"]');
+        if (!scope) return false;
+
+        const selectedText = [
+            ...scope.querySelectorAll('[data-automation-id="selectedItem"], [data-automation-id="selectedItemList"], [data-automation-id="promptSelectionLabel"]')
+        ]
+            .map(node => node.textContent || '')
+            .join(' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+
+        if (selectedText) {
+            return !expectedValue || selectionTextMatches(selectedText, expectedValue);
+        }
+
+        const instruction = (scope.querySelector('[data-automation-id="promptAriaInstruction"]')?.textContent || '')
+            .replace(/\s+/g, ' ')
+            .trim();
+        if (!instruction || /expanded|0 items selected|select one|minimized|search/i.test(instruction)) {
+            return false;
+        }
+
+        return !expectedValue || selectionTextMatches(instruction, expectedValue);
+    }
+
+    function getClosestWorkdaySection(el) {
+        if (!el) return null;
+        let section = el.closest?.('[data-automation-id^="education-"], [data-automation-id*="education" i]');
+        if (section?.querySelectorAll) return section;
+        section = el.closest?.('[data-automation-id^="formField-"]');
+        if (section?.querySelectorAll) return section;
+        section = el.closest?.('section, fieldset, form, [role="group"]');
+        return section?.querySelectorAll ? section : document;
+    }
+
+    function textLooksLikeManualSchoolControl(text) {
+        return /cannot find|can't find|not find|not listed|school.*not.*listed|add school|enter.*school|manual/i.test(
+            String(text || '').toLowerCase()
+        );
+    }
+
+    async function fillWorkdayManualSchoolFallback(searchInput, schoolName, fieldTracker) {
+        const section = getClosestWorkdaySection(searchInput);
+        if (!section?.querySelectorAll) return false;
+
+        const clickCandidates = Array.from(section.querySelectorAll('label, button, [role="button"], input[type="checkbox"], input[type="radio"]'))
+            .filter(el => isElementVisible(el))
+            .filter(el => {
+                const text = [
+                    el.textContent,
+                    el.getAttribute?.('aria-label'),
+                    el.getAttribute?.('title'),
+                    getFieldLabel(el)
+                ].filter(Boolean).join(' ');
+                return textLooksLikeManualSchoolControl(text);
+            });
+
+        for (const candidate of clickCandidates) {
+            const target = candidate.matches?.('label')
+                ? candidate
+                : (getAssociatedLabelElement(candidate) || candidate);
+            clickLikeUser(target);
+            await new Promise(r => setTimeout(r, 300));
+        }
+
+        const refreshedSection = getClosestWorkdaySection(searchInput);
+        const inputs = Array.from(refreshedSection.querySelectorAll('input:not([type="hidden"]), textarea'))
+            .filter(el => el !== searchInput)
+            .filter(el => isElementVisible(el) && !el.disabled && !fieldTracker.filledElements.has(el));
+
+        const schoolInputs = inputs.filter(el => {
+            const descriptor = [
+                el.name,
+                el.id,
+                el.getAttribute('data-automation-id'),
+                el.getAttribute('aria-label'),
+                el.getAttribute('placeholder'),
+                getFieldLabel(el)
+            ].filter(Boolean).join(' ').toLowerCase();
+            return /school|university|institution/.test(descriptor) &&
+                !/search|degree|field|study|gpa|grade|year|date/.test(descriptor);
+        });
+
+        const targetInput = schoolInputs.find(el => !String(el.value || '').trim()) ||
+            schoolInputs[0] ||
+            inputs.find(el => !String(el.value || '').trim());
+
+        if (!targetInput) return false;
+        if (!(await fillElement(targetInput, schoolName))) return false;
+
+        markFieldFilled(targetInput, 'platform', fieldTracker);
+        const formField = targetInput.closest?.('[data-automation-id^="formField-"]');
+        if (formField) markFieldFilled(formField, 'platform', fieldTracker);
+        console.log(`[Platform] Filled manual Workday school fallback with "${schoolName}"`);
+        return targetInput;
     }
 
     function getWorkdayOptionLabel(optionEl) {
@@ -1456,6 +1662,66 @@
         return /\bcounty\b/.test(text);
     }
 
+    function getDegreeLevel(value) {
+        const normalized = String(value || '')
+            .toLowerCase()
+            .replace(/\./g, '')
+            .replace(/[^a-z0-9]+/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+        if (!normalized) return null;
+        if (/\b(high school|highschool|secondary|ged|hs diploma)\b/.test(normalized)) return 'highschool';
+        if (/\b(some college|college coursework|some university|no degree|unfinished college|undergraduate coursework)\b/.test(normalized)) return 'some_college';
+        if (/\b(associate|associates|aa|as|aas)\b/.test(normalized)) return 'associate';
+        if (/\b(bachelor|bachelors|undergraduate|ba|bs|bsc|beng|btech|bfa|bba)\b/.test(normalized)) return 'bachelor';
+        if (/\b(master|masters|ma|ms|msc|mba|meng|mfa|mph|m ed|med)\b/.test(normalized)) return 'master';
+        if (/\b(phd|doctor|doctoral|doctorate|dphil|edd|md|jd|juris doctor)\b/.test(normalized)) return 'doctorate';
+        if (/\b(certificate|certification|diploma|vocational|trade school|professional certificate)\b/.test(normalized)) return 'certificate';
+        return null;
+    }
+
+    function scoreDegreeOption(optionText, requestedDegree) {
+        const option = String(optionText || '').trim();
+        const optionNorm = normalizeSelectText(option);
+        const requestedNorm = normalizeSelectText(requestedDegree);
+        if (!optionNorm || !requestedNorm) return 0;
+        if (/^(select|choose|please|make a selection)\b/i.test(option)) return 0;
+        if (optionNorm === requestedNorm) return 100;
+        if (optionNorm.includes(requestedNorm) || requestedNorm.includes(optionNorm)) return 92;
+
+        const level = getDegreeLevel(requestedDegree);
+        if (!level) return Math.round(calculateSemanticScore(requestedNorm, optionNorm) * 80);
+
+        if (level !== 'highschool' && /\b(high school|highschool|secondary|ged)\b/i.test(option)) {
+            return 0;
+        }
+
+        const levelPatterns = {
+            highschool: /\b(high school|highschool|secondary|ged)\b/i,
+            some_college: /\b(some college|college coursework|some university|no degree|coursework)\b/i,
+            associate: /\b(associate|associates|aa|as|aas)\b/i,
+            bachelor: /\b(bachelor|bachelors|baccalaureate|undergraduate|ba|bs|bsc|beng|btech|bfa|bba)\b/i,
+            master: /\b(master|masters|ma|ms|msc|mba|meng|mfa|mph|med)\b/i,
+            doctorate: /\b(phd|doctor|doctoral|doctorate|dphil|edd|md|jd|juris doctor)\b/i,
+            certificate: /\b(certificate|certification|diploma|vocational|trade school|professional certificate)\b/i
+        };
+
+        return levelPatterns[level]?.test(option) ? 88 : 0;
+    }
+
+    function pickDegreeOption(options, requestedDegree, getLabel = option => option?.textContent || '') {
+        const ranked = Array.from(options || [])
+            .map((option, idx) => ({
+                option,
+                idx,
+                text: getLabel(option).trim(),
+                score: scoreDegreeOption(getLabel(option), requestedDegree)
+            }))
+            .filter(item => item.score >= 80)
+            .sort((a, b) => b.score - a.score || a.idx - b.idx);
+        return ranked[0] || null;
+    }
+
     function getRadioOptionText(radio) {
         if (!radio) return '';
         const label = getFieldLabel(radio);
@@ -1532,8 +1798,6 @@
                 (() => { try { return getFieldLabel?.(element); } catch (_) { return ''; } })()
             ].filter(Boolean).join(' ').toLowerCase();
             const isDegreeField = /degree/.test(degreeProbeText);
-            // Match an "Other" choice (e.g. "Other", "Others", "Other (please specify)")
-            // without matching unrelated options that merely contain the substring.
             const isOtherOptionText = (txt) => /\bothers?\b/.test(String(txt || '').trim().toLowerCase());
 
             // Helper to mirror events on the wrapper element if it differs from the target
@@ -1601,7 +1865,17 @@
                 let bestMatchIdx = -1;
                 let bestMatchScore = 0; // Semantic score ranges from 0 to 1
 
-                for (let idx = 0; idx < targetEl.options.length; idx++) {
+                if (isDegreeField) {
+                    const degreeMatch = pickDegreeOption(Array.from(targetEl.options), strVal, option => option?.textContent || '');
+                    if (degreeMatch) {
+                        matchedOption = degreeMatch.option;
+                        bestMatchIdx = degreeMatch.idx;
+                        bestMatchScore = degreeMatch.score / 100;
+                        console.log(`[Fillo] Degree level match: "${degreeMatch.text}" for "${strVal}" (score ${degreeMatch.score})`);
+                    }
+                }
+
+                for (let idx = 0; !matchedOption && idx < targetEl.options.length; idx++) {
                     const o = targetEl.options[idx];
                     const optText = o.textContent.trim().toLowerCase();
 
@@ -1722,11 +1996,16 @@
                     return Math.round(calculateSemanticScore(answerNorm, optionNorm) * 100);
                 };
                 const selectedTextMatchesRequest = (text) => {
+                    if (isDegreeField) {
+                        return scoreDegreeOption(text, strVal) >= 80 ||
+                            (isOtherOptionText(text) && scoreDegreeOption(text, strVal) === 0);
+                    }
                     return scoreOptionAgainstAnswer(text) >= 60;
                 };
                 const clickOptionWithPointerSequence = (optionEl) => {
                     if (!optionEl) return;
                     optionEl.scrollIntoView({ block: 'nearest' });
+                    callWorkdayReactClick(optionEl.querySelector?.('[data-automation-id="promptOption"], [data-automation-id="promptLeafNode"]') || optionEl);
                     optionEl.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true }));
                     optionEl.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
                     optionEl.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, cancelable: true }));
@@ -1743,6 +2022,14 @@
                 // (e.g. "Female" contains "male") can never beat an exact option ("Male")
                 // just because it appears earlier in the list.
                 const pickOption = (options) => {
+                    if (isDegreeField) {
+                        const degreeMatch = pickDegreeOption(options, strVal, option => option?.textContent || '');
+                        if (degreeMatch) {
+                            console.log(`[Fillo] Degree level option match: "${degreeMatch.text}" for "${strVal}" (score ${degreeMatch.score})`);
+                            return degreeMatch.option;
+                        }
+                    }
+
                     const ranked = options
                         .map((o, idx) => ({
                             o,
@@ -1856,6 +2143,9 @@
                 const wantsUnchecked = value === false || ['false', 'no', 'n', '0', 'unchecked', 'off'].includes(valueText);
 
                 if (type === 'checkbox') {
+                    if (!wantsChecked && !wantsUnchecked && await fillWorkdaySingleCheckboxGroup(targetEl, value)) {
+                        return true;
+                    }
                     if ((wantsChecked && targetEl.checked) || (wantsUnchecked && !targetEl.checked)) {
                         return true;
                     }
@@ -1884,16 +2174,20 @@
                 }
 
                 targetEl.focus({ preventScroll: true });
-                targetEl.click();
+                clickWorkdayChoice(targetEl);
                 targetEl.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
                 mirror('change', Event, { bubbles: true });
                 targetEl.dispatchEvent(new FocusEvent('blur', { bubbles: true, cancelable: true }));
                 mirror('blur', FocusEvent, { bubbles: true });
 
             } else if (targetEl.getAttribute('role') === 'spinbutton') {
-                // Workday date spinbuttons (Month / Year)
-                // Needs the same full React event sequence as text inputs
                 const strValue = String(value);
+                if (await fillWorkdaySpinbuttonByArrowUp(targetEl, strValue)) {
+                    return true;
+                }
+
+                // Workday date spinbuttons fallback (Month / Day / Year)
+                // Needs the same full React event sequence as text inputs
                 const nativeSetter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(targetEl), 'value')?.set;
 
                 // Full focus sequence — Workday marks the field "touched" on focusin
@@ -3404,15 +3698,7 @@
         const queryRoot = scopeRoot?.querySelectorAll ? scopeRoot : document;
 
         let searchInput = null;
-        const hasSelectedPromptValue = (input) => {
-            const scope = input?.closest?.('[data-automation-id^="formField-"], [data-automation-id="multiSelectContainer"]');
-            if (!scope) return false;
-            const selectedText = [
-                ...scope.querySelectorAll('[data-automation-id="selectedItem"], [data-automation-id="selectedItemList"], [data-automation-id="promptSelectionLabel"]')
-            ].map(node => node.textContent || '').join(' ').trim();
-            const instruction = scope.querySelector('[data-automation-id="promptAriaInstruction"]')?.textContent?.trim() || '';
-            return !!selectedText || (!!instruction && !/expanded|0 items selected|select one/i.test(instruction));
-        };
+        const hasSelectedPromptValue = (input) => hasWorkdayPromptSelection(input, searchText);
         const isUsableSearchInput = (input) => input?.tagName?.toLowerCase() === 'input' &&
             !input.disabled &&
             isElementVisible(input) &&
@@ -3640,6 +3926,8 @@
                     console.log(`[Platform] Workday school prompt committed via Enter fallback for "${searchText}"`);
                     return searchInput;
                 }
+                const manualSchool = await fillWorkdayManualSchoolFallback(searchInput, searchText, fieldTracker);
+                if (manualSchool) return manualSchool;
             }
             return false;
         }
@@ -3965,17 +4253,28 @@
 
                         const elValue = (el.value || el.getAttribute('value') || '').trim().toLowerCase();
                         const expectedValue = String(displayValue).trim().toLowerCase();
+                        const isEducationSchoolPrompt = arrayPath === 'education_history' &&
+                            ['school', 'schoolName', 'institution', 'university'].includes(field.name);
 	
                         // Treat as successfully filled if it already holds the EXACT correct value (pre-filled)
                         if (elValue === expectedValue && expectedValue !== '') {
+                            if (isEducationSchoolPrompt && !hasWorkdayPromptSelection(el, displayValue)) {
+                                console.log(`[Platform] School text is present but not committed in Workday prompt: "${displayValue}" (${arrayPath}[${index}])`);
+                                continue;
+                            }
                             console.log(`[Platform] Already natively filled [${field.name}]="${displayValue}" (${arrayPath}[${index}])`);
                             markFieldFilled(el, 'platform', fieldTracker);
+                            rememberEntryAnchor(el, subKey);
                             filled++;
                             fieldFilled = true;
                             break;
                         }
 
-                        if (!fieldTracker.allowRefill && elValue) continue; // user pre-filled it with something else we shouldn't wipe out
+                        if (!fieldTracker.allowRefill && elValue && !isEducationSchoolPrompt) continue; // user pre-filled it with something else we shouldn't wipe out
+                        if (!fieldTracker.allowRefill && elValue && isEducationSchoolPrompt && hasWorkdayPromptSelection(el, displayValue)) continue;
+                        if (isEducationSchoolPrompt && el.closest?.('[data-automation-id="formField-schoolItem"], [data-automation-id="formField-school"], [data-automation-id="formField-schoolName"]')) {
+                            continue;
+                        }
 
                         // Otherwise, it's empty — fill it!
                         if (await fillElement(el, displayValue)) {
@@ -5240,34 +5539,15 @@
                 const isDegreeField = /degree/i.test(`${field.name || ''} ${field.label || ''}`);
                 const isSchoolField = /school|university|institution/i.test(`${field.name || ''} ${field.label || ''}`);
 
-                const getDegreeIntent = (value) => {
-                    const normalized = String(value || '')
-                        .toLowerCase()
-                        .replace(/\./g, '')
-                        .replace(/[^a-z0-9]+/g, ' ')
-                        .replace(/\s+/g, ' ')
-                        .trim();
-                    if (!normalized) return null;
-                    if (/\bphd\b|doctor|doctoral|doctorate/.test(normalized)) return 'doctoral';
-                    if (/\bmba\b/.test(normalized)) return 'master_business';
-                    if (/\bms\b|\bmsc\b|master.*science/.test(normalized)) return 'master_science';
-                    if (/\bma\b|master.*arts/.test(normalized)) return 'master_arts';
-                    if (/master/.test(normalized)) return 'master';
-                    if (/\bbs\b|\bbsc\b|bachelor.*science/.test(normalized)) return 'bachelor_science';
-                    if (/\bba\b|bachelor.*arts/.test(normalized)) return 'bachelor_arts';
-                    if (/bachelor|undergraduate/.test(normalized)) return 'bachelor';
-                    if (/associate/.test(normalized)) return 'associate';
-                    if (/high school|highschool|\bged\b|secondary/.test(normalized)) return 'highschool';
-                    return null;
-                };
-
-                const degreeIntent = isDegreeField ? getDegreeIntent(rawSearchTerm) : null;
+                const degreeIntent = isDegreeField ? getDegreeLevel(rawSearchTerm) : null;
                 const searchTerm = degreeIntent
-                    ? (degreeIntent.startsWith('bachelor') ? 'Bachelor' :
-                        degreeIntent.startsWith('master') ? 'Master' :
-                        degreeIntent === 'doctoral' ? 'Doctor' :
+                    ? (degreeIntent === 'bachelor' ? 'Bachelor' :
+                        degreeIntent === 'master' ? 'Master' :
+                        degreeIntent === 'doctorate' ? 'Doctor' :
                         degreeIntent === 'associate' ? 'Associate' :
                         degreeIntent === 'highschool' ? 'High School' :
+                        degreeIntent === 'some_college' ? 'Some College' :
+                        degreeIntent === 'certificate' ? 'Certificate' :
                         rawSearchTerm)
                     : rawSearchTerm;
                 if (isDegreeField && searchTerm !== rawSearchTerm) {
@@ -5369,20 +5649,23 @@
                 };
 
                 const getDegreeSearchTerms = () => {
-                    if (degreeIntent === 'doctoral') return ['doctoral', 'doctorate', 'phd', 'doctor'];
-                    if (degreeIntent === 'master_business') return ['master', 'mba', 'business'];
-                    if (degreeIntent === 'master_science') return ['master', 'science', 'ms', 'msc'];
-                    if (degreeIntent === 'master_arts') return ['master', 'arts', 'ma'];
+                    if (degreeIntent === 'doctorate') return ['doctoral', 'doctorate', 'phd', 'doctor'];
                     if (degreeIntent === 'master') return ['master', 'masters', "master's"];
-                    if (degreeIntent === 'bachelor_science') return ['bachelor', 'science', 'bs', 'bsc'];
-                    if (degreeIntent === 'bachelor_arts') return ['bachelor', 'arts', 'ba'];
                     if (degreeIntent === 'bachelor') return ['bachelor', 'bachelors', "bachelor's"];
                     if (degreeIntent === 'associate') return ['associate', "associate's"];
                     if (degreeIntent === 'highschool') return ['high school', 'highschool', 'ged', 'secondary'];
+                    if (degreeIntent === 'some_college') return ['some college', 'college coursework', 'some university', 'no degree'];
+                    if (degreeIntent === 'certificate') return ['certificate', 'certification', 'diploma', 'vocational'];
                     return [];
                 };
                 const degreeSearchTerms = isDegreeField ? getDegreeSearchTerms() : [];
                 const scoreSingleSelectOption = (candidateText) => {
+                    if (isDegreeField) {
+                        return Math.max(
+                            scoreDegreeOption(candidateText, rawSearchTerm),
+                            scoreDegreeOption(candidateText, searchTerm)
+                        );
+                    }
                     const baseScore = Math.max(
                         scoreExactFirstOption(candidateText, searchTerm),
                         scoreExactFirstOption(candidateText, rawSearchTerm)
@@ -5395,11 +5678,6 @@
                         if (!termNorm) continue;
                         if (optionNorm === termNorm || optionNorm.includes(termNorm)) degreeScore = Math.max(degreeScore, 96);
                     }
-                    if (degreeIntent === 'bachelor_science' && /bachelor.*science|science.*bachelor|\bbs\b|\bbsc\b/i.test(candidateText)) degreeScore = Math.max(degreeScore, 100);
-                    if (degreeIntent === 'bachelor_arts' && /bachelor.*arts|arts.*bachelor|\bba\b/i.test(candidateText)) degreeScore = Math.max(degreeScore, 100);
-                    if (degreeIntent === 'master_science' && /master.*science|science.*master|\bms\b|\bmsc\b/i.test(candidateText)) degreeScore = Math.max(degreeScore, 100);
-                    if (degreeIntent === 'master_arts' && /master.*arts|arts.*master|\bma\b/i.test(candidateText)) degreeScore = Math.max(degreeScore, 100);
-                    if (degreeIntent === 'master_business' && /master.*business|business.*master|\bmba\b/i.test(candidateText)) degreeScore = Math.max(degreeScore, 100);
                     if (degreeSearchTerms.some(term => term.includes('bachelor')) && /\bba\b|\bbs\b|bachelor/i.test(candidateText)) degreeScore = Math.max(degreeScore, 92);
                     if (degreeSearchTerms.some(term => term.includes('master')) && /\bma\b|\bms\b|mba|master/i.test(candidateText)) degreeScore = Math.max(degreeScore, 92);
                     return Math.max(baseScore, degreeScore);
