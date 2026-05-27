@@ -45,6 +45,71 @@
         target.click?.();
     }
 
+    function getWorkdayReactProps(element) {
+        if (!element) return null;
+        for (const key in element) {
+            if (key.startsWith('__reactProps')) return element[key];
+        }
+        return null;
+    }
+
+    function callWorkdayReactHandler(element, handlerName, value) {
+        const props = getWorkdayReactProps(element);
+        const handler = props?.[handlerName];
+        if (typeof handler !== 'function') return false;
+
+        try {
+            handler({
+                target: element,
+                currentTarget: element,
+                preventDefault: () => {},
+                stopPropagation: () => {}
+            });
+            return true;
+        } catch (error) {
+            console.warn(`[Fillo] Workday React ${handlerName} handler failed:`, error);
+            return false;
+        }
+    }
+
+    function fillWorkdayReactTextInput(input, value) {
+        if (!input || !window.location.hostname.endsWith('.myworkdayjobs.com')) return false;
+        const props = getWorkdayReactProps(input);
+        if (!props) return false;
+
+        const strValue = String(value ?? '');
+        input.value = strValue;
+        let called = false;
+        if (typeof props.onChange === 'function') {
+            called = callWorkdayReactHandler(input, 'onChange', strValue) || called;
+        }
+        if (typeof props.onBlur === 'function') {
+            called = callWorkdayReactHandler(input, 'onBlur', strValue) || called;
+        }
+        return called;
+    }
+
+    function nudgeWorkdaySearchableInput(input, value) {
+        if (!input || !window.location.hostname.endsWith('.myworkdayjobs.com')) return false;
+        const props = getWorkdayReactProps(input);
+        if (typeof props?.onKeyDown !== 'function') return false;
+
+        const strValue = String(value ?? '');
+        try {
+            props.onKeyDown({
+                key: 'Tab',
+                target: { value: strValue },
+                currentTarget: { value: strValue },
+                preventDefault: () => {},
+                stopPropagation: () => {}
+            });
+            return true;
+        } catch (error) {
+            console.warn('[Fillo] Workday searchable input React keydown failed:', error);
+            return false;
+        }
+    }
+
     // Bring an element into view WITHOUT ever scrolling the viewport upward. Tracks
     // the furthest point reached in fillScrollCursor; any target above that point is
     // left where it is (filled in place, no scroll) so the page advances strictly
@@ -182,6 +247,20 @@
         return Array.from(new Set(out.map(s => String(s).trim()).filter(Boolean)));
     }
 
+    function getOpenDropdownOptions(targetEl) {
+        const controls = targetEl.getAttribute('aria-controls');
+        const expandedId = controls ? document.getElementById(controls) : null;
+        const scope = expandedId || targetEl.closest('[data-automation-id^="formField-"], fieldset, .form-group');
+        const scoped = scope
+            ? Array.from(scope.querySelectorAll('[role="option"]'))
+            : [];
+        const portal = Array.from(document.querySelectorAll('[role="listbox"], [data-automation-id="listBox"], [data-automation-id*="popup"], [data-automation-id*="menu"]'))
+            .filter(isElementVisible)
+            .flatMap(list => Array.from(list.querySelectorAll('[role="option"]')));
+        const all = scoped.length > 0 ? scoped.concat(portal) : Array.from(document.querySelectorAll('[role="option"]'));
+        return Array.from(new Set(all)).filter(o => isElementVisible(o));
+    }
+
     async function dismissWorkdayDropdown(control, preferredOutsideTarget = null) {
         try {
             const outsideTarget = preferredOutsideTarget
@@ -200,23 +279,27 @@
                 active?.dispatchEvent?.(new FocusEvent('focusout', { bubbles: true, cancelable: true }));
 
                 clickLikeUser(outsideTarget);
-                await new Promise(r => setTimeout(r, 175));
+                await new Promise(r => setTimeout(r, 100));
                 if (getOpenWorkdayDropdowns().length === 0) break;
 
                 dispatchKey(control || document.body, 'Tab', 'Tab', 9);
-                await new Promise(r => setTimeout(r, 125));
+                await new Promise(r => setTimeout(r, 75));
+                if (getOpenWorkdayDropdowns().length === 0) break;
             }
         } catch (_) {}
     }
 
     // --- Workday Questionnaire / Screening Question Support ---
 
+    function normalizeWordList(s) {
+        return String(s || '').toLowerCase().replace(/[^a-z0-9]/g, ' ').split(/\s+/).filter(w => w.length > 2);
+    }
+
     /** Semantic word-overlap score (module-level version for questionnaire matching). */
     function semanticScore(a, b) {
         if (!a || !b) return 0;
-        const normalize = s => s.toLowerCase().replace(/[^a-z0-9]/g, ' ').split(/\s+/).filter(w => w.length > 2);
-        const aWords = normalize(a);
-        let bWords = normalize(b);
+        const aWords = normalizeWordList(a);
+        let bWords = normalizeWordList(b);
         if (!aWords.length || !bWords.length) return 0;
         let matches = 0;
         for (const w of aWords) {
@@ -273,13 +356,40 @@
                 const options = cleanChoiceOptions(radioInputs.map(r => getFieldLabel(r) || r.value || ''));
                 questions.push({ questionText, elements: radioInputs, type: 'radio', options });
             } else if (dropdownBtn) {
-                questions.push({ questionText, element: dropdownBtn, type: 'dropdown' });
+                const passiveOptions = getDropdownOptionsPassive(dropdownBtn);
+                questions.push({ questionText, element: dropdownBtn, type: 'dropdown', options: passiveOptions.length > 0 ? passiveOptions : [] });
             } else if (textInput) {
                 questions.push({ questionText, element: textInput, type: 'text' });
             }
             // If no answer element found, skip — can't fill it
         }
         return questions;
+    }
+
+    // Read dropdown option texts without opening the dropdown. Returns [] if nothing found passively.
+    function getDropdownOptionsPassive(btn) {
+        if (!btn) return [];
+        const selector = '[role="option"], [data-automation-id="promptOption"], [data-automation-id*="promptOption"]';
+        // Check the aria-controls listbox container first (pre-rendered but hidden)
+        const controlledId = btn.getAttribute('aria-controls');
+        if (controlledId) {
+            const container = document.getElementById(controlledId);
+            if (container) {
+                const opts = cleanChoiceOptions(
+                    Array.from(container.querySelectorAll(selector)).map(el => getWorkdayOptionLabel(el).trim())
+                );
+                if (opts.length > 0) return opts;
+            }
+        }
+        // Check enclosing form field container
+        const formField = btn.closest('[data-automation-id^="formField-"], fieldset, .form-group');
+        if (formField) {
+            const opts = cleanChoiceOptions(
+                Array.from(formField.querySelectorAll(selector)).map(el => getWorkdayOptionLabel(el).trim())
+            );
+            if (opts.length > 0) return opts;
+        }
+        return [];
     }
 
     /** Match a question string to the best stored screening answer. */
@@ -722,8 +832,8 @@
             element.focus({ preventScroll: true });
             element.click();
             let opts = [];
-            for (let i = 0; i < 12; i++) {
-                await new Promise(r => setTimeout(r, 150));
+            for (let i = 0; i < 8; i++) {
+                await new Promise(r => setTimeout(r, 100));
                 opts = Array.from(document.querySelectorAll('[role="option"]')).filter(isElementVisible);
                 if (opts.length) break;
             }
@@ -928,27 +1038,12 @@
                 else best = Math.max(best, Math.round(semanticScore(candidateNorm, optionNorm) * 70));
             }
 
-            const optOut = /do not wish|don't wish|do not want|prefer not|not answer|decline|self[- ]?identify|opt out/i;
-            if (value === 'decline' || value === 'opt_out') {
-                if (optOut.test(optionRaw)) best = Math.max(best, 100);
-                if (intent === 'race_ethnicity' && /opt out/i.test(optionRaw)) best = Math.max(best, 100);
-            }
-            if (value === 'no_disability') {
-                if (/^no\b|do not have.*disability|have not had.*disability|not disabled/i.test(optionRaw)) best = Math.max(best, 100);
-                if (optOut.test(optionRaw)) best = Math.min(best, 20);
-            }
-            if (value === 'has_disability') {
-                if (/^yes\b|have.*disability|had.*disability|disabled/i.test(optionRaw) &&
-                    !/do not have|have not had|not disabled|do not want|not answer/i.test(optionRaw)) best = Math.max(best, 100);
-            }
-            if (value === 'not_protected_veteran') {
-                if (/not (a )?protected veteran/i.test(optionRaw)) best = Math.max(best, /just not/i.test(optionRaw) ? 100 : 92);
-                if (/protected veteran/i.test(optionRaw) && !/not/i.test(optionRaw)) best = Math.min(best, 20);
-            }
-            if (value === 'protected_veteran') {
-                if (/one or more.*protected veteran|classifications of protected veteran|identify as.*protected veteran/i.test(optionRaw) &&
-                    !/not|do not wish|not answer/i.test(optionRaw)) best = Math.max(best, 100);
-            }
+            // OFCCP/EEO disability and veteran special cases
+            const sc = applyChoiceSpecialCases(optionRaw, value, best);
+            if (sc !== null) best = sc;
+            // race_ethnicity opt-out needs extra context check
+            if ((value === 'decline' || value === 'opt_out') && intent === 'race_ethnicity' && /opt out/i.test(optionRaw)) best = Math.max(best, 100);
+            // simple yes/no boosts
             if (value === 'yes' && /^(yes|y)\b/i.test(optionRaw)) best = Math.max(best, 100);
             if (value === 'no' && /^(no|n)\b/i.test(optionRaw)) best = Math.max(best, 100);
 
@@ -967,6 +1062,10 @@
         async function extractDropdownOptions(btn) {
             try {
                 if (!btn) return [];
+
+                // Try to read options without opening the dropdown first
+                const passiveOpts = getDropdownOptionsPassive(btn);
+                if (passiveOpts.length > 0) return passiveOpts;
 
                 const isVisibleOption = (el) => {
                     if (!el) return false;
@@ -1019,8 +1118,8 @@
                 await openDropdown();
 
                 let optionEls = [];
-                for (let i = 0; i < 14; i++) {
-                    await new Promise(r => setTimeout(r, 120));
+                for (let i = 0; i < 10; i++) {
+                    await new Promise(r => setTimeout(r, 100));
                     optionEls = getVisibleOptionElements();
                     if (optionEls.length > 0) break;
                 }
@@ -1035,10 +1134,6 @@
                 return [];
             }
         }
-
-        // Pass 1: resolve stored answers via direct match, collect unmatched for AI batch
-        const answerMap = new Map(); // question index → normalized fill decision
-        const aiBatch = [];          // { batchIndex, questionIndex }
 
         function markScreeningQuestionSkipped(q, reason = 'ai_low_confidence') {
             if (!fieldTracker?.skippedScreeningElements || !q) return;
@@ -1056,6 +1151,10 @@
             }
             console.log(`[Fillo] Screening question skipped (${reason}): "${String(q.questionText || '').substring(0, 80)}"`);
         }
+
+        // Pass 1: resolve stored answers via direct match, collect unmatched for AI batch
+        const answerMap = new Map(); // question index → normalized fill decision
+        const aiBatch = [];          // { batchIndex, questionIndex }
 
         for (let i = 0; i < questions.length; i++) {
             const q = questions[i];
@@ -1124,23 +1223,25 @@
         // Pass 3: fill all resolved answers
         for (let i = 0; i < questions.length; i++) {
             const q = questions[i];
-            const resolvedAnswer = answerMap.get(i);
-            if (!resolvedAnswer) {
+            const resolved = answerMap.get(i);
+            if (!resolved) {
                 if (!isSkippable(q)) console.log(`[Fillo] No answer for: "${q.questionText.substring(0, 60)}"`);
                 continue;
             }
-            const confidence = typeof resolvedAnswer.confidence === 'number' ? resolvedAnswer.confidence : 100;
+
+            const confidence = typeof resolved.confidence === 'number' ? resolved.confidence : 100;
             if (confidence < MIN_SCREENING_CONFIDENCE) {
                 markScreeningQuestionSkipped(q, 'low_confidence_fill_guard');
                 continue;
             }
-            const candidates = buildScreeningFillCandidates(resolvedAnswer);
+
+            const candidates = buildScreeningFillCandidates(resolved);
             let answerText = null;
             if (q.type === 'radio' || q.type === 'dropdown') {
                 if (q.type === 'dropdown' && (!q.options || q.options.length === 0)) {
                     q.options = await extractDropdownOptions(q.element);
                 }
-                answerText = pickScreeningChoice(q.options || [], resolvedAnswer);
+                answerText = pickScreeningChoice(q.options || [], resolved);
                 if (!answerText) {
                     markScreeningQuestionSkipped(q, 'no_page_option_match');
                     continue;
@@ -1157,7 +1258,7 @@
                     .filter(radio => !fieldTracker.filledElements.has(radio))
                     .map((radio, idx) => {
                         const labelText = (getFieldLabel(radio) || radio.value || '').trim();
-                        return { radio, idx, score: scoreScreeningChoice(labelText, resolvedAnswer), labelText };
+                        return { radio, idx, score: scoreScreeningChoice(labelText, resolved), labelText };
                     })
                     .filter(item => item.score >= 60)
                     .sort((a, b) => b.score - a.score || a.idx - b.idx);
@@ -1332,6 +1433,8 @@
         return score;
     }
 
+    // --- Field guard helpers — prevent mismatches on ambiguous fields ---
+
     function isPersonalNamePartField(element) {
         if (!element) return false;
         const text = [
@@ -1346,6 +1449,11 @@
 
         return /\b(first|given|middle|family|last|surname)\s+name\b/.test(text) ||
             /legalname--(first|middle|last)name/.test(text);
+    }
+
+    function isCountyLikeField(el, fallback = '') {
+        const text = getSemanticFieldText(el, fallback);
+        return /\bcounty\b/.test(text);
     }
 
     function getRadioOptionText(radio) {
@@ -1436,8 +1544,9 @@
             // Helper to compute a semantic keyword overlap score between target DB value and an option text.
             const calculateSemanticScore = (targetStr, optionStr) => {
                 if (!targetStr || !optionStr) return 0;
-                // Remove periods first so B.Sc. becomes Bsc, then remove other punctuation, then split.
-                const normalize = s => s.toLowerCase().replace(/\./g, '').replace(/[^a-z0-9]/g, ' ').split(/\s+/).filter(w => w.length > 1 && !['in','of','at','the','and'].includes(w));
+                // Pre-strip periods so B.Sc. becomes Bsc before calling normalizeWordList.
+                // Also keeps words of length > 1 and drops common stopwords (degree-specific needs).
+                const normalizeDegree = s => normalizeWordList(s.replace(/\./g, '')).filter(w => w.length > 1 && !['in','of','at','the','and'].includes(w));
                 const expand = w => {
                     const dict = {
                         'bsc': ['bachelor', 'science'], 'bs': ['bachelor', 'science'], 'ba': ['bachelor', 'arts'],
@@ -1447,8 +1556,8 @@
                     return dict[w] || [w];
                 };
 
-                const tWords = normalize(targetStr).flatMap(expand);
-                let oWords = normalize(optionStr).flatMap(expand);
+                const tWords = normalizeDegree(targetStr).flatMap(expand);
+                let oWords = normalizeDegree(optionStr).flatMap(expand);
                 if (!tWords.length || !oWords.length) return 0;
 
                 let matches = 0;
@@ -1629,20 +1738,6 @@
                 targetEl.focus({ preventScroll: true });
                 targetEl.click();
 
-                const getScopedOptions = () => {
-                    const controls = targetEl.getAttribute('aria-controls');
-                    const expandedId = controls ? document.getElementById(controls) : null;
-                    const scope = expandedId || targetEl.closest('[data-automation-id^="formField-"], fieldset, .form-group');
-                    const scoped = scope
-                        ? Array.from(scope.querySelectorAll('[role="option"]'))
-                        : [];
-                    const portal = Array.from(document.querySelectorAll('[role="listbox"], [data-automation-id="listBox"], [data-automation-id*="popup"], [data-automation-id*="menu"]'))
-                        .filter(isElementVisible)
-                        .flatMap(list => Array.from(list.querySelectorAll('[role="option"]')));
-                    const all = scoped.length > 0 ? scoped.concat(portal) : Array.from(document.querySelectorAll('[role="option"]'));
-                    return Array.from(new Set(all)).filter(o => isElementVisible(o));
-                };
-
                 // Pick the option that best matches the requested value. Exact value/text
                 // matches are taken across ALL options FIRST, so a fuzzy substring match
                 // (e.g. "Female" contains "male") can never beat an exact option ("Male")
@@ -1669,9 +1764,9 @@
 
                 // Poll for the options to appear in the DOM (usually appended to body or adjacent)
                 let optionsDiv = [];
-                for (let i = 0; i < 15; i++) {
-                    await new Promise(r => setTimeout(r, 600)); // max wait ~900ms
-                    const visibleOptions = getScopedOptions();
+                for (let i = 0; i < 8; i++) {
+                    await new Promise(r => setTimeout(r, 300)); // max wait 2.4s
+                    const visibleOptions = getOpenDropdownOptions(targetEl);
                     if (visibleOptions.length > 0) {
                         optionsDiv = visibleOptions;
                         break;
@@ -1719,7 +1814,7 @@
                 mirror('blur', FocusEvent, { bubbles: true });
                 await dismissWorkdayDropdown(targetEl);
 
-                await new Promise(r => setTimeout(r, 600));
+                await new Promise(r => setTimeout(r, 350));
 
                 const finalText = (targetEl.textContent || '').trim();
                 if (finalText === initialText || !selectedTextMatchesRequest(finalText)) {
@@ -1728,7 +1823,7 @@
                     targetEl.focus({ preventScroll: true });
                     targetEl.click();
 
-                    const retryScoped = getScopedOptions();
+                    const retryScoped = getOpenDropdownOptions(targetEl);
                     let retryOption = pickOption(retryScoped);
                     if (!retryOption && isDegreeField) {
                         retryOption = retryScoped.find(o => isOtherOptionText(o.textContent)) || null;
@@ -1744,7 +1839,7 @@
                         targetEl.dispatchEvent(new FocusEvent('focusout', { bubbles: true, cancelable: true }));
                         mirror('blur', FocusEvent, { bubbles: true });
                         await dismissWorkdayDropdown(targetEl);
-                        await new Promise(r => setTimeout(r, 600));
+                        await new Promise(r => setTimeout(r, 350));
                     }
 
                     const retriedText = (targetEl.textContent || '').trim();
@@ -1825,6 +1920,7 @@
                 if (targetEl.value !== strValue) {
                     if (nativeSetter) nativeSetter.call(targetEl, strValue);
                     else targetEl.value = strValue;
+                    fillWorkdayReactTextInput(targetEl, strValue);
                     targetEl.dispatchEvent(new InputEvent('input', { bubbles: true, cancelable: true, inputType: 'insertText', data: strValue }));
                     targetEl.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
                     await new Promise(r => setTimeout(r, 50));
@@ -1870,6 +1966,7 @@
                 // Set via React's native setter to update React fiber state
                 if (nativeSetter) nativeSetter.call(targetEl, strValue);
                 else targetEl.value = strValue;
+                fillWorkdayReactTextInput(targetEl, strValue);
 
                 // Set attribute as well for Custom Web Components (like <spl-input>) which often track attributes
                 targetEl.setAttribute('value', strValue);
@@ -1906,6 +2003,7 @@
                 if (targetEl.value !== strValue) {
                     if (nativeSetter) nativeSetter.call(targetEl, strValue);
                     else targetEl.value = strValue;
+                    fillWorkdayReactTextInput(targetEl, strValue);
                     targetEl.dispatchEvent(new InputEvent('input', { bubbles: true, cancelable: true, inputType: 'insertText', data: strValue }));
                     targetEl.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
                 }
@@ -1934,9 +2032,9 @@
                         return results;
                     };
 
-                    // Poll for dropdown options to appear (up to 4 seconds)
+                    // Poll for dropdown options to appear (up to 2 seconds)
                     const optionSelector = '[role="option"], spl-autocomplete-option, sri-autocomplete-option, li[role="option"], ul[class*="autocomplete"] li, div[class*="option"], div[id*="listbox"] > div';
-                    for (let i = 0; i < 40; i++) {
+                    for (let i = 0; i < 20; i++) {
                         await new Promise(r => setTimeout(r, 100));
 
                         // Search the wrapper element's shadow root first (spl-autocomplete stores options there)
@@ -2046,18 +2144,6 @@
     }
 
 
-        function isCountyLikeField(el, fallback = '') {
-        const text = getSemanticFieldText(el, fallback);
-        return /\bcounty\b/.test(text);
-    }
-
-
-    /**
-     * Mark a field as filled and update strategy statistics
-     * @param {HTMLElement} element - The DOM element that was filled
-     * @param {string} strategy - The strategy used ('platform', 'generic', 'semantic', 'ai')
-     * @param {Object} fieldTracker - The field tracker object
-     */
     function getFieldIdentity(el) {
         const parts = [
             el.name || '',
@@ -2492,6 +2578,36 @@
         return false;
     }
 
+    // OFCCP/EEO disability and veteran special-case scoring shared between scoreScreeningChoice and scoreChoiceOption.
+    // semanticValue: 'decline' | 'opt_out' | 'no_disability' | 'has_disability' | 'not_protected_veteran' | 'protected_veteran'
+    // Returns adjusted score, or null if no special case applies (caller should fall through to regular scoring).
+    function applyChoiceSpecialCases(optionRaw, semanticValue, currentScore) {
+        const optOut = /do not wish|don't wish|do not want|prefer not|not answer|decline|self[- ]?identify|opt out/i;
+        switch (semanticValue) {
+            case 'decline': case 'opt_out':
+                return optOut.test(optionRaw) ? Math.max(currentScore, 100) : currentScore;
+            case 'no_disability':
+                if (/^no\b|do not have.*disability|have not had.*disability|not disabled/.test(optionRaw)) return 100;
+                if (optOut.test(optionRaw)) return Math.min(currentScore, 20);
+                return null;
+            case 'has_disability':
+                if (/^yes\b|have.*disability|had.*disability|disabled/.test(optionRaw) &&
+                    !/do not have|have not had|not disabled|do not want|not answer/.test(optionRaw)) return 100;
+                if (/do not have|have not had|not disabled|do not want|not answer/.test(optionRaw)) return 0;
+                return null;
+            case 'not_protected_veteran':
+                if (/not (a )?protected veteran/i.test(optionRaw)) return Math.max(currentScore, /just not/i.test(optionRaw) ? 100 : 92);
+                if (/protected veteran/i.test(optionRaw) && !/not/i.test(optionRaw)) return Math.min(currentScore, 20);
+                return null;
+            case 'protected_veteran':
+                if (/one or more.*protected veteran|classifications of protected veteran|identify as.*protected veteran/i.test(optionRaw) &&
+                    !/not|do not wish|not answer/i.test(optionRaw)) return Math.max(currentScore, 100);
+                return null;
+            default:
+                return null;
+        }
+    }
+
     function scoreChoiceOption(optionText, wantedValue) {
         const option = normalizeSelectText(optionText);
         const wanted = normalizeSelectText(wantedValue);
@@ -2503,14 +2619,20 @@
         if (wantsOptOut) {
             return /do not want|do not wish|don't wish|prefer not|decline|not answer/.test(optionRaw) ? 100 : 0;
         }
-        const wantsNo = /^(no|false|n|0)\b/.test(wantedRaw) ||
-            /do not have.*disability|have not had.*disability|not disabled|no disability/.test(wantedRaw);
+        // Disability-specific paths use the shared helper
+        const disabilityKey = /do not have.*disability|have not had.*disability|not disabled|no disability/.test(wantedRaw) ? 'no_disability'
+            : (/have.*disability|had.*disability|disabled/.test(wantedRaw) && !/not disabled|do not have/.test(wantedRaw)) ? 'has_disability'
+            : null;
+        if (disabilityKey) {
+            const sc = applyChoiceSpecialCases(optionRaw, disabilityKey, 0);
+            if (sc !== null) return sc;
+        }
+        const wantsNo = /^(no|false|n|0)\b/.test(wantedRaw);
         if (wantsNo) {
             if (/^no\b|do not have.*disability|have not had.*disability|not disabled|no disability/.test(optionRaw)) return 100;
             if (/do not want|do not wish|not answer/.test(optionRaw)) return 0;
         }
-        const wantsYes = /^(yes|true|y|1)\b/.test(wantedRaw) ||
-            /have.*disability|had.*disability|disabled/.test(wantedRaw);
+        const wantsYes = /^(yes|true|y|1)\b/.test(wantedRaw);
         if (wantsYes) {
             if (/^yes\b|have.*disability|had.*disability|disabled/.test(optionRaw) &&
                 !/do not have|have not had|not disabled|do not want|not answer/.test(optionRaw)) return 100;
@@ -2604,7 +2726,7 @@
                     if (field.container) fieldTracker.filledElements.add(field.container);
                     relayLog('info', `[Classifier] "${field.label || field.name || field.identity}" → ${best.mapping.profilePath}`);
                     filled++;
-                    await new Promise(r => setTimeout(r, 80));
+                    await new Promise(r => setTimeout(r, 30));
                 }
             } catch (error) {
                 console.warn('[Fillo] Classifier fill failed:', field, error);
@@ -3149,7 +3271,7 @@
                         if (isElementVisible(explicitBtn)) {
                             console.log(`[Platform] Clicking explicit add button "${sel}" for "${sectionType}" (attempt ${attempt + 1})`);
                             deepClick(explicitBtn);
-                            await new Promise(r => setTimeout(r, 900));
+                            await new Promise(r => setTimeout(r, 600));
                             return true;
                         }
                     }
@@ -3162,7 +3284,7 @@
                     if (sectionBtn) {
                         console.log(`[Platform] Clicking section-aware add button for "${sectionType}" (attempt ${attempt + 1})`);
                         deepClick(sectionBtn);
-                        await new Promise(r => setTimeout(r, 900));
+                        await new Promise(r => setTimeout(r, 600));
                         return true;
                     }
                 }
@@ -3220,7 +3342,7 @@
                     if (chosenBtn) {
                         console.log(`[Platform] Clicking [data-automation-id="add-button"] for "${sectionType}" (attempt ${attempt + 1})`);
                         deepClick(chosenBtn);
-                        await new Promise(r => setTimeout(r, 900));
+                        await new Promise(r => setTimeout(r, 600));
                         return true;
                     }
                 }
@@ -3243,7 +3365,7 @@
                         && isElementVisible(btn)) {
                         console.log(`[Platform] Clicking "${text || aria}" (pattern) for ${sectionType}`);
                         deepClick(btn);
-                        await new Promise(r => setTimeout(r, 900));
+                        await new Promise(r => setTimeout(r, 600));
                         return true;
                     }
                 }
@@ -3276,6 +3398,7 @@
     }
 
     async function fillWorkdaySearchFirstOption(fieldName, displayValue, selectors, fieldTracker, scopeRoot = document) {
+        throwIfStopRequested();
         const searchText = String(displayValue || '').trim();
         if (!searchText) return false;
         const queryRoot = scopeRoot?.querySelectorAll ? scopeRoot : document;
@@ -3377,6 +3500,7 @@
         }
         searchInput.dispatchEvent(new InputEvent('input', { bubbles: true, cancelable: true, inputType: 'insertText', data: searchText }));
         searchInput.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
+        nudgeWorkdaySearchableInput(searchInput, searchText);
 
         dispatchKey(searchInput, 'Enter', 'Enter', 13);
         console.log("Enter key clicked for the drop down")
@@ -3453,6 +3577,7 @@
                     resolve(ranked);
                 };
                 const check = () => {
+                    if (ns.state.stopRequested) { finish(getRankedOptions()); return; }
                     latestRanked = getRankedOptions();
                     // An exact match wins immediately.
                     if (hasExactMatch(latestRanked)) { finish(latestRanked); return; }
@@ -3500,6 +3625,22 @@
             const bestWeak = rankedOptions[0];
             console.log(`[Platform] No exact/strong Workday option for ${fieldName}: "${searchText}"` +
                 (bestWeak ? ` (best weak match: "${bestWeak.text}" score ${bestWeak.score})` : ''));
+            if (isSchoolField) {
+                // Some Workday school prompts only fetch/commit after Enter, and a
+                // second Enter can commit the highlighted exact result once it appears.
+                searchInput.focus({ preventScroll: true });
+                dispatchKey(searchInput, 'Enter', 'Enter', 13);
+                await new Promise(r => setTimeout(r, 1000));
+                dispatchKey(searchInput, 'Enter', 'Enter', 13);
+                await new Promise(r => setTimeout(r, 500));
+                if (hasSelectedPromptValue(searchInput)) {
+                    markFieldFilled(searchInput, 'platform', fieldTracker);
+                    const formField = searchInput.closest?.('[data-automation-id^="formField-"]');
+                    if (formField) markFieldFilled(formField, 'platform', fieldTracker);
+                    console.log(`[Platform] Workday school prompt committed via Enter fallback for "${searchText}"`);
+                    return searchInput;
+                }
+            }
             return false;
         }
 
@@ -3589,6 +3730,7 @@
      * @returns {Promise<number>} number of fields filled
      */
     async function fillArrayEntry(entry, arrayPath, index, platformFields, profileData, fieldTracker, scopeRoot = document) {
+        throwIfStopRequested();
         let filled = 0;
         let entryAnchorY = null;
         const queryRoot = scopeRoot?.querySelectorAll ? scopeRoot : document;
@@ -3646,6 +3788,7 @@
             console.log(`[Platform] ${arrayPath}[${index}]: filling via ${src} (${orderedTemplateFields.length} fields)`);
 
             for (const field of orderedTemplateFields) {
+                throwIfStopRequested();
                 // Extract sub-key: "work_experience.0.jobTitle" → "jobTitle"
                 const subKey = field.profilePath.split('.').slice(2).join('.');
                 const value = subKey ? (entry[subKey] ?? null) : null;
@@ -3855,6 +3998,7 @@
                     const newFields = getNewEmptyVisibleFields(fieldTracker, queryRoot);
 
             for (const [key, val] of Object.entries(entry)) {
+                throwIfStopRequested();
                 if (!val || typeof val !== 'string') continue;
                 const keyLower = key.toLowerCase();
 
@@ -3892,6 +4036,7 @@
      * @returns {Promise<number>} - Number of fields filled
      */
     async function fillByPageHTMLScan(entry, arrayPath, fieldDefs, fieldTracker, scopeRoot = document) {
+        throwIfStopRequested();
         let filled = 0;
         const queryRoot = scopeRoot?.querySelectorAll ? scopeRoot : document;
 
@@ -3900,6 +4045,7 @@
             .filter(el => isElementVisible(el) && !fieldTracker.filledElements.has(el));
 
         for (const container of formFieldEls) {
+            throwIfStopRequested();
             const autoId = container.getAttribute('data-automation-id') || '';
             const fieldName = autoId.replace(/^formField-/, ''); // "companyName", "jobTitle", etc.
 
@@ -3995,6 +4141,7 @@
      */
     async function processArrayFields(platformFields, profileData, fieldTracker, arrayPath) {
         try {
+            throwIfStopRequested();
             const arrayData = profileData[arrayPath];
             if (!Array.isArray(arrayData) || arrayData.length === 0) {
                 console.log(`[Platform] No ${arrayPath} data found`);
@@ -4274,6 +4421,7 @@
             }
 
             for (let i = 0; i < arrayData.length; i++) {
+                throwIfStopRequested();
                 const entry = arrayData[i];
                 if (!entry || typeof entry !== 'object') continue;
                 console.log(`[Platform] Filling ${arrayPath}[${i}]:`, Object.keys(entry).join(', '));
@@ -4337,6 +4485,7 @@
 
             return entriesFilled;
         } catch (e) {
+            if (e?.message === 'FILLO_STOPPED') throw e;
             console.error(`[Platform] Error processing array fields for ${arrayPath}:`, e);
             return 0;
         }
@@ -4351,6 +4500,7 @@
      */
     async function processPlatformField(field, profileData, fieldTracker) {
         try {
+            throwIfStopRequested();
             const {name, profilePath} = field;
             if (!name || !profilePath) return false;
 
@@ -4649,6 +4799,7 @@
                 let addedCount = 0;
 
                 for (const skill of skills) {
+                    throwIfStopRequested();
                     // Re-lookup the input each iteration — UXI can replace DOM nodes after selection.
                     // Also handles monikerSearchBox variant where the input is inside a hidden-search wrapper.
                     const formFieldScope = document.querySelector(`[data-automation-id="formField-${field.name}"]`);
@@ -5086,6 +5237,8 @@
             if (field.type === 'single-select') {
                 const rawSearchTerm = String(displayValue).trim();
                 if (!rawSearchTerm) return false;
+                const isDegreeField = /degree/i.test(`${field.name || ''} ${field.label || ''}`);
+                const isSchoolField = /school|university|institution/i.test(`${field.name || ''} ${field.label || ''}`);
 
                 const getDegreeIntent = (value) => {
                     const normalized = String(value || '')
@@ -5196,6 +5349,7 @@
                             await new Promise(r => setTimeout(r, 20));
                         }
                     }
+                    nudgeWorkdaySearchableInput(ssInput, searchTerm);
                     await new Promise(r => setTimeout(r, ssIsMoniker ? 700 : 500));
                 };
 
@@ -5254,12 +5408,20 @@
                 await dismissWorkdayDropdown(ssInput);
                 await typeIntoSearch();
 
+                if (isSchoolField) {
+                    // Workday school/university prompts often need Enter before the
+                    // remote list hydrates; keep the exact-match ranking below as the
+                    // authoritative selector once options are available.
+                    dispatchKey(ssInput, 'Enter', 'Enter', 13);
+                    await new Promise(r => setTimeout(r, 500));
+                }
+
                 // Skills-style exact-first wait: keep polling for an EXACT option to load
                 // before settling (Workday/moniker prompts fetch results asynchronously, so
                 // the exact match often arrives after some similar ones). Only fall back to
                 // the best similar option after a grace window passes with no exact match.
-                const exactMin = isDegreeField ? 90 : 95;
-                const similarMin = isDegreeField ? 50 : 40;
+                const exactMin = isSchoolField ? 100 : (isDegreeField ? 90 : 95);
+                const similarMin = isSchoolField ? 85 : (isDegreeField ? 50 : 40);
                 const rankOptionsNow = () => getSingleSelectOptions()
                     .map((opt, idx) => {
                         const text = getWorkdayOptionLabel(opt).trim();
@@ -5269,8 +5431,8 @@
 
                 let ranked = rankOptionsNow();
                 let similarSinceTs = null;
-                const maxPolls = isDegreeField ? 8 : 24;
-                const settleMs = isDegreeField ? 500 : 2500;
+                const maxPolls = isSchoolField ? 60 : (isDegreeField ? 8 : 24);
+                const settleMs = isSchoolField ? 3000 : (isDegreeField ? 500 : 2500);
                 for (let i = 0; i < maxPolls; i++) {
                     ranked = rankOptionsNow();
                     if (ranked.some(r => r.score >= exactMin)) break;          // exact match → settle now
@@ -5298,6 +5460,32 @@
                     await dismissWorkdayDropdown(ssInput, document.querySelector('[data-automation-id="applyFlowFooter"]') || document.querySelector('main') || document.body);
                     markFieldFilled(ssInput, 'platform', fieldTracker);
                     return true;
+                }
+
+                if (isSchoolField) {
+                    const hasSelectedPromptValue = () => {
+                        const scope = ssInput.closest?.('[data-automation-id^="formField-"], [data-automation-id="multiSelectContainer"]') || ssContainer;
+                        if (!scope) return false;
+                        const selectedText = [
+                            ...scope.querySelectorAll('[data-automation-id="selectedItem"], [data-automation-id="selectedItemList"], [data-automation-id="promptSelectionLabel"]')
+                        ].map(node => node.textContent || '').join(' ').trim();
+                        const instruction = scope.querySelector('[data-automation-id="promptAriaInstruction"]')?.textContent?.trim() || '';
+                        return !!selectedText || (!!instruction && !/expanded|0 items selected|select one/i.test(instruction));
+                    };
+
+                    ssInput.focus({ preventScroll: true });
+                    dispatchKey(ssInput, 'Enter', 'Enter', 13);
+                    await new Promise(r => setTimeout(r, 1000));
+                    dispatchKey(ssInput, 'Enter', 'Enter', 13);
+                    await new Promise(r => setTimeout(r, 500));
+                    if (hasSelectedPromptValue()) {
+                        ssInput.dispatchEvent(new FocusEvent('blur', { bubbles: true }));
+                        ssInput.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
+                        await dismissWorkdayDropdown(ssInput, document.querySelector('[data-automation-id="applyFlowFooter"]') || document.querySelector('main') || document.body);
+                        markFieldFilled(ssInput, 'platform', fieldTracker);
+                        console.log(`[Platform] Single-select school committed via Enter fallback: "${searchTerm}"`);
+                        return true;
+                    }
                 }
 
                 // Degree field with no matching option → select "Other". Clear the typed
@@ -5580,6 +5768,7 @@
 
             return false;
         } catch (e) {
+            if (e?.message === 'FILLO_STOPPED') throw e;
             console.warn(`[Platform] Error processing field ${field?.name}:`, e);
             return false;
         }
@@ -5873,6 +6062,12 @@
         return { fields, url: location.href, title: document.title };
     };
 
+    function throwIfStopRequested() {
+        if (ns.state.stopRequested) {
+            throw new Error('FILLO_STOPPED');
+        }
+    }
+
     ns.engine.handleFillForm = async function (profileData, useAI = false, { fromObserver = false, detectedFields = null, resumeDataUri = null, resumeFileName = null } = {}) {
         useAI = false;
         // Prevent concurrent executions
@@ -5895,12 +6090,14 @@
         fillScrollCursor = Number.NEGATIVE_INFINITY;
 
         ns.state.isProcessing = true;
+        ns.state.stopRequested = false;
         window.__filloActiveFillRun = true;
         ns.state.resumeDataUri = resumeDataUri;
         ns.state.resumeFileName = resumeFileName;
 
         try {
             relayLog('info', '🚀 Starting manual fill run', { useAI: false, url: location.href, hasDetectedFields: !!detectedFields, hasResume: !!resumeDataUri });
+            throwIfStopRequested();
 
             if (window.location.hostname.includes('icims.com')) {
                 const alreadyUploaded = await waitForIcmsResumeUpload(100);
@@ -5951,6 +6148,7 @@
                     const orderedMatchedFields = [...matchedFields].sort((a, b) => getDetectedFieldOrderKey(a) - getDetectedFieldOrderKey(b));
 
                     for (const df of orderedMatchedFields) {
+                        throwIfStopRequested();
                         // Resolve the profile value from the profilePath
                         const keys = df.profileMatch.split('.');
                         const isScreeningAnswerMatch = String(df.profileMatch || '').toLowerCase() === 'job_preferences.screening_answers';
@@ -6008,7 +6206,7 @@
                             if (filled) break;
                         }
 
-                        await new Promise(r => setTimeout(r, 50));
+                        await new Promise(r => setTimeout(r, 20));
                     }
 
                     relayLog('info', `📋 Detected fields strategy filled ${fieldTracker.strategyStats.detected || 0} fields`);
@@ -6136,9 +6334,10 @@
                 relayLog('info', `📋 Fill order: ${tasks.map(t => t.type === 'field' ? (t.field.name || t.field.profilePath) : t.arrayPath).join(' → ')}`);
 
                 for (const task of tasks) {
+                    throwIfStopRequested();
                     if (task.type === 'field') {
                         await processPlatformField(task.field, profileData, fieldTracker);
-                        const delay = task.field.type === 'icims-dropdown' ? 4000 : 50;
+                        const delay = task.field.type === 'icims-dropdown' ? 4000 : 20;
                         await new Promise(r => setTimeout(r, delay));
                     } else if (task.type === 'array') {
                         if (task.arrayPath === 'work_experience') {
@@ -6175,6 +6374,7 @@
                         const arrayIndexTracker = {};
 
                         for (const container of visibleFormFields) {
+                            throwIfStopRequested();
                             if (fieldTracker.filledElements.has(container)) continue;
 
                             // Resolve this container back to its platform mapping + profile value.
@@ -6314,6 +6514,7 @@
                 const orderedMappingConfig = [...mappingConfig].sort((a, b) => getVariantOrderKey(a.variants) - getVariantOrderKey(b.variants));
 
                 for (const {path, variants, isArray} of orderedMappingConfig) {
+                    throwIfStopRequested();
                     const keys = path.replace('[]', '').split('.');
                     const val = getProfileValueForPath(profileData, keys);
                     if (val == null) continue;
@@ -6323,7 +6524,7 @@
                     } else {
                         await processSingleField(path, variants, val, genericFieldTracker);
                     }
-                    await new Promise(r => setTimeout(r, 50));
+                    await new Promise(r => setTimeout(r, 20));
                 }
             }
 
@@ -6346,6 +6547,7 @@
                 let sqFilled = 0;
                 
                 for (const fieldInfo of unmatchedFields) {
+                    throwIfStopRequested();
                     // Try to match using the field's label or context
                     const questionText = fieldInfo.label || fieldInfo.context?.label || fieldInfo.placeholder || fieldInfo.name;
                     // Skip very short generic field names to avoid false positive semantic matches
@@ -6416,6 +6618,7 @@
             // Disabled by default so filling only runs when the user clicks the Fill
             // button. Set ns.config.AUTO_REFILL_ON_MUTATION = true to re-enable.
             if (ns.config.AUTO_REFILL_ON_MUTATION) {
+                throwIfStopRequested();
                 state.currentObserver = ns.engine.observeDynamic(profileData, mappingConfig, useAI);
             }
 
@@ -6481,6 +6684,10 @@
                 message: `Manual form filling completed: ${detectedFilled} detected + ${summary.platformFilled} platform + ${summary.classifierFilled} classifier + ${summary.genericFilled} generic + ${summary.screeningFilled} screening`
             };
         } catch (e) {
+            if (e?.message === 'FILLO_STOPPED') {
+                relayLog('info', 'Fill stopped by user');
+                return { success: true, stopped: true, filled: 0, message: 'Fill stopped by user' };
+            }
             ns.utils.showNotification('❌ Form filling failed: ' + e.message, 'error');
             throw e;
         } finally {
@@ -6508,6 +6715,7 @@
         document.addEventListener('focusin', onUserInput, true);
 
         const obs = new MutationObserver((mutations) => {
+            if (ns.state.stopRequested) return;
             // Block if an active fill is running
             if (ns.state.isProcessing) return;
 
@@ -6522,6 +6730,7 @@
 
             if (timer) clearTimeout(timer);
             timer = setTimeout(async () => {
+                if (ns.state.stopRequested) return;
                 // Double-check all guards inside the debounce
                 if (ns.state.isProcessing) return;
                 if (ns.state.lastFillTime && (Date.now() - ns.state.lastFillTime) < cooldown) return;

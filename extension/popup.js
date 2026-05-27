@@ -80,6 +80,7 @@ class FilloPopup {
       profileSelect: document.getElementById("profile-select"),
       profilePreview: document.getElementById("profile-preview"),
       fillBtn: document.getElementById("fill-btn"),
+      stopFillBtn: document.getElementById("stop-fill-btn"),
       detectBtn: document.getElementById("detect-btn"),
       signinBtn: document.getElementById("signin-btn"),
       refreshBtn: document.getElementById("refresh-btn"),
@@ -96,11 +97,20 @@ class FilloPopup {
       detectedFieldsToggle: document.getElementById("detected-fields-toggle"),
     };
     this.fillBtnDefaultText = this.elements.fillBtn?.textContent || "Fill Application Form";
+    if (this.elements.stopFillBtn) this.elements.stopFillBtn.disabled = true;
+  }
+
+  setFillingState(isFilling) {
+    this.isFilling = isFilling;
+    this.elements.fillBtn.disabled = isFilling || !this.selectedProfileId;
+    this.elements.fillBtn.textContent = isFilling ? "Filling..." : this.fillBtnDefaultText;
+    this.elements.stopFillBtn.disabled = !isFilling;
   }
 
   attachListeners() {
     this.elements.profileSelect.addEventListener("change", (e) => this.handleProfileSelection(e.target.value));
     this.elements.fillBtn.addEventListener("click", () => this.fillForm());
+    this.elements.stopFillBtn.addEventListener("click", () => this.stopFilling());
     this.elements.detectBtn.addEventListener("click", () => this.detectFields());
     this.elements.signinBtn.addEventListener("click", () => this.openWebApp());
     this.elements.refreshBtn.addEventListener("click", () => this.checkForToken());
@@ -216,15 +226,51 @@ class FilloPopup {
   }
 
   // ---------- Fill Logic ----------
+  async stopFilling() {
+    try {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (!tab?.id) return this.showStatus("No active tab found", "error");
+      if (isForbiddenUrl(tab.url)) return this.showStatus("❌ Extension cannot run on browser internal pages.", "error");
+
+      this.setFillingState(false);
+      this.showStatus("Stopping fill...", "info");
+
+      try {
+        await chrome.tabs.sendMessage(tab.id, { action: "stopFill" });
+      } catch (_) {
+        // The all-frames script below is the authoritative stop signal.
+      }
+
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id, allFrames: true },
+        func: () => {
+          const ns = window.__Fillo;
+          if (!ns) return { success: false, error: "Content script not ready" };
+          ns.state.stopRequested = true;
+          ns.state.isProcessing = false;
+          window.__filloActiveFillRun = false;
+          if (ns.state.currentObserver) {
+            ns.state.currentObserver.disconnect();
+            ns.state.currentObserver = null;
+          }
+          return { success: true, stopped: true };
+        }
+      });
+
+      this.showStatus("Fill stopped. Review the page before continuing.", "success");
+    } catch (err) {
+      console.error("❌ Stop fill failed:", err);
+      this.showStatus("Could not stop filling on this page.", "error");
+    }
+  }
+
   async fillForm() {
     console.log("🔄 Starting fillForm...");
     if (this.isFilling) return;
     if (!this.selectedProfileId) return this.showStatus("Please select a profile first", "error");
 
     try {
-      this.isFilling = true;
-      this.elements.fillBtn.disabled = true;
-      this.elements.fillBtn.textContent = "Filling...";
+      this.setFillingState(true);
 
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
       if (!tab?.id) return this.showStatus("No active tab found", "error");
@@ -334,6 +380,10 @@ class FilloPopup {
       // Aggregate results effectively across all iframes
       for (const res of results) {
         if (res.result && res.result.success) {
+          if (res.result.stopped) {
+            lastError = "Fill stopped by user";
+            continue;
+          }
           // If at least one frame succeeds (even if filling 0 fields), consider it a success
           // But if one frame filled >0, it will contribute to totals.
           anySuccess = true;
@@ -352,6 +402,8 @@ class FilloPopup {
             ? `✅ Filled ${totalFilled} fields${totalScreening > 0 ? ` (${totalScreening} screening)` : ""}. Watching for more…`
             : `✅ Form scanned — no new fields to fill`;
         this.showStatus(msg, "success");
+      } else if (lastError === "Fill stopped by user") {
+        this.showStatus("Fill stopped. Review the page before continuing.", "success");
       } else {
         this.showStatus(`❌ ${lastError || "No fillable fields found"}`, "error");
       }
@@ -361,9 +413,7 @@ class FilloPopup {
         this.showStatus("❌ Cannot access this page. Try a different site.", "error");
       else this.showStatus("❌ Fill failed. Please refresh the page and retry.", "error");
     } finally {
-      this.isFilling = false;
-      this.elements.fillBtn.textContent = this.fillBtnDefaultText;
-      this.elements.fillBtn.disabled = !this.selectedProfileId;
+      this.setFillingState(false);
     }
   }
 

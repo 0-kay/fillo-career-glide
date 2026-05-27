@@ -103,7 +103,7 @@
           "label": "Type to Add Skills",
           "type": "multi-select",
           "profilePath": "technical_skills",
-          "selector": "[data-automation-id='formField-skills'] [data-automation-id='multiSelectContainer'] input, [data-fkit-id='skills--skills'] input, input#skills--skills, input[data-uxi-multiselect-id][id$='--skills']"
+          "selector": "[data-automation-id='formField-skillsPrompt'] input, [data-automation-id='formField-skills'] [data-automation-id='multiSelectContainer'] input, [data-fkit-id='skills--skills'] input, input#skills--skills, input[data-uxi-multiselect-id][id$='--skills']"
         },
         {
           "name": "resume",
@@ -213,25 +213,29 @@
               "name": "school",
               "label": "School",
               "type": "single-select",
-              "key": "school"
+              "key": "school",
+              "selector": "[data-automation-id='formField-schoolItem'] input, [data-automation-id='formField-school'] input, [data-automation-id='formField-schoolName'] input"
             },
             {
               "name": "schoolName",
               "label": "School or University",
               "type": "single-select",
-              "key": "school"
+              "key": "school",
+              "selector": "[data-automation-id='formField-schoolItem'] input, [data-automation-id='formField-schoolName'] input, [data-automation-id='formField-school'] input"
             },
             {
               "name": "degree",
               "label": "Degree",
-              "type": "text",
-              "key": "degree"
+              "type": "dropdown",
+              "key": "degree",
+              "selector": "button[data-automation-id='degree'], [data-automation-id='formField-degree'] button, [data-automation-id='formField-degree'] input"
             },
             {
               "name": "fieldOfStudy",
               "label": "Field of Study",
               "type": "text",
-              "key": "fieldOfStudy"
+              "key": "fieldOfStudy",
+              "selector": "[data-automation-id='formField-field-of-study'] input, [data-automation-id='formField-fieldOfStudy'] input"
             },
             {
               "name": "educationStartDate",
@@ -249,13 +253,15 @@
               "name": "gradeAverage",
               "label": "Overall Result (GPA)",
               "type": "text",
-              "key": "gpa"
+              "key": "gpa",
+              "selector": "input[data-automation-id='gpa'], [data-automation-id='formField-gradeAverage'] input"
             },
             {
               "name": "firstYearAttended",
               "label": "From",
               "type": "text",
               "key": "startDate",
+              "selector": "[data-automation-id='formField-firstYearAttended'] input",
               "selectorAttr": "aria-describedby",
               "selectorMatch": "contains"
             },
@@ -264,6 +270,7 @@
               "label": "To (Actual or Expected)",
               "type": "text",
               "key": "endDate",
+              "selector": "[data-automation-id='formField-lastYearAttended'] input",
               "selectorAttr": "aria-describedby",
               "selectorMatch": "contains"
             }

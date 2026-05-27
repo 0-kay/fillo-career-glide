@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { getFieldVariationsForOneField } from '../_shared/field-variations.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -28,46 +29,7 @@ serve(async (req) => {
       throw new Error('OpenAI API key not configured')
     }
 
-    // Helper function to get all related field variations
-    const getFieldVariations = (fieldInfo) => {
-      const variations = new Set()
-      const searchTerms = [
-        fieldInfo.name,
-        fieldInfo.id,
-        fieldInfo.placeholder,
-        fieldInfo.label,
-        ...fieldInfo.className.split(' ')
-      ].filter(Boolean)
-
-      // Find matching variations from our field mapping
-      for (const [key, value] of Object.entries(fieldVariations || {})) {
-        if (Array.isArray(value)) {
-          // Direct array of variations
-          if (searchTerms.some(term => 
-            value.some(v => v.toLowerCase().includes(term.toLowerCase()) || 
-                           term.toLowerCase().includes(v.toLowerCase()))
-          )) {
-            value.forEach(v => variations.add(v))
-          }
-        } else if (typeof value === 'object' && value !== null) {
-          // Nested object with variations
-          for (const [subKey, subValue] of Object.entries(value as Record<string, any>)) {
-            if (Array.isArray(subValue)) {
-              if (searchTerms.some(term => 
-                subValue.some(v => v.toLowerCase().includes(term.toLowerCase()) || 
-                               term.toLowerCase().includes(v.toLowerCase()))
-              )) {
-                subValue.forEach(v => variations.add(v))
-              }
-            }
-          }
-        }
-      }
-
-      return Array.from(variations)
-    }
-
-    const relatedVariations = getFieldVariations(fieldInfo)
+    const relatedVariations = getFieldVariationsForOneField(fieldInfo, fieldVariations)
 
     // Prepare comprehensive AI prompt
     const prompt = `
@@ -126,7 +88,7 @@ RESPONSE FORMAT (JSON ONLY):
 }
 
 CRITICAL GUIDELINES:
-- Only suggest filling if confidence > 70
+- Only suggest filling if confidence >= 65
 - For boolean/checkbox fields, use true/false
 - For dates, use appropriate format (MM/DD/YYYY or YYYY-MM-DD)
 - For arrays, use first item or aggregate appropriately  

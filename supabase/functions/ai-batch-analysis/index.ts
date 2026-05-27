@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { getFieldVariationsForOneField } from '../_shared/field-variations.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -29,50 +30,10 @@ serve(async (req) => {
       throw new Error('OpenAI API key not configured')
     }
 
-    // Helper function to get field variations for all fields
-    const getFieldVariationsForAll = (fields) => {
-      const allVariations = new Map()
-      
-      fields.forEach((fieldInfo, index) => {
-        const variations = new Set()
-        const searchTerms = [
-          fieldInfo.name,
-          fieldInfo.id,
-          fieldInfo.placeholder,
-          fieldInfo.label,
-          ...fieldInfo.className.split(' ')
-        ].filter(Boolean)
-
-        // Find matching variations from our field mapping
-        for (const [key, value] of Object.entries(fieldVariations || {})) {
-          if (Array.isArray(value)) {
-            if (searchTerms.some(term => 
-              value.some(v => v.toLowerCase().includes(term.toLowerCase()) || 
-                             term.toLowerCase().includes(v.toLowerCase()))
-            )) {
-              value.forEach(v => variations.add(v))
-            }
-          } else if (typeof value === 'object' && value !== null) {
-            for (const [subKey, subValue] of Object.entries(value as Record<string, any>)) {
-              if (Array.isArray(subValue)) {
-                if (searchTerms.some(term => 
-                  subValue.some(v => v.toLowerCase().includes(term.toLowerCase()) || 
-                                 term.toLowerCase().includes(v.toLowerCase()))
-                )) {
-                  subValue.forEach(v => variations.add(v))
-                }
-              }
-            }
-          }
-        }
-
-        allVariations.set(index, Array.from(variations))
-      })
-
-      return allVariations
-    }
-
-    const allFieldVariations = getFieldVariationsForAll(fields)
+    const allFieldVariations = new Map<number, string[]>()
+    fields.forEach((fieldInfo: any, index: number) => {
+      allFieldVariations.set(index, getFieldVariationsForOneField(fieldInfo, fieldVariations))
+    })
 
     // Prepare comprehensive batch AI prompt
     const fieldsAnalysis = fields.map((field, index) => `
@@ -107,7 +68,7 @@ INTELLIGENT MATCHING RULES:
 6. Consider conditional logic (e.g., "Do you have experience?" → yes if work_experience exists)
 7. Handle array data intelligently (use first item, count, or summary)
 8. Support both US and international formats
-9. ONLY fill fields with confidence >= 60%
+9. ONLY fill fields with confidence >= 65%
 
 SPECIAL FIELD TYPES TO HANDLE:
 - Names: Use full_name, first_name, last_name appropriately
@@ -144,7 +105,7 @@ RESPONSE FORMAT (JSON ARRAY ONLY):
 
 CRITICAL GUIDELINES:
 - Return exactly one result per field in order (fieldIndex 0, 1, 2, etc.)
-- Only suggest filling if confidence >= 60
+- Only suggest filling if confidence >= 65
 - For boolean/checkbox fields, use true/false
 - For dates, use appropriate format
 - For arrays, use first item or aggregate appropriately
@@ -217,7 +178,7 @@ CRITICAL GUIDELINES:
       // Validate and sanitize the value based on field type
       let sanitizedValue = result.value
       
-      if (result.shouldFill && confidence >= 60) {
+      if (result.shouldFill && confidence >= 65) {
         // Type-specific validation and conversion
         if (field.type === 'email') {
           if (typeof sanitizedValue === 'string' && sanitizedValue.includes('@')) {
@@ -245,7 +206,7 @@ CRITICAL GUIDELINES:
       
       return {
         fieldIndex: index,
-        shouldFill: result.shouldFill && confidence >= 60,
+        shouldFill: result.shouldFill && confidence >= 65,
         value: sanitizedValue,
         confidence: confidence,
         reasoning: result.reasoning || 'AI batch analysis',

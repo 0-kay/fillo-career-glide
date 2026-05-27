@@ -51,18 +51,6 @@
     return null;
   };
 
-  utils.loadBundledJson = async function(path){
-    try {
-      if (!chrome?.runtime?.getURL) return null;
-      const res = await fetch(chrome.runtime.getURL(path));
-      if (!res.ok) return null;
-      return await res.json();
-    } catch (error) {
-      console.warn(`[Fillo] Failed to load bundled ${path}:`, error);
-      return null;
-    }
-  };
-
   utils.fetchMatchTableRows = async function({ tableName = 'matches', limit = 1, authToken = null } = {}){
     const supabaseUrl = ns.config?.AI_CONFIG?.supabaseUrl;
     const headers = utils.getSupabaseHeaders(authToken);
@@ -250,28 +238,4 @@
     }catch(e){ console.error('Failed to show notification:', e); }
   };
 
-  /**
-   * Get the full URL for an extension resource
-  * @param {string} path - Relative path to the resource (for example, a bundled asset or API target)
-   * @returns {string} - Full extension URL
-   */
-  utils.getExtensionURL = function(path){
-    return chrome.runtime.getURL(path);
-  };
-
-  /**
-   * Get the extension ID
-   * @returns {string} - Extension ID
-   */
-  utils.getExtensionId = function(){
-    return chrome.runtime.id;
-  };
-
-  /**
-   * Get extension manifest information
-   * @returns {object} - Manifest object
-   */
-  utils.getManifest = function(){
-    return chrome.runtime.getManifest();
-  };
 })(window.__Fillo);

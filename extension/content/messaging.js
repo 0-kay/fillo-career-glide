@@ -44,6 +44,13 @@
             if (ns.state.currentObserver){ ns.state.currentObserver.disconnect(); ns.state.currentObserver = null; }
             sendResponse({ success:true });
             break;
+          case 'stopFill':
+            ns.state.stopRequested = true;
+            ns.state.isProcessing = false;
+            window.__filloActiveFillRun = false;
+            if (ns.state.currentObserver){ ns.state.currentObserver.disconnect(); ns.state.currentObserver = null; }
+            sendResponse({ success:true, stopped:true });
+            break;
           case 'reloadAIConfig':
             // Static config for now; placeholder for future dynamic reloads
             sendResponse({ success:true, message:'AI configuration reloaded' });
