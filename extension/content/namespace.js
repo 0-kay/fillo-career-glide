@@ -4,10 +4,12 @@
       state: {
         currentObserver: null,
         isProcessing: false,
-        isInitialized: false
+        isInitialized: false,
+        stopRequested: false
       },
       config: {},
       utils: {},
+      domainDetector: {},
       mapping: {},
       ai: {},
       planner: {},
