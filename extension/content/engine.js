@@ -456,6 +456,12 @@
     function getOpenDropdownOptions(targetEl) {
         const controls = targetEl.getAttribute('aria-controls');
         const expandedId = controls ? document.getElementById(controls) : null;
+        if (expandedId) {
+            // The controlled listbox is the exact dropdown for this button — never mix
+            // in options from other open dropdowns when it has visible options.
+            const controlled = Array.from(expandedId.querySelectorAll('[role="option"]')).filter(isElementVisible);
+            if (controlled.length > 0) return controlled;
+        }
         const scope = expandedId || targetEl.closest('[data-automation-id^="formField-"], fieldset, .form-group');
         const scoped = scope
             ? Array.from(scope.querySelectorAll('[role="option"]'))
@@ -469,11 +475,15 @@
 
     async function dismissWorkdayDropdown(control, preferredOutsideTarget = null) {
         try {
+            // Fast path: Workday usually closes the listbox on option click already.
+            if (getOpenWorkdayDropdowns().length === 0) return;
+
             const outsideTarget = preferredOutsideTarget
                 || document.querySelector('[data-automation-id="applyFlowFooter"]')
                 || document.querySelector('main')
                 || document.body;
-            for (let attempt = 0; attempt < 4; attempt++) {
+            const escalation = [25, 50, 100, 200];
+            for (let attempt = 0; attempt < escalation.length; attempt++) {
                 const active = document.activeElement;
                 for (const target of [control, active, document.body, document.documentElement]) {
                     dispatchKey(target, 'Escape', 'Escape', 27);
@@ -485,11 +495,11 @@
                 active?.dispatchEvent?.(new FocusEvent('focusout', { bubbles: true, cancelable: true }));
 
                 clickLikeUser(outsideTarget);
-                await new Promise(r => setTimeout(r, 100));
+                await new Promise(r => setTimeout(r, escalation[attempt]));
                 if (getOpenWorkdayDropdowns().length === 0) break;
 
                 dispatchKey(control || document.body, 'Tab', 'Tab', 9);
-                await new Promise(r => setTimeout(r, 75));
+                await new Promise(r => setTimeout(r, Math.floor(escalation[attempt] * 0.75)));
                 if (getOpenWorkdayDropdowns().length === 0) break;
             }
         } catch (_) {}
@@ -555,7 +565,16 @@
             if (!questionText || questionText.length < 5) continue;
 
             const dropdownBtn = field.querySelector('button[aria-haspopup="listbox"]');
-            const textInput = field.querySelector('input[type="text"]:not(.css-77hcv), textarea');
+            // Exclude search/multiselect/date inputs via stable attributes — emotion CSS
+            // hashes (e.g. .css-77hcv) vary per Workday tenant/build and can't be relied on.
+            const textInput = Array.from(field.querySelectorAll('input[type="text"], textarea')).find(el =>
+                !el.readOnly &&
+                el.getAttribute('data-uxi-widget-type') !== 'selectinput' &&
+                !el.hasAttribute('data-uxi-multiselect-id') &&
+                el.getAttribute('data-automation-id') !== 'searchBox' &&
+                el.getAttribute('role') !== 'spinbutton' &&
+                !el.closest('[data-automation-id="multiSelectContainer"], [data-automation-id="dateInputWrapper"], button[aria-haspopup="listbox"]')
+            ) || null;
             const radioInputs = Array.from(field.querySelectorAll('input[type="radio"]'));
 
             if (radioInputs.length > 0) {
@@ -606,14 +625,15 @@
      * @param {Array} [questionPatterns] - Optional patterns from database screeningQuestions
      * @returns {Object|null} - Best matching screening answer or null
      */
-    function matchQuestionToAnswer(questionText, screeningAnswers, questionPatterns, elementType = null) {
+    function matchQuestionToAnswer(questionText, screeningAnswers, questionPatterns, elementType = null, pageOptions = null) {
         if (!screeningAnswers || !Array.isArray(screeningAnswers)) return null;
         const qLower = questionText.toLowerCase();
 
         // Determine expected answer type from the element type so we don't fill a
         // free-text answer into a Yes/No field and vice-versa.
         // null = unknown (no filtering applied)
-        const expectsYesNo = false;
+        const isChoiceElement = ['radio', 'dropdown', 'select', 'select-one'].includes(elementType);
+        const expectsYesNo = isChoiceElement && Array.isArray(pageOptions) && looksLikeYesNoOptions(pageOptions);
         const expectsText = elementType === 'text' || elementType === 'textarea';
 
         function isTypeCompatible(sa) {
@@ -1036,12 +1056,13 @@
             (element.getAttribute('aria-haspopup') === 'listbox' || element.getAttribute('role') === 'combobox');
         if (isCombo) {
             element.focus({ preventScroll: true });
-            element.click();
+            clickLikeUser(element);
             let opts = [];
             for (let i = 0; i < 8; i++) {
                 await new Promise(r => setTimeout(r, 100));
                 opts = Array.from(document.querySelectorAll('[role="option"]')).filter(isElementVisible);
                 if (opts.length) break;
+                if (i === 2) dispatchKey(element, 'ArrowDown', 'ArrowDown', 40);
             }
             if (!looksLikeYesNoOptions(opts.map(o => o.textContent))) {
                 await dismissWorkdayDropdown(element);
@@ -1469,14 +1490,23 @@
                     .filter(item => item.score >= 60)
                     .sort((a, b) => b.score - a.score || a.idx - b.idx);
                 for (const { radio, labelText } of rankedRadios) {
-                        radio.focus({ preventScroll: true });
+                    radio.focus({ preventScroll: true });
+                    clickWorkdayChoice(radio);
+                    await new Promise(r => setTimeout(r, 150));
+                    if (!radio.checked) {
+                        // Direct input click fallback before giving up on this candidate
                         radio.click();
                         radio.dispatchEvent(new Event('change', { bubbles: true }));
+                        await new Promise(r => setTimeout(r, 100));
+                    }
+                    if (radio.checked) {
                         markFieldFilled(radio, 'platform', fieldTracker);
                         console.log(`[Fillo] Radio intent match: "${labelText}"`);
                         filled++;
                         picked = true;
                         break;
+                    }
+                    console.warn(`[Fillo] Radio click did not stick for "${labelText}", trying next candidate`);
                 }
                 if (!picked) {
                     console.log(`[Fillo] No radio option matched "${answerText}" for "${q.questionText.substring(0, 40)}"`);
@@ -1788,18 +1818,6 @@
             const tag = targetEl.tagName.toLowerCase();
             const type = (targetEl.type || '').toLowerCase();
 
-            // Degree dropdowns should fall back to an "Other" option when the profile's
-            // degree value isn't one of the listed choices. Detect the field by its
-            // name / id / automation-id / label so this works for Workday and generic forms.
-            const degreeProbeText = [
-                element.getAttribute?.('name'), element.getAttribute?.('id'), element.getAttribute?.('data-automation-id'),
-                targetEl.getAttribute?.('name'), targetEl.getAttribute?.('id'), targetEl.getAttribute?.('data-automation-id'),
-                (element.closest?.('[data-automation-id^="formField-"]') || targetEl.closest?.('[data-automation-id^="formField-"]'))?.getAttribute?.('data-automation-id'),
-                (() => { try { return getFieldLabel?.(element); } catch (_) { return ''; } })()
-            ].filter(Boolean).join(' ').toLowerCase();
-            const isDegreeField = /degree/.test(degreeProbeText);
-            const isOtherOptionText = (txt) => /\bothers?\b/.test(String(txt || '').trim().toLowerCase());
-
             // Helper to mirror events on the wrapper element if it differs from the target
             const mirror = (evName, Cls, opts) => {
                 if (targetEl !== element) element.dispatchEvent(new Cls(evName, opts));
@@ -1857,23 +1875,23 @@
                 targetEl.dispatchEvent(new MouseEvent('mouseup',        { bubbles: true, cancelable: true }));
                 targetEl.click();
 
-                // Small yield so the DOM can react to the open event before we try to set a value
-                await new Promise(r => setTimeout(r, 500));
+                // Small yield so the DOM can react to the open event before we try to set a value.
+                // For native <select>, options are already present in the DOM — only wait if the
+                // framework hasn't populated them yet. Most cases skip the wait entirely.
+                if (!targetEl.options || targetEl.options.length === 0) {
+                    const openIntervals = [0, 25, 50, 100, 150, 200];
+                    for (let i = 0; i < openIntervals.length; i++) {
+                        if (openIntervals[i] > 0) {
+                            await new Promise(r => setTimeout(r, openIntervals[i]));
+                        }
+                        if (targetEl.options && targetEl.options.length > 0) break;
+                    }
+                }
 
                 // Find the matching option and select it
                 let matchedOption = null;
                 let bestMatchIdx = -1;
                 let bestMatchScore = 0; // Semantic score ranges from 0 to 1
-
-                if (isDegreeField) {
-                    const degreeMatch = pickDegreeOption(Array.from(targetEl.options), strVal, option => option?.textContent || '');
-                    if (degreeMatch) {
-                        matchedOption = degreeMatch.option;
-                        bestMatchIdx = degreeMatch.idx;
-                        bestMatchScore = degreeMatch.score / 100;
-                        console.log(`[Fillo] Degree level match: "${degreeMatch.text}" for "${strVal}" (score ${degreeMatch.score})`);
-                    }
-                }
 
                 for (let idx = 0; !matchedOption && idx < targetEl.options.length; idx++) {
                     const o = targetEl.options[idx];
@@ -1903,18 +1921,6 @@
                     if (aiBestIdx !== null && aiBestIdx >= 0 && aiBestIdx < targetEl.options.length) {
                         bestMatchIdx = aiBestIdx;
                         matchedOption = targetEl.options[aiBestIdx];
-                    }
-                }
-
-                // Degree field with no matching option → select "Other".
-                if (!matchedOption && isDegreeField) {
-                    for (let idx = 0; idx < targetEl.options.length; idx++) {
-                        if (isOtherOptionText(targetEl.options[idx].textContent)) {
-                            matchedOption = targetEl.options[idx];
-                            bestMatchIdx = idx;
-                            console.log(`[Fillo] Degree "${strVal}" not in options — selecting "Other"`);
-                            break;
-                        }
                     }
                 }
 
@@ -1950,191 +1956,64 @@
                 mirror('blur', FocusEvent, { bubbles: true });
 
             } else if (tag === 'button' && (targetEl.getAttribute('aria-haspopup') === 'listbox' || targetEl.getAttribute('role') === 'combobox')) {
-                // BUTTON/COMBOBOX: specifically for Workday-style custom dropdown components
                 const strVal = String(value);
                 const strLower = strVal.toLowerCase();
-                const initialText = (targetEl.textContent || '').trim();
-                const scoreOptionAgainstAnswer = (optionText) => {
-                    const optionRaw = String(optionText || '').trim();
-                    const answerRaw = String(strVal || '').trim();
-                    const optionLower = optionRaw.toLowerCase();
-                    const answerLower = answerRaw.toLowerCase();
-                    const optionNorm = normalizeSelectText(optionRaw);
-                    const answerNorm = normalizeSelectText(answerRaw);
-                    if (!optionNorm || !answerNorm) return -1;
-                    if (/^(select|choose|please|make a selection)\b/i.test(optionRaw)) return -1;
-                    if (optionNorm === answerNorm || optionLower === answerLower) return 100;
 
-                    const answerOptOut = /do not wish|don't wish|self-identify|self identify|decline|prefer not|not answer/i.test(answerRaw);
-                    const optionOptOut = /do not wish|don't wish|self-identify|self identify|decline|prefer not|not answer/i.test(optionRaw);
-                    if (answerOptOut || optionOptOut) return answerOptOut === optionOptOut ? 96 : 0;
-
-                    const answerNotProtectedVeteran = /just not.*protected veteran|not (a )?protected veteran|notprotectedveteran/i.test(answerRaw);
-                    if (answerNotProtectedVeteran) {
-                        if (/identify as a veteran.*not a protected veteran|just not.*protected veteran/i.test(optionRaw)) return 100;
-                        if (/not (a )?protected veteran/i.test(optionRaw) && /veteran/i.test(optionRaw)) return 90;
-                        return 0;
-                    }
-
-                    const answerNotVeteran = /\bnot a veteran\b|\bnot veteran\b/i.test(answerRaw);
-                    if (answerNotVeteran) {
-                        if (/\bnot a veteran\b|\bnot veteran\b/i.test(optionRaw)) return 100;
-                        if (/not (a )?protected veteran/i.test(optionRaw)) return 35;
-                        return 0;
-                    }
-
-                    const answerProtectedVeteran = /one or more classifications of protected veteran|identify as.*protected veteran|disabled veteran|recently separated|armed forces|campaign badge/i.test(answerRaw);
-                    if (answerProtectedVeteran) {
-                        if (/one or more.*protected veterans?|classifications of protected veterans?|identify as.*protected veteran/i.test(optionRaw) &&
-                            !/not (a )?protected veteran|not a veteran|do not wish|self-identify/i.test(optionRaw)) {
-                            return 100;
-                        }
-                        return 0;
-                    }
-
-                    if (optionNorm.includes(answerNorm) || answerNorm.includes(optionNorm)) return 85;
-                    return Math.round(calculateSemanticScore(answerNorm, optionNorm) * 100);
-                };
-                const selectedTextMatchesRequest = (text) => {
-                    if (isDegreeField) {
-                        return scoreDegreeOption(text, strVal) >= 80 ||
-                            (isOtherOptionText(text) && scoreDegreeOption(text, strVal) === 0);
-                    }
-                    return scoreOptionAgainstAnswer(text) >= 60;
-                };
-                const clickOptionWithPointerSequence = (optionEl) => {
-                    if (!optionEl) return;
-                    optionEl.scrollIntoView({ block: 'nearest' });
-                    callWorkdayReactClick(optionEl.querySelector?.('[data-automation-id="promptOption"], [data-automation-id="promptLeafNode"]') || optionEl);
-                    optionEl.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true }));
-                    optionEl.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
-                    optionEl.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, cancelable: true }));
-                    optionEl.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
-                    optionEl.click();
-                };
-
-                // Click button to open the listbox
-                targetEl.focus({ preventScroll: true });
+                // Open the dropdown
                 targetEl.click();
+                await new Promise(r => setTimeout(r, 500));
 
-                // Pick the option that best matches the requested value. Exact value/text
-                // matches are taken across ALL options FIRST, so a fuzzy substring match
-                // (e.g. "Female" contains "male") can never beat an exact option ("Male")
-                // just because it appears earlier in the list.
-                const pickOption = (options) => {
-                    if (isDegreeField) {
-                        const degreeMatch = pickDegreeOption(options, strVal, option => option?.textContent || '');
-                        if (degreeMatch) {
-                            console.log(`[Fillo] Degree level option match: "${degreeMatch.text}" for "${strVal}" (score ${degreeMatch.score})`);
-                            return degreeMatch.option;
+                // Scope the option query to THIS dropdown. Querying all
+                // `[role="option"]` on the page mixes options from unrelated
+                // listboxes that happen to be open (e.g. the skills multiselect
+                // bleeding into the degree dropdown).
+                const listboxId = targetEl.getAttribute('aria-controls');
+                let optionRoot = null;
+                if (listboxId) optionRoot = document.getElementById(listboxId);
+                if (!optionRoot) {
+                    const expanded = Array.from(document.querySelectorAll('[role="listbox"][aria-expanded="true"], [role="listbox"]:not([hidden])'))
+                        .filter(isElementVisible);
+                    optionRoot = expanded[expanded.length - 1] || null;
+                }
+                const options = optionRoot
+                    ? [...optionRoot.querySelectorAll('[role="option"]')]
+                    : [...document.querySelectorAll('li[role="option"], div[role="option"]')];
+
+                let match = options.find(o => o.textContent.trim().toLowerCase() === strLower);
+
+                // Fuzzy fallback — e.g. "Master of Education" → "Master of Arts"
+                // when the platform's enum doesn't include the exact degree.
+                if (!match) {
+                    let bestScore = 0;
+                    for (const o of options) {
+                        const optText = o.textContent.trim().toLowerCase();
+                        if (!optText || optText === 'select one') continue;
+                        const score = calculateSemanticScore(strLower, optText);
+                        if (score > bestScore && score > 0.4) {
+                            bestScore = score;
+                            match = o;
                         }
                     }
+                    if (match) console.log(`Fuzzy-matched "${strVal}" → "${match.textContent.trim()}" (score ${bestScore.toFixed(2)})`);
+                }
 
-                    const ranked = options
-                        .map((o, idx) => ({
-                            o,
-                            idx,
-                            text: o.textContent?.trim() || '',
-                            score: Math.max(
-                                scoreOptionAgainstAnswer(o.textContent || ''),
-                                o.getAttribute('data-value')?.toLowerCase() === strLower ? 100 : -1
-                            )
-                        }))
-                        .filter(item => item.score >= 60)
-                        .sort((a, b) => b.score - a.score || a.idx - b.idx);
-                    if (ranked[0]) {
-                        console.log(`[Fillo] Dropdown semantic option match: "${ranked[0].text}" for "${strVal}" (score ${ranked[0].score})`);
-                        return ranked[0].o;
-                    }
-                    return null;
-                };
-
-                // Poll for the options to appear in the DOM (usually appended to body or adjacent)
-                let optionsDiv = [];
-                for (let i = 0; i < 8; i++) {
-                    await new Promise(r => setTimeout(r, 300)); // max wait 2.4s
-                    const visibleOptions = getOpenDropdownOptions(targetEl);
-                    if (visibleOptions.length > 0) {
-                        optionsDiv = visibleOptions;
-                        break;
+                // AI fallback when local fuzzy fails
+                if (!match && AI_CONFIG.enabled && ns.ai?.matchDropdownOptionWithAI) {
+                    const labels = options.map(o => o.textContent.trim());
+                    const aiBestIdx = await ns.ai.matchDropdownOptionWithAI(strVal, labels);
+                    if (aiBestIdx !== null && aiBestIdx >= 0 && aiBestIdx < options.length) {
+                        match = options[aiBestIdx];
+                        console.log(`AI-matched "${strVal}" → "${match.textContent.trim()}"`);
                     }
                 }
 
-                let selected = false;
-                if (optionsDiv.length > 0) {
-                    let matchedOption = pickOption(optionsDiv);
-
-                    // If no good local match found, fall back to AI option picking (only if AI enabled)
-                    if (!matchedOption && AI_CONFIG.enabled && ns.ai?.matchDropdownOptionWithAI) {
-                        const aiBestIdx = await ns.ai.matchDropdownOptionWithAI(strVal, optionsDiv.map(o => o.textContent.trim()));
-                        if (aiBestIdx !== null && aiBestIdx >= 0 && aiBestIdx < optionsDiv.length) {
-                            matchedOption = optionsDiv[aiBestIdx];
-                        }
-                    }
-
-                    // Degree field with no matching option → select "Other".
-                    if (!matchedOption && isDegreeField) {
-                        matchedOption = optionsDiv.find(o => isOtherOptionText(o.textContent)) || null;
-                        if (matchedOption) console.log(`[Fillo] Degree "${strVal}" not in options — selecting "Other"`);
-                    }
-
-                    if (matchedOption) {
-                        // Workday needs focus before clicking
-                        targetEl.focus({ preventScroll: true });
-                        clickOptionWithPointerSequence(matchedOption);
-                        selected = true;
-                    } else {
-                        console.warn('[Fillo] No dropdown option matched for listbox/combo:', strVal);
-                        return false;
-                    }
-                }
-
-                if (!selected) {
+                if (!match) {
+                    console.warn(`Option "${strVal}" not found. Available:`, options.map(o => o.textContent.trim()));
                     return false;
                 }
 
-                // Fire generic change/blur
-                targetEl.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
-                mirror('change', Event, { bubbles: true });
-                targetEl.dispatchEvent(new FocusEvent('blur', { bubbles: false, cancelable: true }));
-                targetEl.dispatchEvent(new FocusEvent('focusout', { bubbles: true, cancelable: true }));
-                mirror('blur', FocusEvent, { bubbles: true });
-                await dismissWorkdayDropdown(targetEl);
-
-                await new Promise(r => setTimeout(r, 350));
-
-                const finalText = (targetEl.textContent || '').trim();
-                if (finalText === initialText || !selectedTextMatchesRequest(finalText)) {
-                    console.warn('[Fillo] Dropdown selection did not stick:', strVal);
-
-                    targetEl.focus({ preventScroll: true });
-                    targetEl.click();
-
-                    const retryScoped = getOpenDropdownOptions(targetEl);
-                    let retryOption = pickOption(retryScoped);
-                    if (!retryOption && isDegreeField) {
-                        retryOption = retryScoped.find(o => isOtherOptionText(o.textContent)) || null;
-                    }
-
-                    if (retryOption) {
-                        targetEl.focus({ preventScroll: true });
-                        clickOptionWithPointerSequence(retryOption);
-
-                        targetEl.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
-                        mirror('change', Event, { bubbles: true });
-                        targetEl.dispatchEvent(new FocusEvent('blur', { bubbles: false, cancelable: true }));
-                        targetEl.dispatchEvent(new FocusEvent('focusout', { bubbles: true, cancelable: true }));
-                        mirror('blur', FocusEvent, { bubbles: true });
-                        await dismissWorkdayDropdown(targetEl);
-                        await new Promise(r => setTimeout(r, 350));
-                    }
-
-                    const retriedText = (targetEl.textContent || '').trim();
-                    if (retriedText === initialText || !selectedTextMatchesRequest(retriedText)) {
-                        console.warn(`[Fillo] Dropdown selected "${retriedText}" but expected "${strVal}"`);
-                        return false;
-                    }
-                }
+                match.click();
+                console.log(`Selected: ${match.textContent.trim()}`);
 
             } else if (type === 'checkbox' || type === 'radio') {
                 // CHECKBOX/RADIO: set the intended state instead of blindly toggling.
@@ -3336,10 +3215,35 @@
     function getProfileValueForPath(profileData, path) {
         const keys = Array.isArray(path) ? path : String(path || '').split('.');
         if (keys.length === 1 && keys[0] === '__today') return new Date();
+
+        // Name paths: prefer personal_details (the applicant's real name) over the
+        // top-level first_name/last_name columns, which can hold a stale profile
+        // label or a filename from a failed resume parse.
+        const namePath = keys.length === 1 ? keys[0].toLowerCase() : '';
+        if (namePath === 'first_name' || namePath === 'last_name' || namePath === 'middle_name') {
+            const pd = profileData?.personal_details || {};
+            const direct = namePath === 'first_name' ? (pd.firstName || pd.first_name)
+                : namePath === 'last_name' ? (pd.lastName || pd.last_name)
+                : (pd.middleName || pd.middle_name);
+            if (direct) return direct;
+            const fullName = String(pd.fullName || pd.full_name || '').trim();
+            if (fullName) {
+                const parts = fullName.split(/\s+/);
+                const fromFull = namePath === 'first_name' ? parts[0]
+                    : namePath === 'last_name' ? (parts.length > 1 ? parts[parts.length - 1] : '')
+                    : (parts.length > 2 ? parts.slice(1, -1).join(' ') : '');
+                if (fromFull) return fromFull;
+            }
+        }
+
         const value = getValue(profileData, keys);
         if (value != null && value !== '') return value;
 
         const normalizedPath = keys.join('.').toLowerCase();
+        // Phone device type (Workday et al.): profiles rarely store one — default to Mobile.
+        if (/(^|\.)phone_?(device_?)?type$/.test(normalizedPath)) {
+            return 'Mobile';
+        }
         if (/job_preferences\.(salaryexpectation|salary_expectations|expectedsalary|expected_salary|expectedcompensation|expected_compensation|desiredsalary|desired_salary)$/.test(normalizedPath)) {
             return getSalaryExpectationValue(profileData);
         }
@@ -3789,7 +3693,6 @@
         nudgeWorkdaySearchableInput(searchInput, searchText);
 
         dispatchKey(searchInput, 'Enter', 'Enter', 13);
-        console.log("Enter key clicked for the drop down")
 
         const getOptions = () => {
             const controls = searchInput.getAttribute('aria-controls');
@@ -4222,10 +4125,16 @@
                             if (!isElementVisible(checkbox)) continue;
                             if (fieldTracker.filledElements.has(checkbox)) continue;
                             if (!checkbox.checked && checkbox.getAttribute('aria-checked') !== 'true') {
-                                checkbox.click();
-                                console.log(`[Platform] Ticked "I currently work here" (endDate=present) for ${arrayPath}[${index}]`);
-                                markFieldFilled(checkbox, 'platform', fieldTracker);
-                                filled++;
+                                checkbox.focus({ preventScroll: true });
+                                clickWorkdayChoice(checkbox);
+                                await new Promise(r => setTimeout(r, 120));
+                                if (checkbox.checked || checkbox.getAttribute('aria-checked') === 'true') {
+                                    console.log(`[Platform] Ticked "I currently work here" (endDate=present) for ${arrayPath}[${index}]`);
+                                    markFieldFilled(checkbox, 'platform', fieldTracker);
+                                    filled++;
+                                } else {
+                                    console.warn('[Platform] "I currently work here" checkbox click did not stick');
+                                }
                             }
                             break;
                         }
@@ -4661,11 +4570,32 @@
                     '[data-automation-id*="education" i]',
                     '[data-automation-id*="website" i]'
                 ].join(',');
+                // innerText misses form-control values — Workday renders existing entries
+                // as open form panels whose data lives in input values, so append them.
+                const containerEntryText = (el) => {
+                    const parts = [el.innerText || el.textContent || ''];
+                    for (const ctrl of el.querySelectorAll('input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"])')) {
+                        if (ctrl.value) parts.push(ctrl.value);
+                    }
+                    return normalizeExistingEntryText(parts.join(' '));
+                };
+                // Match by substring OR by significant-word overlap — Workday's autocomplete
+                // often rewrites profile values (e.g. "MIT" → "Massachusetts Institute of
+                // Technology"), so strict substring alone produces false negatives on re-runs.
+                const valueMatchesText = (value, text) => {
+                    if (!value || !text) return false;
+                    if (text.includes(value) || value.includes(text)) return true;
+                    const words = value.split(' ').filter(w => w.length >= 3);
+                    if (words.length === 0) return false;
+                    const hits = words.filter(w => text.includes(w)).length;
+                    return hits / words.length >= 0.6;
+                };
+
                 const containers = Array.from(document.querySelectorAll(selector))
                     .filter(el => isElementVisible(el))
                     .map(el => ({
                         el,
-                        text: normalizeExistingEntryText(el.innerText || el.textContent || ''),
+                        text: containerEntryText(el),
                         hint: normalizeExistingEntryText([
                             el.getAttribute?.('data-automation-id'),
                             el.getAttribute?.('data-test'),
@@ -4673,13 +4603,21 @@
                             el.className
                         ].filter(Boolean).join(' '))
                     }))
-                    .filter(item => item.text.length >= 3 && item.text.length <= 1200)
-                    .filter(item => sectionHints.length === 0 || sectionHints.some(h => item.text.includes(h) || item.hint.includes(h)) || picked.some(value => item.text.includes(value)))
+                    .filter(item => item.text.length >= 3 && item.text.length <= 2000)
+                    .filter(item => sectionHints.length === 0 || sectionHints.some(h => item.text.includes(h) || item.hint.includes(h)) || picked.some(value => valueMatchesText(value, item.text)))
                     .sort((a, b) => a.text.length - b.text.length);
 
-                return containers.some(({ text }) => currentArrayPath === 'websites'
-                    ? picked.some(value => text.includes(value))
-                    : picked.slice(0, 2).every(value => text.includes(value)));
+                const matched = containers.find(({ text }) => {
+                    if (currentArrayPath === 'websites') return picked.some(value => valueMatchesText(value, text));
+                    const slice = picked.slice(0, 2);
+                    if (slice.every(value => valueMatchesText(value, text))) return true;
+                    return slice.length === 1 && slice[0].length >= 8 && valueMatchesText(slice[0], text);
+                });
+                if (matched) {
+                    console.log(`[Platform] Existing ${currentArrayPath} entry detected on page — matched "${picked.join(' | ')}"`);
+                    return true;
+                }
+                return false;
             }
 
             // Helper: commit the currently-open entry by clicking its Done/Save button.
@@ -4726,15 +4664,17 @@
                 console.log(`[Platform] Filling ${arrayPath}[${i}]:`, Object.keys(entry).join(', '));
 
                 if (i === 0) {
+                    // If this entry already exists on the page (saved application or a
+                    // previous fill), skip it entirely — refilling would duplicate it.
+                    if (entryAlreadyExistsOnPage(entry, arrayPath)) {
+                        console.log(`[Platform] ${arrayPath}[${i}] already exists on page — skipping`);
+                        continue;
+                    }
                     // For the first entry: the form may already be open on the page.
                     // Try to fill it directly; if nothing is found, click Add first.
                     let fieldsFilled = await tryFillEntry(entry, i);
 
                         if (fieldsFilled === 0) {
-                            if (entryAlreadyExistsOnPage(entry, arrayPath)) {
-                                console.log(`[Platform] ${arrayPath}[${i}] already exists on page — not clicking Add`);
-                                continue;
-                            }
                             if (addButtonFailures >= 3) { console.warn(`[Platform] Add button unavailable, stopping`); break; }
                             const entryScope = await openArrayEntryPanel();
                             if (entryScope) {
@@ -5097,8 +5037,37 @@
                 };
                 let addedCount = 0;
 
+                const skillPillSelector = [
+                    '[data-automation-id="selectedItem"]',
+                    '[data-automation-id="selectedItemList"] [role="listitem"]',
+                    '[data-automation-id="selectedItemList"] li'
+                ].join(', ');
+                const getSelectedSkillTexts = () => {
+                    const currentScope = document.querySelector(`[data-automation-id="formField-${field.name}"]`) || msContainer || document;
+                    return Array.from(currentScope.querySelectorAll(skillPillSelector))
+                        .filter(isElementVisible)
+                        .map(node => normalizeSkillText(node.textContent || ''))
+                        .filter(Boolean);
+                };
+
                 for (const skill of skills) {
                     throwIfStopRequested();
+
+                    // Skip skills already present as pills — refilling the same form
+                    // would otherwise duplicate them or churn the search box.
+                    // Use bidirectional substring so pills with extra formatting (e.g.
+                    // "Java (Advanced)", "JavaScript ×") still match against the profile value.
+                    const wantedSkillNorm = normalizeSkillText(skill);
+                    if (wantedSkillNorm) {
+                        const alreadyPresent = getSelectedSkillTexts().some(t =>
+                            t === wantedSkillNorm || t.includes(wantedSkillNorm) || wantedSkillNorm.includes(t)
+                        );
+                        if (alreadyPresent) {
+                            console.log(`[Platform] Skill "${skill}" already selected — skipping`);
+                            addedCount++;
+                            continue;
+                        }
+                    }
                     // Re-lookup the input each iteration — UXI can replace DOM nodes after selection.
                     // Also handles monikerSearchBox variant where the input is inside a hidden-search wrapper.
                     const formFieldScope = document.querySelector(`[data-automation-id="formField-${field.name}"]`);
@@ -5332,19 +5301,6 @@
                         });
                     };
 
-                    const skillPillSelector = [
-                        '[data-automation-id="selectedItem"]',
-                        '[data-automation-id="selectedItemList"] [role="listitem"]',
-                        '[data-automation-id="selectedItemList"] li'
-                    ].join(', ');
-                    const getSelectedSkillTexts = () => {
-                        const currentScope = document.querySelector(`[data-automation-id="formField-${field.name}"]`) || msContainer || document;
-                        return Array.from(currentScope.querySelectorAll(skillPillSelector))
-                            .filter(isElementVisible)
-                            .map(node => normalizeSkillText(node.textContent || ''))
-                            .filter(Boolean);
-                    };
-
                     // Snapshot the pills already present BEFORE attempting this skill. A
                     // selection only counts when a pill that wasn't in this snapshot appears —
                     // otherwise a pre-existing pill (e.g. an earlier "Java") falsely confirms
@@ -5536,23 +5492,9 @@
             if (field.type === 'single-select') {
                 const rawSearchTerm = String(displayValue).trim();
                 if (!rawSearchTerm) return false;
-                const isDegreeField = /degree/i.test(`${field.name || ''} ${field.label || ''}`);
                 const isSchoolField = /school|university|institution/i.test(`${field.name || ''} ${field.label || ''}`);
 
-                const degreeIntent = isDegreeField ? getDegreeLevel(rawSearchTerm) : null;
-                const searchTerm = degreeIntent
-                    ? (degreeIntent === 'bachelor' ? 'Bachelor' :
-                        degreeIntent === 'master' ? 'Master' :
-                        degreeIntent === 'doctorate' ? 'Doctor' :
-                        degreeIntent === 'associate' ? 'Associate' :
-                        degreeIntent === 'highschool' ? 'High School' :
-                        degreeIntent === 'some_college' ? 'Some College' :
-                        degreeIntent === 'certificate' ? 'Certificate' :
-                        rawSearchTerm)
-                    : rawSearchTerm;
-                if (isDegreeField && searchTerm !== rawSearchTerm) {
-                    console.log(`[Platform] Degree search normalized "${rawSearchTerm}" -> "${searchTerm}"`);
-                }
+                const searchTerm = rawSearchTerm;
 
                 // Find the search input inside [data-automation-id="formField-{name}"]
                 let ssInput = null;
@@ -5648,39 +5590,11 @@
                         );
                 };
 
-                const getDegreeSearchTerms = () => {
-                    if (degreeIntent === 'doctorate') return ['doctoral', 'doctorate', 'phd', 'doctor'];
-                    if (degreeIntent === 'master') return ['master', 'masters', "master's"];
-                    if (degreeIntent === 'bachelor') return ['bachelor', 'bachelors', "bachelor's"];
-                    if (degreeIntent === 'associate') return ['associate', "associate's"];
-                    if (degreeIntent === 'highschool') return ['high school', 'highschool', 'ged', 'secondary'];
-                    if (degreeIntent === 'some_college') return ['some college', 'college coursework', 'some university', 'no degree'];
-                    if (degreeIntent === 'certificate') return ['certificate', 'certification', 'diploma', 'vocational'];
-                    return [];
-                };
-                const degreeSearchTerms = isDegreeField ? getDegreeSearchTerms() : [];
                 const scoreSingleSelectOption = (candidateText) => {
-                    if (isDegreeField) {
-                        return Math.max(
-                            scoreDegreeOption(candidateText, rawSearchTerm),
-                            scoreDegreeOption(candidateText, searchTerm)
-                        );
-                    }
-                    const baseScore = Math.max(
+                    return Math.max(
                         scoreExactFirstOption(candidateText, searchTerm),
                         scoreExactFirstOption(candidateText, rawSearchTerm)
                     );
-                    if (!isDegreeField || degreeSearchTerms.length === 0) return baseScore;
-                    const optionNorm = normalizeSelectText(candidateText);
-                    let degreeScore = 0;
-                    for (const term of degreeSearchTerms) {
-                        const termNorm = normalizeSelectText(term);
-                        if (!termNorm) continue;
-                        if (optionNorm === termNorm || optionNorm.includes(termNorm)) degreeScore = Math.max(degreeScore, 96);
-                    }
-                    if (degreeSearchTerms.some(term => term.includes('bachelor')) && /\bba\b|\bbs\b|bachelor/i.test(candidateText)) degreeScore = Math.max(degreeScore, 92);
-                    if (degreeSearchTerms.some(term => term.includes('master')) && /\bma\b|\bms\b|mba|master/i.test(candidateText)) degreeScore = Math.max(degreeScore, 92);
-                    return Math.max(baseScore, degreeScore);
                 };
 
                 await dismissWorkdayDropdown(ssInput);
@@ -5698,8 +5612,8 @@
                 // before settling (Workday/moniker prompts fetch results asynchronously, so
                 // the exact match often arrives after some similar ones). Only fall back to
                 // the best similar option after a grace window passes with no exact match.
-                const exactMin = isSchoolField ? 100 : (isDegreeField ? 90 : 95);
-                const similarMin = isSchoolField ? 85 : (isDegreeField ? 50 : 40);
+                const exactMin = isSchoolField ? 100 : 95;
+                const similarMin = isSchoolField ? 85 : 40;
                 const rankOptionsNow = () => getSingleSelectOptions()
                     .map((opt, idx) => {
                         const text = getWorkdayOptionLabel(opt).trim();
@@ -5709,8 +5623,8 @@
 
                 let ranked = rankOptionsNow();
                 let similarSinceTs = null;
-                const maxPolls = isSchoolField ? 60 : (isDegreeField ? 8 : 24);
-                const settleMs = isSchoolField ? 3000 : (isDegreeField ? 500 : 2500);
+                const maxPolls = isSchoolField ? 60 : 24;
+                const settleMs = isSchoolField ? 3000 : 2500;
                 for (let i = 0; i < maxPolls; i++) {
                     ranked = rankOptionsNow();
                     if (ranked.some(r => r.score >= exactMin)) break;          // exact match → settle now
@@ -5720,7 +5634,7 @@
                     } else {
                         similarSinceTs = null;
                     }
-                    await new Promise(r => setTimeout(r, isDegreeField ? 150 : 250));
+                    await new Promise(r => setTimeout(r, 250));
                 }
 
                 // ranked is sorted by score desc, so ranked[0] is the exact match when one
@@ -6686,9 +6600,10 @@
                                     if (!year) { const ym = dateStr.match(/^(\d{4})$/); if (ym) year = ym[1]; }
                                     const mi = dateWrapper.querySelector('[data-automation-id="dateSectionMonth-input"]');
                                     const yi = dateWrapper.querySelector('[data-automation-id="dateSectionYear-input"]');
-                                    if (mi && month) await fillElement(mi, month);
-                                    if (yi && year) await fillElement(yi, year);
-                                    if (mi || yi) { markFieldFilled(dateWrapper, 'platform', fieldTracker); markFieldFilled(container, 'platform', fieldTracker); }
+                                    let dateFilled = false;
+                                    if (mi && month) { await fillElement(mi, month); dateFilled = true; }
+                                    if (yi && year) { await fillElement(yi, year); dateFilled = true; }
+                                    if (dateFilled) { markFieldFilled(dateWrapper, 'platform', fieldTracker); markFieldFilled(container, 'platform', fieldTracker); }
                                 }
                                 await new Promise(r => setTimeout(r, 60));
                                 continue;
@@ -6834,7 +6749,19 @@
                     if (/how did you (hear|find|learn|know) about/i.test(questionText) ||
                         /source of (hire|application|referral)/i.test(questionText)) continue;
 
-                    let match = matchQuestionToAnswer(questionText, screeningAnswers, questionPatterns, fieldInfo.type);
+                    // Collect page options passively (never open dropdowns here) so
+                    // matchQuestionToAnswer can apply yes/no type filtering.
+                    let pageOptions = null;
+                    const fiEl = fieldInfo.element;
+                    if (fieldInfo.type === 'radio' && fiEl?.name) {
+                        pageOptions = Array.from(document.querySelectorAll(`input[type="radio"][name="${CSS.escape(fiEl.name)}"]`))
+                            .map(r => getFieldLabel(r) || r.value || '');
+                    } else if (fiEl?.tagName?.toLowerCase() === 'select') {
+                        pageOptions = Array.from(fiEl.options || []).map(o => o.textContent);
+                    } else if (fieldInfo.type === 'dropdown') {
+                        pageOptions = getDropdownOptionsPassive(fiEl);
+                    }
+                    let match = matchQuestionToAnswer(questionText, screeningAnswers, questionPatterns, fieldInfo.type, pageOptions);
                     if (!match && salaryExpectationValue && /\b(salary|compensation|pay)\b/i.test(questionText)) {
                         match = { answer: salaryExpectationValue };
                     }

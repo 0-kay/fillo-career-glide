@@ -92,7 +92,8 @@ const MATCH_CONFIG = {
           "label": "Phone Device Type",
           "type": "dropdown",
           "required": true,
-          "profilePath": "personal_details.phoneType"
+          "profilePath": "personal_details.phoneType",
+          "default": "Mobile"
         },
         {
           "name": "phoneNumber",

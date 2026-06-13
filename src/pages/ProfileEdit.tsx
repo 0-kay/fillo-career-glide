@@ -12,6 +12,27 @@ import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/hooks/useAuth';
 import ScreeningQuestionsDialog, { ScreeningAnswer } from '@/components/ScreeningQuestionsDialog';
 
+type EduDate = { year?: string; month?: string } | string | null | undefined;
+
+// Normalize education dates: migrate plain strings to {year, month} objects
+const normalizeEduDate = (d: EduDate) => {
+  if (d && typeof d === 'object' && 'year' in d) return { year: d.year || "", month: d.month || "" };
+  if (typeof d === 'string') {
+    const s = d.trim();
+    const ym = s.match(/^(\d{1,2})[/-](\d{4})$/);
+    if (ym) return { year: ym[2], month: ym[1] };
+    const yOnly = s.match(/^(\d{4})$/);
+    if (yOnly) return { year: yOnly[1], month: "" };
+    return { year: s, month: "" };
+  }
+  return { year: "", month: "" };
+};
+
+const formatEduDate = (d: EduDate) => {
+  if (d && typeof d === 'object') return d.month ? `${d.month}/${d.year}` : (d.year || '');
+  return d ? String(d) : '';
+};
+
 const ProfileEdit = () => {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -63,19 +84,6 @@ const ProfileEdit = () => {
           if (!pd.phoneExtension || pd.phoneExtension === 'empty string') {
             pd.phoneExtension = '';
           }
-          // Normalize education dates: migrate plain strings to {year, month} objects
-          const normalizeEduDate = (d: any) => {
-            if (d && typeof d === 'object' && 'year' in d) return { year: d.year || "", month: d.month || "" };
-            if (typeof d === 'string') {
-              const s = d.trim();
-              const ym = s.match(/^(\d{1,2})[\/\-](\d{4})$/);
-              if (ym) return { year: ym[2], month: ym[1] };
-              const yOnly = s.match(/^(\d{4})$/);
-              if (yOnly) return { year: yOnly[1], month: "" };
-              return { year: s, month: "" };
-            }
-            return { year: "", month: "" };
-          };
           const educationHistory = (data.education_history || []).map((edu: any) => ({
             ...edu,
             startDate: normalizeEduDate(edu.startDate),
@@ -83,7 +91,7 @@ const ProfileEdit = () => {
           }));
 
           setFormData({
-            profileName: data.name || 'Untitled Profile',
+            profileName: (data.resume_metadata as any)?.profile_name || [data.first_name, data.last_name].filter(Boolean).join(' ') || (data.personal_details as any)?.fullName || 'Untitled Profile',
             personalDetails: pd,
             workExperience: data.work_experience || [],
             educationHistory,
@@ -177,7 +185,15 @@ const ProfileEdit = () => {
           : { line1: '', line2: '', city: '', state: '', postalCode: '', country: '' },
         phoneExtension: formData.personalDetails?.phoneExtension || '',
       };
+      // first_name/last_name are fill data (the applicant's real name) — derive them
+      // from the personal details Full Name, never from the profile label.
+      const nameParts = (personalDetails.fullName || personalDetails.full_name || '').trim().split(/\s+/).filter(Boolean);
       const { error } = await updateProfile(id, {
+        ...(nameParts.length > 0 ? {
+          first_name: nameParts[0],
+          middle_name: nameParts.length > 2 ? nameParts.slice(1, -1).join(' ') : '',
+          last_name: nameParts.length > 1 ? nameParts[nameParts.length - 1] : '',
+        } : {}),
         personal_details: personalDetails,
         work_experience: formData.workExperience,
         education_history: formData.educationHistory,
@@ -190,7 +206,7 @@ const ProfileEdit = () => {
         languages: formData.languages,
         volunteer_experience: formData.volunteerExperience,
         job_preferences: { ...formData.jobPreferences, screening_answers: formData.screeningAnswers },
-        resume_metadata: formData.resumeMetadata
+        resume_metadata: { ...formData.resumeMetadata, profile_name: (formData.profileName || '').trim() || 'Untitled Profile' }
       });
 
       if (error) {
@@ -333,6 +349,15 @@ const ProfileEdit = () => {
       if (!newData[section][index]) newData[section][index] = {};
       newData[section][index][field] = value;
       return newData;
+    });
+  };
+
+  // Education dates are stored as {year, month} objects — parse the typed value
+  const updateEducationDate = (index: number, field: 'startDate' | 'endDate', value: string) => {
+    setFormData((prev: any) => {
+      const history = [...(prev.educationHistory || [])];
+      history[index] = { ...history[index], [field]: normalizeEduDate(value) };
+      return { ...prev, educationHistory: history };
     });
   };
 
@@ -812,46 +837,79 @@ const ProfileEdit = () => {
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
                       <Label className="text-sm font-medium">Degree</Label>
-                      <p className="text-sm font-semibold text-gray-900">{edu?.degree || 'N/A'}</p>
+                      <EditableField
+                        value={edu?.degree || ''}
+                        onSave={(value) => updateNestedField('educationHistory', index, 'degree', value)}
+                        fieldKey={`edu-degree-${index}`}
+                        placeholder="e.g., Bachelor of Science"
+                        className="font-semibold"
+                      />
                     </div>
                     <div>
                       <Label className="text-sm font-medium">Institution</Label>
-                      <p className="text-sm text-gray-700">{edu?.school || 'N/A'}</p>
+                      <EditableField
+                        value={edu?.school || ''}
+                        onSave={(value) => updateNestedField('educationHistory', index, 'school', value)}
+                        fieldKey={`edu-school-${index}`}
+                        placeholder="Enter school or university"
+                      />
                     </div>
                     <div>
-                      <Label className="text-sm font-medium">Graduation</Label>
-                      <p className="text-sm text-gray-700">
-                        {edu?.endDate?.month ? `${edu.endDate.month}/` : ''}{edu?.endDate?.year || 'N/A'}
-                      </p>
+                      <Label className="text-sm font-medium">Field of Study</Label>
+                      <EditableField
+                        value={edu?.fieldOfStudy || ''}
+                        onSave={(value) => updateNestedField('educationHistory', index, 'fieldOfStudy', value)}
+                        fieldKey={`edu-field-${index}`}
+                        placeholder="e.g., Computer Science"
+                      />
                     </div>
                     <div>
                       <Label className="text-sm font-medium">Location</Label>
-                      <p className="text-sm text-gray-700">{edu?.location || 'N/A'}</p>
+                      <EditableField
+                        value={edu?.location || ''}
+                        onSave={(value) => updateNestedField('educationHistory', index, 'location', value)}
+                        fieldKey={`edu-location-${index}`}
+                        placeholder="e.g., Boston, MA"
+                      />
+                    </div>
+                    <div>
+                      <Label className="text-sm font-medium">Start Date</Label>
+                      <EditableField
+                        value={formatEduDate(edu?.startDate)}
+                        onSave={(value) => updateEducationDate(index, 'startDate', value)}
+                        fieldKey={`edu-start-${index}`}
+                        placeholder="e.g., 9/2018 or 2018"
+                      />
+                    </div>
+                    <div>
+                      <Label className="text-sm font-medium">End Date / Graduation</Label>
+                      <EditableField
+                        value={formatEduDate(edu?.endDate)}
+                        onSave={(value) => updateEducationDate(index, 'endDate', value)}
+                        fieldKey={`edu-end-${index}`}
+                        placeholder="e.g., 5/2022 or 2022"
+                      />
+                    </div>
+                    <div>
+                      <Label className="text-sm font-medium">GPA</Label>
+                      <EditableField
+                        value={edu?.gpa || ''}
+                        onSave={(value) => updateNestedField('educationHistory', index, 'gpa', value)}
+                        fieldKey={`edu-gpa-${index}`}
+                        placeholder="e.g., 3.8"
+                      />
                     </div>
                   </div>
-                  {edu?.description && (
-                    <div className="mt-4">
-                      <Label className="text-sm font-medium">Details</Label>
-                      <div className="mt-2 text-sm text-gray-700">
-                        {edu.description.includes('•') ? (
-                          edu.description.split('•').filter(item => item.trim()).map((item: string, itemIndex: number) => (
-                            <div key={itemIndex} className="mb-1 flex items-start">
-                              <span className="text-blue-600 mr-2 mt-0.5">•</span>
-                              <span className="flex-1">{item.trim()}</span>
-                            </div>
-                          ))
-                        ) : (
-                          <p className="text-sm text-gray-700">{edu.description}</p>
-                        )}
-                      </div>
-                    </div>
-                  )}
-                  {edu?.gpa && (
-                    <div className="mt-2">
-                      <Label className="text-sm font-medium">GPA</Label>
-                      <p className="text-sm text-gray-700">{edu.gpa}</p>
-                    </div>
-                  )}
+                  <div className="mt-4">
+                    <Label className="text-sm font-medium">Details</Label>
+                    <EditableField
+                      value={edu?.description || ''}
+                      onSave={(value) => updateNestedField('educationHistory', index, 'description', value)}
+                      fieldKey={`edu-desc-${index}`}
+                      multiline={true}
+                      placeholder="Relevant coursework, honors, activities. Use • for bullet points."
+                    />
+                  </div>
                 </div>
               ))}
               {(!formData.educationHistory || formData.educationHistory.length === 0) && (
@@ -1001,27 +1059,52 @@ const ProfileEdit = () => {
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div>
                         <Label className="text-sm font-medium">Certification Name</Label>
-                        <p className="text-sm font-semibold text-gray-900">{cert?.name || 'N/A'}</p>
+                        <EditableField
+                          value={cert?.name || ''}
+                          onSave={(value) => updateNestedField('certifications', index, 'name', value)}
+                          fieldKey={`cert-name-${index}`}
+                          placeholder="Enter certification name"
+                          className="font-semibold"
+                        />
                       </div>
                       <div>
                         <Label className="text-sm font-medium">Issuing Organization</Label>
-                        <p className="text-sm text-gray-700">{cert?.issuingOrganization || 'N/A'}</p>
+                        <EditableField
+                          value={cert?.issuingOrganization || ''}
+                          onSave={(value) => updateNestedField('certifications', index, 'issuingOrganization', value)}
+                          fieldKey={`cert-org-${index}`}
+                          placeholder="Enter issuing organization"
+                        />
                       </div>
                       <div>
                         <Label className="text-sm font-medium">Issue Date</Label>
-                        <p className="text-sm text-gray-700">{cert?.dateIssued || 'N/A'}</p>
+                        <EditableField
+                          value={cert?.dateIssued || ''}
+                          onSave={(value) => updateNestedField('certifications', index, 'dateIssued', value)}
+                          fieldKey={`cert-issued-${index}`}
+                          placeholder="e.g., Jan 2023"
+                        />
                       </div>
                       <div>
                         <Label className="text-sm font-medium">Expiration Date</Label>
-                        <p className="text-sm text-gray-700">{cert?.expirationDate || 'Does not expire'}</p>
+                        <EditableField
+                          value={cert?.expirationDate || ''}
+                          onSave={(value) => updateNestedField('certifications', index, 'expirationDate', value)}
+                          fieldKey={`cert-expires-${index}`}
+                          placeholder="e.g., Jan 2026 or leave empty"
+                        />
                       </div>
                     </div>
-                    {cert?.credentialId && (
-                      <div className="mt-4">
-                        <Label className="text-sm font-medium">Credential ID</Label>
-                        <p className="text-sm text-gray-700 font-mono">{cert.credentialId}</p>
-                      </div>
-                    )}
+                    <div className="mt-4">
+                      <Label className="text-sm font-medium">Credential ID</Label>
+                      <EditableField
+                        value={cert?.credentialId || ''}
+                        onSave={(value) => updateNestedField('certifications', index, 'credentialId', value)}
+                        fieldKey={`cert-credential-${index}`}
+                        placeholder="Enter credential ID"
+                        className="font-mono"
+                      />
+                    </div>
                   </div>
                 ))}
               </div>
@@ -1041,30 +1124,43 @@ const ProfileEdit = () => {
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div>
                         <Label className="text-sm font-medium">Award Title</Label>
-                        <p className="text-sm font-semibold text-gray-900">{award?.title || 'N/A'}</p>
+                        <EditableField
+                          value={award?.title || ''}
+                          onSave={(value) => updateNestedField('awards', index, 'title', value)}
+                          fieldKey={`award-title-${index}`}
+                          placeholder="Enter award title"
+                          className="font-semibold"
+                        />
                       </div>
                       <div>
                         <Label className="text-sm font-medium">Issuer</Label>
-                        <p className="text-sm text-gray-700">{award?.issuer || 'N/A'}</p>
+                        <EditableField
+                          value={award?.issuer || ''}
+                          onSave={(value) => updateNestedField('awards', index, 'issuer', value)}
+                          fieldKey={`award-issuer-${index}`}
+                          placeholder="Enter issuer"
+                        />
                       </div>
                       <div>
                         <Label className="text-sm font-medium">Date</Label>
-                        <p className="text-sm text-gray-700">{award?.date || 'N/A'}</p>
+                        <EditableField
+                          value={award?.date || ''}
+                          onSave={(value) => updateNestedField('awards', index, 'date', value)}
+                          fieldKey={`award-date-${index}`}
+                          placeholder="e.g., 2023"
+                        />
                       </div>
                     </div>
-                    {award?.description && (
-                      <div className="mt-4">
-                        <Label className="text-sm font-medium">Description</Label>
-                        <div className="mt-2 text-sm text-gray-700">
-                          {award.description.split('•').filter(item => item.trim()).map((item: string, itemIndex: number) => (
-                            <div key={itemIndex} className="mb-1 flex items-start">
-                              <span className="text-blue-600 mr-2 mt-0.5">•</span>
-                              <span className="flex-1">{item.trim()}</span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
+                    <div className="mt-4">
+                      <Label className="text-sm font-medium">Description</Label>
+                      <EditableField
+                        value={award?.description || ''}
+                        onSave={(value) => updateNestedField('awards', index, 'description', value)}
+                        fieldKey={`award-desc-${index}`}
+                        multiline={true}
+                        placeholder="Describe the award. Use • for bullet points."
+                      />
+                    </div>
                   </div>
                 ))}
               </div>
@@ -1084,36 +1180,61 @@ const ProfileEdit = () => {
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div>
                         <Label className="text-sm font-medium">Role</Label>
-                        <p className="text-sm font-semibold text-gray-900">{vol?.role || 'N/A'}</p>
+                        <EditableField
+                          value={vol?.role || ''}
+                          onSave={(value) => updateNestedField('volunteerExperience', index, 'role', value)}
+                          fieldKey={`vol-role-${index}`}
+                          placeholder="Enter role"
+                          className="font-semibold"
+                        />
                       </div>
                       <div>
                         <Label className="text-sm font-medium">Organization</Label>
-                        <p className="text-sm text-gray-700">{vol?.organization || 'N/A'}</p>
+                        <EditableField
+                          value={vol?.organization || ''}
+                          onSave={(value) => updateNestedField('volunteerExperience', index, 'organization', value)}
+                          fieldKey={`vol-org-${index}`}
+                          placeholder="Enter organization"
+                        />
                       </div>
                       <div>
-                        <Label className="text-sm font-medium">Duration</Label>
-                        <p className="text-sm text-gray-700">
-                          {vol?.startDate || 'N/A'} - {vol?.endDate || 'Present'}
-                        </p>
+                        <Label className="text-sm font-medium">Start Date</Label>
+                        <EditableField
+                          value={vol?.startDate || ''}
+                          onSave={(value) => updateNestedField('volunteerExperience', index, 'startDate', value)}
+                          fieldKey={`vol-start-${index}`}
+                          placeholder="e.g., Jan 2022"
+                        />
                       </div>
                       <div>
+                        <Label className="text-sm font-medium">End Date</Label>
+                        <EditableField
+                          value={vol?.endDate || ''}
+                          onSave={(value) => updateNestedField('volunteerExperience', index, 'endDate', value)}
+                          fieldKey={`vol-end-${index}`}
+                          placeholder="e.g., Present or Dec 2023"
+                        />
+                      </div>
+                      <div className="md:col-span-2">
                         <Label className="text-sm font-medium">Location</Label>
-                        <p className="text-sm text-gray-700">{vol?.location || 'N/A'}</p>
+                        <EditableField
+                          value={vol?.location || ''}
+                          onSave={(value) => updateNestedField('volunteerExperience', index, 'location', value)}
+                          fieldKey={`vol-location-${index}`}
+                          placeholder="e.g., San Francisco, CA"
+                        />
                       </div>
                     </div>
-                    {vol?.description && (
-                      <div className="mt-4">
-                        <Label className="text-sm font-medium">Description</Label>
-                        <div className="mt-2 text-sm text-gray-700">
-                          {vol.description.split('•').filter(item => item.trim()).map((item: string, itemIndex: number) => (
-                            <div key={itemIndex} className="mb-1 flex items-start">
-                              <span className="text-blue-600 mr-2 mt-0.5">•</span>
-                              <span className="flex-1">{item.trim()}</span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
+                    <div className="mt-4">
+                      <Label className="text-sm font-medium">Description</Label>
+                      <EditableField
+                        value={vol?.description || ''}
+                        onSave={(value) => updateNestedField('volunteerExperience', index, 'description', value)}
+                        fieldKey={`vol-desc-${index}`}
+                        multiline={true}
+                        placeholder="Describe your volunteer work. Use • for bullet points."
+                      />
+                    </div>
                   </div>
                 ))}
               </div>
@@ -1130,11 +1251,26 @@ const ProfileEdit = () => {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {formData.languages.map((lang: any, index: number) => (
                   <div key={index} className="border rounded-lg p-4 bg-gray-50">
-                    <div className="flex justify-between items-center">
-                      <p className="text-sm font-semibold text-gray-900">{lang?.language || 'N/A'}</p>
-                      <Badge variant="outline" className="text-xs">
-                        {lang?.proficiency || 'N/A'}
-                      </Badge>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <Label className="text-sm font-medium">Language</Label>
+                        <EditableField
+                          value={lang?.language || ''}
+                          onSave={(value) => updateNestedField('languages', index, 'language', value)}
+                          fieldKey={`lang-name-${index}`}
+                          placeholder="e.g., Spanish"
+                          className="font-semibold"
+                        />
+                      </div>
+                      <div>
+                        <Label className="text-sm font-medium">Proficiency</Label>
+                        <EditableField
+                          value={lang?.proficiency || ''}
+                          onSave={(value) => updateNestedField('languages', index, 'proficiency', value)}
+                          fieldKey={`lang-prof-${index}`}
+                          placeholder="e.g., Fluent, Native, Intermediate"
+                        />
+                      </div>
                     </div>
                   </div>
                 ))}

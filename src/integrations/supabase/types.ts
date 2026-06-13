@@ -16,15 +16,14 @@ export type Database = {
           certifications_licenses: Json | null
           completeness: number | null
           created_at: string | null
-          education: Json | null
           education_history: Json | null
-          experience: Json | null
+          first_name: string | null
           id: string
           job_preferences: Json | null
           languages: Json | null
-          name: string
+          last_name: string | null
+          middle_name: string | null
           personal_details: Json | null
-          personal_info: Json | null
           projects: Json | null
           resume_metadata: Json | null
           skills: string[] | null
@@ -42,15 +41,14 @@ export type Database = {
           certifications_licenses?: Json | null
           completeness?: number | null
           created_at?: string | null
-          education?: Json | null
           education_history?: Json | null
-          experience?: Json | null
+          first_name?: string | null
           id?: string
           job_preferences?: Json | null
           languages?: Json | null
-          name: string
+          last_name?: string | null
+          middle_name?: string | null
           personal_details?: Json | null
-          personal_info?: Json | null
           projects?: Json | null
           resume_metadata?: Json | null
           skills?: string[] | null
@@ -68,15 +66,14 @@ export type Database = {
           certifications_licenses?: Json | null
           completeness?: number | null
           created_at?: string | null
-          education?: Json | null
           education_history?: Json | null
-          experience?: Json | null
+          first_name?: string | null
           id?: string
           job_preferences?: Json | null
           languages?: Json | null
-          name?: string
+          last_name?: string | null
+          middle_name?: string | null
           personal_details?: Json | null
-          personal_info?: Json | null
           projects?: Json | null
           resume_metadata?: Json | null
           skills?: string[] | null

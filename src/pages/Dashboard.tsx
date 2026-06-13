@@ -213,7 +213,7 @@ const Dashboard = () => {
                     <div key={profile.id} className="flex items-center space-x-3">
                       <div className="w-2 h-2 bg-blue-600 rounded-full"></div>
                       <div className="flex-1">
-                        <p className="text-sm font-medium text-gray-900">{profile.name}</p>
+                        <p className="text-sm font-medium text-gray-900">{(profile.resume_metadata as Record<string, string>)?.profile_name || [profile.first_name, profile.last_name].filter(Boolean).join(' ') || 'Untitled Profile'}</p>
                         <p className="text-xs text-gray-500">
                           Updated {new Date(profile.updated_at).toLocaleDateString()}
                         </p>
