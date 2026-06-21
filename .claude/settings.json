@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(awk 'NR>=1500 && NR<=1820 && \\(/fillElement|pickScreeningChoice|extractDropdownOptions|scoreScreeningChoice|dropdownBtn|aria-haspopup/\\){print NR\": \"$0}' extension/content/engine.js)"
+    ]
+  }
+}
