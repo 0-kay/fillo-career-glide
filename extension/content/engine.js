@@ -45,6 +45,86 @@
         target.click?.();
     }
 
+    /**
+     * Wait for a DOM condition without polling.
+     *
+     * Resolves with whatever `predicate()` returns (truthy) as soon as the
+     * condition is met — fed by MutationObservers on the page body plus any
+     * shadow roots passed in. Keeps a slow safety poll (100 ms) for predicates
+     * driven by value getters / computed styles that don't always trigger
+     * mutations, and resolves with the last predicate result on timeout so
+     * callers can branch on failure.
+     *
+     * @param {() => any}                 predicate
+     * @param {Object}                    [opts]
+     * @param {number}                    [opts.timeout=1000]    Hard cap (ms).
+     * @param {Element|Document}          [opts.root]            Observer root (defaults to document.body).
+     * @param {ShadowRoot[]}              [opts.shadowRoots]     Extra shadow roots to observe (spl-*, monikerSearchBox).
+     * @param {boolean}                   [opts.attributes=true] Observe attribute changes (aria-expanded etc.).
+     * @param {boolean}                   [opts.characterData]   Observe text changes (option labels rendering).
+     * @returns {Promise<any>}            Predicate's truthy return value, or the last falsy value on timeout.
+     */
+    function waitFor(predicate, opts = {}) {
+        const {
+            timeout = 1000,
+            root = document.body || document.documentElement,
+            shadowRoots = [],
+            attributes = true,
+            characterData = false,
+        } = opts;
+
+        const check = () => {
+            try { return predicate(); } catch (_) { return null; }
+        };
+        const initial = check();
+        if (initial) return Promise.resolve(initial);
+
+        return new Promise(resolve => {
+            let done = false;
+            let lastResult = initial;
+            const observers = [];
+            let safetyTimer = null;
+            let timeoutTimer = null;
+
+            const finish = (value) => {
+                if (done) return;
+                done = true;
+                for (const o of observers) { try { o.disconnect(); } catch (_) {} }
+                if (safetyTimer) clearTimeout(safetyTimer);
+                if (timeoutTimer) clearTimeout(timeoutTimer);
+                resolve(value);
+            };
+
+            const tryCheck = () => {
+                const r = check();
+                lastResult = r;
+                if (r) finish(r);
+            };
+
+            const observe = (node) => {
+                if (!node) return;
+                try {
+                    const o = new MutationObserver(tryCheck);
+                    o.observe(node, { childList: true, subtree: true, attributes, characterData });
+                    observers.push(o);
+                } catch (_) { /* node may be detached */ }
+            };
+            observe(root);
+            for (const sr of shadowRoots) observe(sr);
+
+            // Safety poll — catches state that mutates via property setters
+            // (e.g. <select>.options length changes from framework code) without
+            // firing observable mutations.
+            const safetyPoll = () => {
+                tryCheck();
+                if (!done) safetyTimer = setTimeout(safetyPoll, 100);
+            };
+            safetyTimer = setTimeout(safetyPoll, 100);
+
+            timeoutTimer = setTimeout(() => finish(check()), Math.max(50, timeout));
+        });
+    }
+
     function getWorkdayReactProps(element) {
         if (!element) return null;
         for (const key in element) {
@@ -503,6 +583,62 @@
                 if (getOpenWorkdayDropdowns().length === 0) break;
             }
         } catch (_) {}
+    }
+
+    /**
+     * Selecting a country in Workday re-renders the dependent address fields
+     * (state/region list, postal-code format, phone code, etc.). Workday flips a
+     * busy/loading indicator while it fetches the new field set, then swaps the
+     * DOM. Block until that settles so the next fill targets the fresh nodes
+     * rather than the soon-to-be-detached ones.
+     *
+     * Strategy: if a busy/loading indicator appears, wait for it to clear; then
+     * wait for DOM mutations to go quiet. A generic mutation-idle alone settles
+     * prematurely in the gap between Workday tearing down the old fields and
+     * async-loading the replacements.
+     */
+    async function waitForWorkdayPageSettle({ quietMs = 500, maxWaitMs = 6000 } = {}) {
+        const busySelector = '[aria-busy="true"], [role="progressbar"], [data-automation-id*="loading" i], [data-automation-id*="spinner" i], [data-automation-id*="progress" i]';
+        const isBusy = () => !!document.querySelector(busySelector);
+        const deadline = Date.now() + maxWaitMs;
+
+        // Give Workday a beat to flip the busy flag after the option click.
+        const busyAppeared = await waitFor(() => (isBusy() ? true : null), { timeout: 600 });
+
+        if (busyAppeared) {
+            // Wait for the busy indicator to clear.
+            await waitFor(() => (isBusy() ? null : true), {
+                timeout: Math.max(50, deadline - Date.now()),
+            });
+        }
+
+        // Then wait for the DOM churn to go quiet (re-render finished painting).
+        await new Promise(resolve => {
+            let resolved = false;
+            let debounceTimer = null;
+            const finish = (why) => {
+                if (resolved) return;
+                resolved = true;
+                clearTimeout(debounceTimer);
+                clearTimeout(capTimer);
+                try { obs.disconnect(); } catch (_) {}
+                console.log(`[Workday] Country re-render settled (${why})`);
+                resolve();
+            };
+            const obs = new MutationObserver(() => {
+                if (isBusy()) return; // ignore churn while still loading
+                clearTimeout(debounceTimer);
+                debounceTimer = setTimeout(() => finish(`mutations idle ${quietMs}ms`), quietMs);
+            });
+            obs.observe(document.body, {
+                childList: true,
+                subtree: true,
+                attributes: true,
+                attributeFilter: ['aria-busy', 'aria-disabled', 'aria-expanded', 'aria-hidden', 'value', 'class', 'data-automation-id'],
+            });
+            debounceTimer = setTimeout(() => finish('initial quiet window'), quietMs);
+            const capTimer = setTimeout(() => finish('max wait cap'), Math.max(quietMs, deadline - Date.now()));
+        });
     }
 
     // --- Workday Questionnaire / Screening Question Support ---
@@ -1057,13 +1193,12 @@
         if (isCombo) {
             element.focus({ preventScroll: true });
             clickLikeUser(element);
-            let opts = [];
-            for (let i = 0; i < 8; i++) {
-                await new Promise(r => setTimeout(r, 100));
-                opts = Array.from(document.querySelectorAll('[role="option"]')).filter(isElementVisible);
-                if (opts.length) break;
-                if (i === 2) dispatchKey(element, 'ArrowDown', 'ArrowDown', 40);
-            }
+            // Nudge a few options out of frameworks that need an ArrowDown after click.
+            setTimeout(() => dispatchKey(element, 'ArrowDown', 'ArrowDown', 40), 220);
+            const opts = (await waitFor(() => {
+                const found = Array.from(document.querySelectorAll('[role="option"]')).filter(isElementVisible);
+                return found.length ? found : null;
+            }, { timeout: 800 })) || [];
             if (!looksLikeYesNoOptions(opts.map(o => o.textContent))) {
                 await dismissWorkdayDropdown(element);
                 return false;
@@ -1344,12 +1479,10 @@
 
                 await openDropdown();
 
-                let optionEls = [];
-                for (let i = 0; i < 10; i++) {
-                    await new Promise(r => setTimeout(r, 100));
-                    optionEls = getVisibleOptionElements();
-                    if (optionEls.length > 0) break;
-                }
+                const optionEls = (await waitFor(() => {
+                    const found = getVisibleOptionElements();
+                    return found.length > 0 ? found : null;
+                }, { timeout: 1000 })) || [];
 
                 const opts = cleanChoiceOptions(optionEls.map(el => getWorkdayOptionLabel(el)));
                 await dismissWorkdayDropdown(btn);
@@ -1875,17 +2008,14 @@
                 targetEl.dispatchEvent(new MouseEvent('mouseup',        { bubbles: true, cancelable: true }));
                 targetEl.click();
 
-                // Small yield so the DOM can react to the open event before we try to set a value.
                 // For native <select>, options are already present in the DOM — only wait if the
-                // framework hasn't populated them yet. Most cases skip the wait entirely.
+                // framework hasn't populated them yet. waitFor uses a MutationObserver scoped
+                // to the select so it wakes the instant options get appended.
                 if (!targetEl.options || targetEl.options.length === 0) {
-                    const openIntervals = [0, 25, 50, 100, 150, 200];
-                    for (let i = 0; i < openIntervals.length; i++) {
-                        if (openIntervals[i] > 0) {
-                            await new Promise(r => setTimeout(r, openIntervals[i]));
-                        }
-                        if (targetEl.options && targetEl.options.length > 0) break;
-                    }
+                    await waitFor(
+                        () => targetEl.options && targetEl.options.length > 0 ? targetEl.options.length : null,
+                        { root: targetEl, timeout: 500 }
+                    );
                 }
 
                 // Find the matching option and select it
@@ -1911,6 +2041,22 @@
                             bestMatchScore = score;
                             matchedOption = o;
                             bestMatchIdx = idx;
+                        }
+                    }
+                }
+
+                // Degree-aware matching for degree <select> fields — maps a stored value like
+                // "Bachelor of Science" to the option "Bachelor's Degree" by degree level,
+                // which the generic semantic score above misses. Mirrors the button path.
+                if (!matchedOption) {
+                    const selHint = [targetEl.getAttribute('name'), targetEl.id, targetEl.getAttribute('aria-label')]
+                        .filter(Boolean).join(' ').toLowerCase();
+                    if (/\bdegree\b|qualification|education level|level of education/.test(selHint)) {
+                        const best = pickDegreeOption(Array.from(targetEl.options), strVal, o => o.textContent || '');
+                        if (best) {
+                            matchedOption = best.option;
+                            bestMatchIdx = best.idx;
+                            console.log(`Degree-matched <select> "${strVal}" → "${best.text}" (score ${best.score})`);
                         }
                     }
                 }
@@ -1959,27 +2105,77 @@
                 const strVal = String(value);
                 const strLower = strVal.toLowerCase();
 
-                // Open the dropdown
-                targetEl.click();
-                await new Promise(r => setTimeout(r, 500));
+                // Workday button dropdowns usually have NO aria-controls, and the option list
+                // renders into a portal elsewhere in the DOM. Guessing "the last open listbox"
+                // is fragile — it can latch onto an unrelated listbox (wrong options, nothing
+                // matches). Instead, snapshot the option nodes BEFORE opening and take the ones
+                // that appear AFTER — those are unambiguously THIS dropdown's.
+                const placeholderOption = /^(no items?\.?|no results?|no matches|loading\.?\.?\.?|searching\.?\.?\.?|type to search|select one)$/i;
+                const optionSel = '[role="option"], [data-automation-id="promptOption"], li[data-automation-id="multiselectItem"]';
+                const isRealOpt = (o) => {
+                    const t = (o.textContent || '').trim();
+                    return isElementVisible(o) && t && !placeholderOption.test(t);
+                };
 
-                // Scope the option query to THIS dropdown. Querying all
-                // `[role="option"]` on the page mixes options from unrelated
-                // listboxes that happen to be open (e.g. the skills multiselect
-                // bleeding into the degree dropdown).
-                const listboxId = targetEl.getAttribute('aria-controls');
-                let optionRoot = null;
-                if (listboxId) optionRoot = document.getElementById(listboxId);
-                if (!optionRoot) {
-                    const expanded = Array.from(document.querySelectorAll('[role="listbox"][aria-expanded="true"], [role="listbox"]:not([hidden])'))
-                        .filter(isElementVisible);
-                    optionRoot = expanded[expanded.length - 1] || null;
+                // Close any leftover dropdown so stale option nodes don't leak into our diff.
+                await dismissWorkdayDropdown(targetEl);
+                const beforeOptions = new Set(document.querySelectorAll(optionSel));
+
+                // Only ever consider options that appeared AFTER we open THIS dropdown — never a
+                // page-wide scrape (that's how we ended up matching against 54 unrelated options).
+                const collectFresh = () => Array.from(document.querySelectorAll(optionSel))
+                    .filter(o => !beforeOptions.has(o) && isRealOpt(o));
+
+                // Open. Plain click reliably toggles Workday's listbox open (a full pointer chain
+                // can open-then-close it, leaving zero fresh options).
+                targetEl.focus?.({ preventScroll: true });
+                targetEl.click();
+
+                let options = (await waitFor(() => {
+                    const found = collectFresh();
+                    return found.length ? found : null;
+                }, { timeout: 1500 })) || [];
+
+                // Nothing opened — re-open and nudge with ArrowDown, then wait again.
+                if (options.length === 0) {
+                    targetEl.click();
+                    targetEl.focus?.({ preventScroll: true });
+                    dispatchKey(targetEl, 'ArrowDown', 'ArrowDown', 40);
+                    options = (await waitFor(() => {
+                        const found = collectFresh();
+                        return found.length ? found : null;
+                    }, { timeout: 2500 })) || [];
                 }
-                const options = optionRoot
-                    ? [...optionRoot.querySelectorAll('[role="option"]')]
-                    : [...document.querySelectorAll('li[role="option"], div[role="option"]')];
+
+                if (options.length === 0) {
+                    console.warn(`[Workday] Dropdown for "${strVal}" never opened (no options appeared) — control:`,
+                        targetEl.getAttribute('name') || targetEl.id || targetEl.getAttribute('aria-label') || targetEl.outerHTML?.slice(0, 120));
+                    return false;
+                }
+
+                // Degree fields: use degree-level-aware scoring first so values like
+                // "High School" / "Bachelor of Science" map to "High School Diploma" /
+                // "Bachelor's Degree" without needing the fuzzy or AI fallback.
+                const dropdownHint = [
+                    targetEl.getAttribute('name'),
+                    targetEl.id,
+                    targetEl.getAttribute('aria-label')
+                ].filter(Boolean).join(' ').toLowerCase();
+                const isDegreeButton = /\bdegree\b|qualification|education level|level of education/.test(dropdownHint);
+                // Also treat it as a degree match whenever the VALUE itself is a degree level
+                // (e.g. "high school", "bachelor of science") — the field's attributes don't
+                // always say "degree" (generic screening fields, UUID ids), but the value does.
+                const valueIsDegree = !!getDegreeLevel(strVal);
 
                 let match = options.find(o => o.textContent.trim().toLowerCase() === strLower);
+
+                if (!match && (isDegreeButton || valueIsDegree)) {
+                    const degreeBest = pickDegreeOption(options, strVal, o => o.textContent || '');
+                    if (degreeBest) {
+                        match = degreeBest.option;
+                        console.log(`Degree-matched "${strVal}" → "${degreeBest.text}" (score ${degreeBest.score})`);
+                    }
+                }
 
                 // Fuzzy fallback — e.g. "Master of Education" → "Master of Arts"
                 // when the platform's enum doesn't include the exact degree.
@@ -1997,23 +2193,52 @@
                     if (match) console.log(`Fuzzy-matched "${strVal}" → "${match.textContent.trim()}" (score ${bestScore.toFixed(2)})`);
                 }
 
-                // AI fallback when local fuzzy fails
-                if (!match && AI_CONFIG.enabled && ns.ai?.matchDropdownOptionWithAI) {
-                    const labels = options.map(o => o.textContent.trim());
-                    const aiBestIdx = await ns.ai.matchDropdownOptionWithAI(strVal, labels);
-                    if (aiBestIdx !== null && aiBestIdx >= 0 && aiBestIdx < options.length) {
-                        match = options[aiBestIdx];
-                        console.log(`AI-matched "${strVal}" → "${match.textContent.trim()}"`);
-                    }
-                }
-
                 if (!match) {
-                    console.warn(`Option "${strVal}" not found. Available:`, options.map(o => o.textContent.trim()));
+                    console.warn(`Option "${strVal}" not found. Available (${options.length}): ` +
+                        JSON.stringify(options.map(o => o.textContent.trim())));
                     return false;
                 }
 
-                match.click();
-                console.log(`Selected: ${match.textContent.trim()}`);
+                // Select with a full pointer interaction on the EXACT matched row — Workday
+                // option rows ignore a bare .click(). Try the row and its inner leaf nodes,
+                // stopping as soon as the dropdown closes (commit). Do NOT fall back to blind
+                // ArrowDown counting — that lands on the wrong option (picked Doctorate for
+                // "Master"); selecting the wrong degree is worse than not selecting.
+                const matchRow = match.closest?.('[role="option"]') || match;
+                matchRow.scrollIntoView?.({ block: 'nearest' });
+                const clickTargets = [
+                    match.querySelector?.('[data-automation-id="promptLeafNode"]'),
+                    match.querySelector?.('[data-automation-id="promptOption"]'),
+                    matchRow,
+                    match
+                ].filter(Boolean);
+                let committed = false;
+                for (const t of clickTargets) {
+                    clickLikeUser(t);
+                    await new Promise(r => setTimeout(r, 70));
+                    if (getOpenWorkdayDropdowns().length === 0 || !document.contains(matchRow) || !isElementVisible(matchRow)) {
+                        committed = true;
+                        break;
+                    }
+                }
+                console.log(committed
+                    ? `Selected: ${match.textContent.trim()}`
+                    : `[Workday] Clicked "${match.textContent.trim()}" but selection did not commit`);
+
+                // Workday country dropdowns trigger an async re-render of dependent
+                // address fields (state/region options, postal-code format, etc.).
+                // Block until that re-render finishes so the next fill targets the
+                // freshly rendered DOM rather than stale nodes.
+                const elName = (targetEl.getAttribute('name') || '').toLowerCase();
+                const elId = (targetEl.id || '').toLowerCase();
+                const elAriaLabel = (targetEl.getAttribute('aria-label') || '').toLowerCase();
+                const isCountryDropdown =
+                    elName === 'country' ||
+                    elId.includes('country') && !elId.includes('countryphonecode') ||
+                    /\bcountry\b/.test(elAriaLabel) && !elAriaLabel.includes('phone');
+                if (isCountryDropdown) {
+                    await waitForWorkdayPageSettle();
+                }
 
             } else if (type === 'checkbox' || type === 'radio') {
                 // CHECKBOX/RADIO: set the intended state instead of blindly toggling.
@@ -2205,33 +2430,27 @@
                         return results;
                     };
 
-                    // Poll for dropdown options to appear (up to 2 seconds)
+                    // Wait for dropdown options to appear (observer + safety poll, up to 2s).
+                    // spl-autocomplete stores options inside its shadow root, so feed
+                    // that into waitFor's shadowRoots option to wake on shadow mutations.
                     const optionSelector = '[role="option"], spl-autocomplete-option, sri-autocomplete-option, li[role="option"], ul[class*="autocomplete"] li, div[class*="option"], div[id*="listbox"] > div';
-                    for (let i = 0; i < 20; i++) {
-                        await new Promise(r => setTimeout(r, 100));
-
-                        // Search the wrapper element's shadow root first (spl-autocomplete stores options there)
-                        let visibleOptions = [];
-                        if (element !== targetEl && element.shadowRoot) {
-                            visibleOptions = querySelectorAllDeep(optionSelector, element.shadowRoot);
+                    const wrapperShadow = (element !== targetEl && element.shadowRoot) ? element.shadowRoot : null;
+                    autocompleteOptions = (await waitFor(() => {
+                        let found = [];
+                        if (wrapperShadow) {
+                            found = querySelectorAllDeep(optionSelector, wrapperShadow);
                         }
-                        // Fallback: search entire document (options may be in a portal/overlay)
-                        if (visibleOptions.length === 0) {
-                            visibleOptions = querySelectorAllDeep(optionSelector);
+                        if (found.length === 0) {
+                            found = querySelectorAllDeep(optionSelector);
                         }
-
-                        visibleOptions = visibleOptions
+                        const filtered = found
                             .filter(o => isElementVisible(o))
                             .filter(o => {
                                 const t = o.textContent.toLowerCase();
                                 return t.length > 0 && !t.includes('loading') && !t.includes('searching') && !t.includes('no result') && !t.includes('type to search') && !t.includes('no matches');
                             });
-
-                        if (visibleOptions.length > 0) {
-                            autocompleteOptions = visibleOptions;
-                            break;
-                        }
-                    }
+                        return filtered.length > 0 ? filtered : null;
+                    }, { timeout: 2000, shadowRoots: wrapperShadow ? [wrapperShadow] : [] })) || [];
 
                     if (autocompleteOptions.length > 0) {
                         console.log(`[Autocomplete] Found ${autocompleteOptions.length} valid options in Shadow DOM. Selecting first: "${autocompleteOptions[0].textContent.trim()}"`);
@@ -3369,6 +3588,22 @@
     }
 
     /**
+     * Robustly click an "Add" button. Workday's React buttons frequently ignore a bare
+     * .click() and only fire on a genuine pointer sequence, so dispatch the full chain
+     * (focus → pointerdown/mousedown → pointerup/mouseup → click) on the deepest button,
+     * then deepClick() as a final fallback.
+     */
+    function robustAddClick(el) {
+        if (!el) return;
+        const target = (el.shadowRoot && el.shadowRoot.querySelector('button')) || el;
+        try { target.scrollIntoView?.({ block: 'center' }); } catch (_) {}
+        try { target.focus?.({ preventScroll: true }); } catch (_) {}
+        clickLikeUser(target);
+        // Belt-and-suspenders: also run deepClick (handles shadow-DOM hosts / nested buttons).
+        deepClick(el);
+    }
+
+    /**
      * Find an add button that is visually inside or near a section that matches
      * the given heading keywords. This prevents clicking the work-experience add
      * button when we want the education one (both can have id="add-button").
@@ -3387,22 +3622,38 @@
             '.gwt-Label', '.section-title', '.section-header'
         ];
 
-        const headings = document.querySelectorAll(headingSelectors.join(','));
+        const addBtnSel = '[id="add-button"], [data-automation-id="add-button"], [data-test*="add" i], ' +
+            'button[aria-label*="add" i], button[title*="add" i], .add-button, [data-automation-id*="add" i], [data-automation-id*="Add" i]';
+        const headings = Array.from(document.querySelectorAll(headingSelectors.join(',')));
+        const sectionMatches = (text) => headingKeywords.some(kw => text.includes(kw));
 
+        // Primary: pick the add button whose NEAREST PRECEDING heading matches this section.
+        // "Add Another" (data-automation-id="add-button") is generic — one per section — so the
+        // only reliable way to tell education's from work's is the heading it sits under.
+        const addButtons = Array.from(document.querySelectorAll(addBtnSel)).filter(isElementVisible);
+        for (const btn of addButtons) {
+            let nearest = null;
+            for (const h of headings) {
+                // h precedes btn in document order?
+                if (h.compareDocumentPosition(btn) & Node.DOCUMENT_POSITION_FOLLOWING) nearest = h;
+                else break; // headings are in document order; once one follows btn, stop
+            }
+            const text = (nearest?.textContent || '').toLowerCase().trim();
+            if (nearest && sectionMatches(text)) {
+                console.log(`[Platform] Add button matched to preceding section heading "${text.slice(0, 40)}"`);
+                return btn;
+            }
+        }
+
+        // Fallback: walk up from a matching heading to a container that holds an add button.
         for (const heading of headings) {
             const headingText = (heading.textContent || '').toLowerCase().trim();
-            if (!headingKeywords.some(kw => headingText.includes(kw))) continue;
+            if (!sectionMatches(headingText)) continue;
 
-            // Walk up to find a container that holds an add button
             let container = heading;
             for (let depth = 0; depth < 8; depth++) {
                 if (!container) break;
-
-                // Look for any add-style button in this container
-                const candidates = container.querySelectorAll(
-                    '[id="add-button"], [data-automation-id="add-button"], [data-test*="add" i], ' +
-                    'button[aria-label*="add" i], button[title*="add" i], .add-button, [data-automation-id*="add" i], [data-automation-id*="Add" i]'
-                );
+                const candidates = container.querySelectorAll(addBtnSel);
                 for (const btn of candidates) {
                     if (isElementVisible(btn)) {
                         console.log(`[Platform] Found section-specific add button near "${headingText.slice(0,40)}"`);
@@ -3481,7 +3732,7 @@
                     const sectionBtn = findSectionAddButton(sectionKeywords);
                     if (sectionBtn) {
                         console.log(`[Platform] Clicking section-aware add button for "${sectionType}" (attempt ${attempt + 1})`);
-                        deepClick(sectionBtn);
+                        robustAddClick(sectionBtn);
                         await new Promise(r => setTimeout(r, 600));
                         return true;
                     }
@@ -3539,7 +3790,7 @@
 
                     if (chosenBtn) {
                         console.log(`[Platform] Clicking [data-automation-id="add-button"] for "${sectionType}" (attempt ${attempt + 1})`);
-                        deepClick(chosenBtn);
+                        robustAddClick(chosenBtn);
                         await new Promise(r => setTimeout(r, 600));
                         return true;
                     }
@@ -3562,7 +3813,7 @@
                     if (patterns.some(p => text.includes(p) || aria.includes(p) || title.includes(p))
                         && isElementVisible(btn)) {
                         console.log(`[Platform] Clicking "${text || aria}" (pattern) for ${sectionType}`);
-                        deepClick(btn);
+                        robustAddClick(btn);
                         await new Promise(r => setTimeout(r, 600));
                         return true;
                     }
@@ -3738,6 +3989,7 @@
         // Prefer an exact match; only fall back to a similar one if no exact match
         // appears. exactMin gates "settle immediately"; similarMin is the fallback bar.
         const isSchoolField = ['school', 'schoolName', 'institution', 'university'].includes(fieldName);
+        const isFieldOfStudy = ['fieldofstudy', 'field', 'major', 'areaofstudy', 'studyfield'].includes(String(fieldName).toLowerCase());
         const exactMin = isSchoolField ? 100 : 40;
         const similarMin = isSchoolField ? 85 : 40;
         const getRankedOptions = () => getOptions()
@@ -3832,6 +4084,21 @@
                 const manualSchool = await fillWorkdayManualSchoolFallback(searchInput, searchText, fieldTracker);
                 if (manualSchool) return manualSchool;
             }
+            if (isFieldOfStudy) {
+                // Field of Study prompts commit the typed term on Enter — either selecting the
+                // highlighted taxonomy match or accepting the value as free text. The search
+                // term is already typed into the input above, so just press Enter.
+                searchInput.focus({ preventScroll: true });
+                dispatchKey(searchInput, 'Enter', 'Enter', 13);
+                await new Promise(r => setTimeout(r, 600));
+                if (hasSelectedPromptValue(searchInput)) {
+                    markFieldFilled(searchInput, 'platform', fieldTracker);
+                    const formField = searchInput.closest?.('[data-automation-id^="formField-"]');
+                    if (formField) markFieldFilled(formField, 'platform', fieldTracker);
+                    console.log(`[Platform] Field of study committed via Enter fallback for "${searchText}"`);
+                    return searchInput;
+                }
+            }
             return false;
         }
 
@@ -3924,12 +4191,54 @@
         throwIfStopRequested();
         let filled = 0;
         let entryAnchorY = null;
-        const queryRoot = scopeRoot?.querySelectorAll ? scopeRoot : document;
         const firstKeyByArray = {
             work_experience: ['company', 'companyName', 'employer', 'organization'],
             education_history: ['school', 'schoolName', 'institution', 'university'],
             websites: ['url', 'website', 'link']
         };
+
+        // Pin THIS entry to its own block. Repeated-entry forms (esp. ones that re-render the
+        // whole section on "Add Another") have no stable per-entry container, so entry i's
+        // fields would otherwise scatter across blocks (school in block 1, degree in block 0…),
+        // interleaving the two entries. We locate every block by the section's first field
+        // (school / company), order them in the document, and scope ALL of entry i's field
+        // queries to the span of the i-th block. This is the "fill block 0 fully, then block 1"
+        // behavior — one entry at a time, into one block.
+        const buildIndexedBlockScope = () => {
+            const firstKeys = firstKeyByArray[arrayPath] || [];
+            if (!firstKeys.length) return null;
+            const sel = firstKeys.flatMap(k => [
+                `[data-automation-id="formField-${k}"]`,
+                `[id$="--${k}"]`, `[name$="--${k}"]`, `[data-automation-id="${k}"]`, `[name="${k}"]`
+            ]).join(',');
+            const seen = new Set();
+            const blocks = [];
+            for (const el of document.querySelectorAll(sel)) {
+                if (!isElementVisible(el)) continue;
+                const ff = el.closest('[data-automation-id^="formField-"]') || el;
+                if (seen.has(ff)) continue;
+                seen.add(ff);
+                blocks.push(ff);
+            }
+            blocks.sort((a, b) => (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) ? -1 : (a === b ? 0 : 1));
+            if (blocks.length <= index) return null; // this entry's block isn't on the page yet
+            const start = blocks[index];
+            const end = blocks[index + 1] || null;
+            const inBlock = (el) => {
+                if (!el) return false;
+                if (el === start || start.contains?.(el)) return true;
+                if (!(start.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING)) return false; // before start
+                if (!end) return true;
+                return !!(el.compareDocumentPosition(end) & Node.DOCUMENT_POSITION_FOLLOWING); // before end
+            };
+            return {
+                querySelectorAll(s) { return Array.from(document.querySelectorAll(s)).filter(inBlock); },
+                querySelector(s) { return this.querySelectorAll(s)[0] || null; }
+            };
+        };
+        const indexedScope = buildIndexedBlockScope();
+        const queryRoot = indexedScope || (scopeRoot?.querySelectorAll ? scopeRoot : document);
+        if (indexedScope) console.log(`[Platform] ${arrayPath}[${index}]: scoped to block #${index}`);
         const rememberEntryAnchor = (el, subKey) => {
             if (arrayPath !== 'education_history') return;
             if (entryAnchorY != null) return;
@@ -3940,9 +4249,14 @@
             console.log(`[Platform] Anchored ${arrayPath}[${index}] at y=${entryAnchorY}`);
         };
         const isInCurrentEntryScope = (el) => {
-            if (arrayPath !== 'education_history' || entryAnchorY == null) return true;
+            // No anchor, or a non-finite anchor (getVisualOrderKey returns Infinity when the
+            // field has no layout box — e.g. the workday.com text variant): positional scoping
+            // is meaningless, so don't gate. We rely on the scoped queryRoot instead.
+            if (arrayPath !== 'education_history' || entryAnchorY == null || !Number.isFinite(entryAnchorY)) return true;
             const anchor = el?.closest?.('[data-automation-id^="formField-"]') || el;
-            return getVisualOrderKey(anchor) + 8 >= entryAnchorY;
+            const key = getVisualOrderKey(anchor);
+            if (!Number.isFinite(key)) return true;
+            return key + 8 >= entryAnchorY;
         };
 
         // Strategy A: Use database field definitions for this exact index
@@ -4038,62 +4352,134 @@
                     field.name                         // For querySelectorAll if it's a tag
                 ];
 
-                if (arrayPath === 'education_history' && ['school', 'schoolName', 'institution', 'university'].includes(field.name)) {
-                    const selected = await fillWorkdaySearchFirstOption(field.name, displayValue, selectors, fieldTracker, queryRoot);
-                    if (selected) {
-                        rememberEntryAnchor(selected, subKey);
-                        filled++;
-                        await new Promise(r => setTimeout(r, 120));
-                        continue;
+                if (arrayPath === 'education_history' && ['school', 'schoolName', 'institution', 'university', 'fieldOfStudy', 'field', 'major', 'areaOfStudy'].includes(field.name)) {
+                    const isSchoolKey = ['school', 'schoolName', 'institution', 'university'].includes(field.name);
+
+                    // After "Add Another" re-renders the section, the previous entry's fields
+                    // become fresh DOM nodes (no longer in filledElements), and the scoped root
+                    // can include them too. So consider ALL instances of this field and prefer an
+                    // EMPTY, laid-out input — never one that already holds a value — so we fill the
+                    // NEW block instead of overwriting the previous entry.
+                    const hasLayout = (el) => { const r = el.getBoundingClientRect?.(); return !!r && r.width > 0 && r.height > 0; };
+                    const isEmptyInput = (el) => !String(el.value || '').trim();
+                    const inputSel = 'input:not([type="hidden"]):not([type="file"]):not([type="checkbox"]):not([type="radio"]), textarea';
+                    const allFFs = Array.from(queryRoot.querySelectorAll(`[data-automation-id="formField-${field.name}"]`));
+                    const searchRoots = allFFs.length ? allFFs : [queryRoot];
+                    let input = null;
+                    for (const root of searchRoots) {
+                        const cands = Array.from(root.querySelectorAll(inputSel)).filter(el => isElementVisible(el) && hasLayout(el));
+                        input = cands.find(el => isEmptyInput(el) && !fieldTracker.filledElements.has(el));
+                        if (input) break;
+                    }
+                    if (!input) {
+                        const cands = Array.from((allFFs[0] || queryRoot).querySelectorAll(inputSel)).filter(el => isElementVisible(el));
+                        input = cands.find(el => hasLayout(el) && isEmptyInput(el))
+                            || cands.find(hasLayout)
+                            || cands[0]
+                            || queryRoot.querySelector(`[id$="--${field.name}"], [name$="--${field.name}"]`);
+                    }
+                    const fieldFF = input?.closest?.('[data-automation-id^="formField-"]') || allFFs[0] || null;
+
+                    // Detect the widget shape. Most Workday tenants (*.myworkdayjobs.com) render
+                    // school / field of study as a search PROMPT (multiselect + "Search" box) that
+                    // needs a committed selection. Some surfaces use a PLAIN TEXT INPUT. Classify
+                    // by BOTH the container and the input itself — fieldFF alone misses cases.
+                    const promptSel = '[data-automation-id="multiSelectContainer"], [data-uxi-widget-type="multiselect"], ' +
+                        'input[data-uxi-widget-type="selectinput"], [data-automation-id="searchBox"], [data-automation-id="promptIcon"]';
+                    const isSearchPrompt = !!(
+                        fieldFF?.querySelector?.(promptSel) ||
+                        input?.closest?.('[data-automation-id="multiSelectContainer"]') ||
+                        input?.getAttribute?.('data-uxi-widget-type') === 'selectinput' ||
+                        input?.getAttribute?.('data-automation-id') === 'searchBox' ||
+                        (input?.getAttribute?.('placeholder') || '').trim().toLowerCase() === 'search' ||
+                        input?.getAttribute?.('aria-haspopup') === 'listbox' ||
+                        input?.getAttribute?.('role') === 'combobox'
+                    );
+
+                    if (isSearchPrompt) {
+                        const selected = await fillWorkdaySearchFirstOption(field.name, displayValue, selectors, fieldTracker, queryRoot);
+                        if (selected) {
+                            rememberEntryAnchor(selected, subKey);
+                            filled++;
+                            await new Promise(r => setTimeout(r, 120));
+                            continue;
+                        }
+                        // Prompt didn't commit (e.g. a high school not in Workday's university
+                        // taxonomy). Still anchor on the school field's DOM position so the rest
+                        // of THIS entry (degree, field of study, dates, GPA) isn't gated forever
+                        // and deferred to a later out-of-order pass. Only school keys anchor.
+                        if (entryAnchorY == null && isSchoolKey) {
+                            const schoolFF = fieldFF || input
+                                || queryRoot.querySelector(`[id$="--${field.name}"]`)
+                                || queryRoot.querySelector(`[name$="--${field.name}"]`);
+                            if (schoolFF) {
+                                const anchorEl = schoolFF.closest?.('[data-automation-id^="formField-"]') || schoolFF;
+                                entryAnchorY = getVisualOrderKey(anchorEl);
+                                console.log(`[Platform] Anchored ${arrayPath}[${index}] at y=${entryAnchorY} (school not committed — using field position so rest of entry still fills)`);
+                            }
+                        }
+                    } else {
+                        // Plain text-input variant: just type the value into the field's input.
+                        if (input && isElementVisible(input) && !fieldTracker.filledElements.has(input) && isInCurrentEntryScope(input)) {
+                            if (await fillElement(input, displayValue)) {
+                                // Verify it actually stuck (controlled inputs / prompts can revert).
+                                await new Promise(r => setTimeout(r, 40));
+                                const stuck = String(input.value || '').trim().length > 0;
+                                if (stuck) {
+                                    console.log(`[Platform] Filled text [${field.name}]="${displayValue}" (${arrayPath}[${index}])`);
+                                    markFieldFilled(input, 'platform', fieldTracker);
+                                    rememberEntryAnchor(input, subKey);
+                                    filled++;
+                                    await new Promise(r => setTimeout(r, 60));
+                                    continue;
+                                }
+                                console.warn(`[Platform] Text fill for [${field.name}] did not stick (value cleared) — likely a prompt; trying search handler`);
+                                const selected = await fillWorkdaySearchFirstOption(field.name, displayValue, selectors, fieldTracker, queryRoot);
+                                if (selected) {
+                                    rememberEntryAnchor(selected, subKey);
+                                    filled++;
+                                    await new Promise(r => setTimeout(r, 120));
+                                    continue;
+                                }
+                            }
+                        }
+                        // Couldn't fill but still anchor on school so the entry isn't gated.
+                        if (entryAnchorY == null && isSchoolKey && input) {
+                            entryAnchorY = getVisualOrderKey(input.closest?.('[data-automation-id^="formField-"]') || input);
+                            console.log(`[Platform] Anchored ${arrayPath}[${index}] at y=${entryAnchorY} (text school field)`);
+                        }
                     }
                 }
 
                 // Workday date fields: find the dateInputWrapper and fill Month/Year spinbuttons
                 const isDateField = ['startDate', 'endDate', 'educationStartDate', 'educationEndDate', 'firstYearAttended', 'lastYearAttended'].includes(field.name);
                 if (isDateField && displayValue) {
+                    // Helper: extract {year, month} from any displayValue format
+                    const extractYearMonth = (dv) => {
+                        if (dv && typeof dv === 'object' && 'year' in dv) {
+                            return { year: dv.year || null, month: dv.month || null };
+                        }
+                        const ds = String(dv).trim();
+                        const slashMatch = ds.match(/^(\d{1,2})[\/\-](\d{4})$/);
+                        if (slashMatch) return { year: slashMatch[2], month: slashMatch[1] };
+                        const isoMatch = ds.match(/^(\d{4})[\/\-](\d{1,2})$/);
+                        if (isoMatch) return { year: isoMatch[1], month: isoMatch[2] };
+                        const mnNames = { jan:1,january:1,feb:2,february:2,mar:3,march:3,apr:4,april:4,may:5,jun:6,june:6,jul:7,july:7,aug:8,august:8,sep:9,september:9,oct:10,october:10,nov:11,november:11,dec:12,december:12 };
+                        const wm = ds.match(/^([a-zA-Z]+)\s+(\d{4})$/);
+                        if (wm) { const m = mnNames[wm[1].toLowerCase()]; if (m) return { year: wm[2], month: String(m) }; }
+                        const yo = ds.match(/^(\d{4})$/);
+                        if (yo) return { year: yo[1], month: null };
+                        return { year: null, month: null };
+                    };
+
+                    let dateFieldFilled = false;
                     const dateWrappers = queryRoot.querySelectorAll(`[data-automation-id="formField-${field.name}"] [data-automation-id="dateInputWrapper"]`);
                     for (const wrapper of dateWrappers) {
                         if (!isElementVisible(wrapper)) continue;
                         if (!isInCurrentEntryScope(wrapper)) continue;
-                        // Check if already filled by us
                         if (fieldTracker.filledElements.has(wrapper)) continue;
 
-                        let month = null, year = null;
-
-                        // Handle {year, month} object format (education dates)
-                        if (displayValue && typeof displayValue === 'object' && 'year' in displayValue) {
-                            year = displayValue.year || null;
-                            month = displayValue.month || null;
-                        } else {
-                            // Parse date string: "Jan 2020", "01/2020", "2020", "March 2021", "2020-01", etc.
-                            const dateStr = String(displayValue).trim();
-
-                            // Try MM/YYYY or MM-YYYY
-                            const slashMatch = dateStr.match(/^(\d{1,2})[\/\-](\d{4})$/);
-                            if (slashMatch) { month = slashMatch[1]; year = slashMatch[2]; }
-
-                            // Try YYYY-MM
-                            if (!year) {
-                                const isoMatch = dateStr.match(/^(\d{4})[\/\-](\d{1,2})$/);
-                                if (isoMatch) { year = isoMatch[1]; month = isoMatch[2]; }
-                            }
-
-                            // Try "Month YYYY" or "Mon YYYY"
-                            if (!year) {
-                                const monthNames = { jan:1, january:1, feb:2, february:2, mar:3, march:3, apr:4, april:4, may:5, jun:6, june:6, jul:7, july:7, aug:8, august:8, sep:9, september:9, oct:10, october:10, nov:11, november:11, dec:12, december:12 };
-                                const wordMatch = dateStr.match(/^([a-zA-Z]+)\s+(\d{4})$/);
-                                if (wordMatch) {
-                                    const m = monthNames[wordMatch[1].toLowerCase()];
-                                    if (m) { month = String(m); year = wordMatch[2]; }
-                                }
-                            }
-
-                            // Try just YYYY
-                            if (!year) {
-                                const yearOnly = dateStr.match(/^(\d{4})$/);
-                                if (yearOnly) { year = yearOnly[1]; }
-                            }
-                        }
+                        const { year, month } = extractYearMonth(displayValue);
 
                         const monthInput = wrapper.querySelector('[data-automation-id="dateSectionMonth-input"]');
                         const yearInput = wrapper.querySelector('[data-automation-id="dateSectionYear-input"]');
@@ -4112,7 +4498,34 @@
                             console.log(`[Platform] Filled date [${field.name}] month=${month} year=${year} (${arrayPath}[${index}])`);
                             markFieldFilled(wrapper, 'platform', fieldTracker);
                             filled++;
+                            dateFieldFilled = true;
                             break;
+                        }
+                    }
+
+                    // Fallback: year-only spinbutton without a dateInputWrapper (e.g. Workday
+                    // firstYearAttended / lastYearAttended). Extract year and fill the bare input.
+                    if (!dateFieldFilled) {
+                        const { year } = extractYearMonth(displayValue);
+                        if (year) {
+                            const directSelectors = [
+                                ...(field.selector ? [field.selector] : []),
+                                `[data-automation-id="formField-${field.name}"] input[role="spinbutton"]`,
+                                `[data-automation-id="formField-${field.name}"] input`,
+                            ];
+                            outer: for (const s of directSelectors) {
+                                const inputs = queryRoot.querySelectorAll(s);
+                                for (const inp of inputs) {
+                                    if (!isElementVisible(inp) || fieldTracker.filledElements.has(inp) || !isInCurrentEntryScope(inp)) continue;
+                                    if (await fillElement(inp, year)) {
+                                        console.log(`[Platform] Filled year spinbutton [${field.name}] year=${year} (${arrayPath}[${index}])`);
+                                        markFieldFilled(inp, 'platform', fieldTracker);
+                                        filled++;
+                                        dateFieldFilled = true;
+                                        break outer;
+                                    }
+                                }
+                            }
                         }
                     }
                     // If endDate value is "present" (any case), tick the "I currently work here" checkbox
@@ -4140,7 +4553,7 @@
                         }
                     }
 
-                    await new Promise(r => setTimeout(r, 80));
+                    await new Promise(r => setTimeout(r, 25));
                     continue; // skip standard fill logic for date fields
                 }
 
@@ -4198,7 +4611,7 @@
                     if (fieldFilled) break;
                 }
 
-                await new Promise(r => setTimeout(r, 80));
+                await new Promise(r => setTimeout(r, 25));
             }
         } else {
             // Strategy B: No database field defs at all — heuristic fill of newly-visible empty fields
@@ -4283,37 +4696,55 @@
             // Handle Workday date spinbuttons specially
             const isDateFieldName = def.name === 'startDate' || def.name === 'endDate' || def.name === 'educationStartDate' || def.name === 'educationEndDate' || def.name === 'firstYearAttended' || def.name === 'lastYearAttended';
             if (isDateFieldName) {
-                const dateWrapper = container.querySelector('[data-automation-id="dateInputWrapper"]');
-                if (dateWrapper && isElementVisible(dateWrapper) && !fieldTracker.filledElements.has(dateWrapper)) {
-                    let month = null, year = null;
+                // Parse date from either {year,month} object (education) or string (work experience)
+                let scanYear = null, scanMonth = null;
+                if (value && typeof value === 'object' && 'year' in value) {
+                    scanYear = value.year || null;
+                    scanMonth = value.month || null;
+                } else {
                     const dateStr = String(value).trim();
                     const slashMatch = dateStr.match(/^(\d{1,2})[\/\-](\d{4})$/);
-                    if (slashMatch) { month = slashMatch[1]; year = slashMatch[2]; }
-                    if (!year) {
-                        const isoMatch = dateStr.match(/^(\d{4})[\/\-](\d{1,2})$/);
-                        if (isoMatch) { year = isoMatch[1]; month = isoMatch[2]; }
+                    if (slashMatch) { scanMonth = slashMatch[1]; scanYear = slashMatch[2]; }
+                    if (!scanYear) { const iso = dateStr.match(/^(\d{4})[\/\-](\d{1,2})$/); if (iso) { scanYear = iso[1]; scanMonth = iso[2]; } }
+                    if (!scanYear) {
+                        const mn = { jan:1,january:1,feb:2,february:2,mar:3,march:3,apr:4,april:4,may:5,jun:6,june:6,jul:7,july:7,aug:8,august:8,sep:9,september:9,oct:10,october:10,nov:11,november:11,dec:12,december:12 };
+                        const wm = dateStr.match(/^([a-zA-Z]+)\s+(\d{4})$/);
+                        if (wm) { const m = mn[wm[1].toLowerCase()]; if (m) { scanMonth = String(m); scanYear = wm[2]; } }
                     }
-                    if (!year) {
-                        const monthNames = { jan:1, january:1, feb:2, february:2, mar:3, march:3, apr:4, april:4, may:5, jun:6, june:6, jul:7, july:7, aug:8, august:8, sep:9, september:9, oct:10, october:10, nov:11, november:11, dec:12, december:12 };
-                        const wordMatch = dateStr.match(/^([a-zA-Z]+)\s+(\d{4})$/);
-                        if (wordMatch) { const m = monthNames[wordMatch[1].toLowerCase()]; if (m) { month = String(m); year = wordMatch[2]; } }
-                    }
-                    if (!year) { const yearOnly = dateStr.match(/^(\d{4})$/); if (yearOnly) year = yearOnly[1]; }
+                    if (!scanYear) { const yo = dateStr.match(/^(\d{4})$/); if (yo) scanYear = yo[1]; }
+                }
 
+                let htmlDateFilled = false;
+                const dateWrapper = container.querySelector('[data-automation-id="dateInputWrapper"]');
+                if (dateWrapper && isElementVisible(dateWrapper) && !fieldTracker.filledElements.has(dateWrapper)) {
                     const monthInput = dateWrapper.querySelector('[data-automation-id="dateSectionMonth-input"]');
                     const yearInput = dateWrapper.querySelector('[data-automation-id="dateSectionYear-input"]');
                     let dateFilled = false;
-                    if (monthInput && month && !fieldTracker.filledElements.has(monthInput)) {
-                        await fillElement(monthInput, month); dateFilled = true;
+                    if (monthInput && scanMonth && !fieldTracker.filledElements.has(monthInput)) {
+                        await fillElement(monthInput, scanMonth); dateFilled = true;
                     }
-                    if (yearInput && year && !fieldTracker.filledElements.has(yearInput)) {
-                        await fillElement(yearInput, year); dateFilled = true;
+                    if (yearInput && scanYear && !fieldTracker.filledElements.has(yearInput)) {
+                        await fillElement(yearInput, scanYear); dateFilled = true;
                     }
                     if (dateFilled) {
                         markFieldFilled(dateWrapper, 'platform', fieldTracker);
                         markFieldFilled(container, 'platform', fieldTracker);
-                        console.log(`[HTMLScan] Filled date "${fieldName}" month=${month} year=${year}`);
+                        console.log(`[HTMLScan] Filled date "${fieldName}" month=${scanMonth} year=${scanYear}`);
                         filled++;
+                        htmlDateFilled = true;
+                    }
+                }
+
+                // Fallback: year-only spinbutton without dateInputWrapper
+                if (!htmlDateFilled && scanYear) {
+                    const inp = container.querySelector('input[role="spinbutton"], input');
+                    if (inp && isElementVisible(inp) && !fieldTracker.filledElements.has(inp)) {
+                        if (await fillElement(inp, scanYear)) {
+                            markFieldFilled(inp, 'platform', fieldTracker);
+                            markFieldFilled(container, 'platform', fieldTracker);
+                            console.log(`[HTMLScan] Filled year spinbutton "${fieldName}" year=${scanYear}`);
+                            filled++;
+                        }
                     }
                 }
                 await new Promise(r => setTimeout(r, 80));
@@ -4437,6 +4868,28 @@
                 .filter(f => f.arrayPath === arrayPath)
                 .map(f => ({ name: f.name, label: f.label, key: f.profilePath?.split('.').slice(2).join('.'), type: f.type }));
 
+            // Count how many entry "blocks" are rendered, keyed off the section's first field
+            // (school / company / url). Used to confirm an Add actually created a NEW block —
+            // some surfaces re-render the same single form, which would otherwise overwrite the
+            // previous entry instead of adding one.
+            const firstFieldNames = arrayPath === 'work_experience'
+                ? ['company', 'companyName', 'employer', 'organization']
+                : arrayPath === 'education_history'
+                ? ['school', 'schoolName', 'institution', 'university']
+                : ['url', 'website', 'link', 'websiteAddress'];
+            const countEntryBlocks = () => {
+                const blocks = new Set();
+                for (const name of firstFieldNames) {
+                    for (const el of document.querySelectorAll(
+                        `[data-automation-id="formField-${name}"], [id$="--${name}"], [name$="--${name}"], [data-automation-id="${name}"], [name="${name}"]`
+                    )) {
+                        if (!isElementVisible(el)) continue;
+                        blocks.add(el.closest('[data-automation-id^="formField-"]') || el);
+                    }
+                }
+                return blocks.size;
+            };
+
             function getVisibleEntryCandidates() {
                 return Array.from(document.querySelectorAll(
                     '[data-automation-id^="formField-"], input:not([type="hidden"]):not([type="file"]), textarea, select, button[aria-haspopup="listbox"]'
@@ -4474,15 +4927,12 @@
             }
 
             async function waitForNewEntryScope(beforeVisible) {
-                for (let poll = 0; poll < 20; poll++) {
-                    await new Promise(r => setTimeout(r, 200));
+                const appeared = await waitFor(() => {
                     const current = getVisibleEntryCandidates();
-                    const appeared = current.filter(el => !beforeVisible.has(el));
-                    if (appeared.length > 0) {
-                        return makeScopedQueryRoot(appeared);
-                    }
-                }
-                return null;
+                    const newOnes = current.filter(el => !beforeVisible.has(el));
+                    return newOnes.length > 0 ? newOnes : null;
+                }, { timeout: 4000 });
+                return appeared ? makeScopedQueryRoot(appeared) : null;
             }
 
             async function openArrayEntryPanel() {
@@ -4492,234 +4942,57 @@
                 return await waitForNewEntryScope(beforeVisible);
             }
 
-            // Helper: attempt to fill the currently-open entry form, with HTML scan fallback
-            async function tryFillEntry(entry, idx, entryScope = document) {
+            // Helper: attempt to fill the currently-open entry form, with HTML scan fallback.
+            // The fallback is page-wide, so it must only run for a FRESH block (allowFallback).
+            // On a refill of an already-filled block, fillArrayEntry returns 0 (nothing to do) —
+            // running the page-wide scan there would pour this entry into a stray empty block
+            // and duplicate it.
+            async function tryFillEntry(entry, idx, entryScope = document, allowFallback = true) {
                 let n = await fillArrayEntry(entry, arrayPath, idx, platformFields, profileData, fieldTracker, entryScope);
-                if (n === 0 && arrayFieldDefs.length > 0 && !(arrayPath === 'education_history' && idx > 0)) {
+                if (n === 0 && allowFallback && arrayFieldDefs.length > 0 && !(arrayPath === 'education_history' && idx > 0)) {
                     n = await fillByPageHTMLScan(entry, arrayPath, arrayFieldDefs, fieldTracker, entryScope);
                 }
                 return n;
             }
 
-            function normalizeExistingEntryText(value) {
-                return String(value || '')
-                    .toLowerCase()
-                    .replace(/^https?:\/\//, '')
-                    .replace(/^www\./, '')
-                    .replace(/[^a-z0-9]+/g, ' ')
-                    .replace(/\s+/g, ' ')
-                    .trim();
-            }
-
-            function flattenEntryValue(value) {
-                if (value == null) return '';
-                if (typeof value === 'string' || typeof value === 'number') return String(value);
-                if (Array.isArray(value)) return value.map(flattenEntryValue).filter(Boolean).join(' ');
-                if (typeof value === 'object') {
-                    if ('year' in value || 'month' in value) return [value.month, value.year].filter(Boolean).join(' ');
-                    return Object.values(value).map(flattenEntryValue).filter(Boolean).join(' ');
-                }
-                return '';
-            }
-
-            function entryAlreadyExistsOnPage(entry, currentArrayPath) {
-                const keyGroups = currentArrayPath === 'work_experience'
-                    ? [['company', 'companyName', 'employer', 'organization'], ['jobTitle', 'title', 'position', 'role']]
-                    : currentArrayPath === 'education_history'
-                    ? [['school', 'schoolName', 'institution', 'university'], ['degree', 'degreeName', 'fieldOfStudy', 'field']]
-                    : currentArrayPath === 'websites'
-                    ? [['url', 'website', 'link']]
-                    : [];
-
-                const picked = [];
-                for (const group of keyGroups) {
-                    const raw = group.map(key => flattenEntryValue(entry[key])).find(Boolean);
-                    const normalized = normalizeExistingEntryText(raw);
-                    if (normalized && normalized.length >= 3) picked.push(normalized);
-                }
-
-                if (picked.length === 0) {
-                    for (const value of Object.values(entry)) {
-                        const normalized = normalizeExistingEntryText(flattenEntryValue(value));
-                        if (normalized.length >= 4) picked.push(normalized);
-                        if (picked.length >= 2) break;
-                    }
-                }
-
-                if (picked.length === 0) return false;
-                if (currentArrayPath !== 'websites' && picked.length < 2) return false;
-
-                const sectionHints = currentArrayPath === 'work_experience'
-                    ? ['work', 'experience', 'employment', 'job']
-                    : currentArrayPath === 'education_history'
-                    ? ['education', 'school', 'degree', 'university', 'academic']
-                    : currentArrayPath === 'websites'
-                    ? ['website', 'web address', 'url', 'link']
-                    : [];
-                const selector = [
-                    '[role="listitem"]',
-                    'li',
-                    'article',
-                    '[data-automation-id*="item" i]',
-                    '[data-automation-id*="card" i]',
-                    '[data-automation-id*="panel" i]',
-                    '[data-test*="experience" i]',
-                    '[data-test*="education" i]',
-                    '[data-test*="website" i]',
-                    '[data-automation-id*="experience" i]',
-                    '[data-automation-id*="education" i]',
-                    '[data-automation-id*="website" i]'
-                ].join(',');
-                // innerText misses form-control values — Workday renders existing entries
-                // as open form panels whose data lives in input values, so append them.
-                const containerEntryText = (el) => {
-                    const parts = [el.innerText || el.textContent || ''];
-                    for (const ctrl of el.querySelectorAll('input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"])')) {
-                        if (ctrl.value) parts.push(ctrl.value);
-                    }
-                    return normalizeExistingEntryText(parts.join(' '));
-                };
-                // Match by substring OR by significant-word overlap — Workday's autocomplete
-                // often rewrites profile values (e.g. "MIT" → "Massachusetts Institute of
-                // Technology"), so strict substring alone produces false negatives on re-runs.
-                const valueMatchesText = (value, text) => {
-                    if (!value || !text) return false;
-                    if (text.includes(value) || value.includes(text)) return true;
-                    const words = value.split(' ').filter(w => w.length >= 3);
-                    if (words.length === 0) return false;
-                    const hits = words.filter(w => text.includes(w)).length;
-                    return hits / words.length >= 0.6;
-                };
-
-                const containers = Array.from(document.querySelectorAll(selector))
-                    .filter(el => isElementVisible(el))
-                    .map(el => ({
-                        el,
-                        text: containerEntryText(el),
-                        hint: normalizeExistingEntryText([
-                            el.getAttribute?.('data-automation-id'),
-                            el.getAttribute?.('data-test'),
-                            el.getAttribute?.('aria-label'),
-                            el.className
-                        ].filter(Boolean).join(' '))
-                    }))
-                    .filter(item => item.text.length >= 3 && item.text.length <= 2000)
-                    .filter(item => sectionHints.length === 0 || sectionHints.some(h => item.text.includes(h) || item.hint.includes(h)) || picked.some(value => valueMatchesText(value, item.text)))
-                    .sort((a, b) => a.text.length - b.text.length);
-
-                const matched = containers.find(({ text }) => {
-                    if (currentArrayPath === 'websites') return picked.some(value => valueMatchesText(value, text));
-                    const slice = picked.slice(0, 2);
-                    if (slice.every(value => valueMatchesText(value, text))) return true;
-                    return slice.length === 1 && slice[0].length >= 8 && valueMatchesText(slice[0], text);
-                });
-                if (matched) {
-                    console.log(`[Platform] Existing ${currentArrayPath} entry detected on page — matched "${picked.join(' | ')}"`);
-                    return true;
-                }
-                return false;
-            }
-
-            // Helper: commit the currently-open entry by clicking its Done/Save button.
-            // Only uses platform-specific selectors — avoids broad [data-automation-id="saveButton"]
-            // which is Workday's page-level "Save and Continue" and would navigate away.
-            async function commitOpenEntry() {
-                const commitSelectors = [
-                    `[data-test="save-${sectionType}"]`,
-                    `[data-test="${sectionType}-save"]`,
-                    `[data-automation-id="save-${sectionType}"]`,
-                    `[data-automation-id="${sectionType}-save"]`,
-                    '[data-automation-id="done"]',
-                    '[data-test="save-button"]',
-                    'button[type="submit"].save',
-                    'button.save-button'
-                ];
-                for (const sel of commitSelectors) {
-                    const btn = document.querySelector(sel);
-                    if (btn && isElementVisible(btn)) {
-                        console.log(`[Platform] Committing entry via: ${sel}`);
-                        deepClick(btn);
-                        await new Promise(r => setTimeout(r, 700));
-                        return true;
-                    }
-                }
-                // Text-based: only exact "Done" to avoid accidentally clicking "Save and Continue"
-                for (const btn of document.querySelectorAll('button, [role="button"]')) {
-                    if (!isElementVisible(btn)) continue;
-                    const text = (btn.textContent || '').trim();
-                    if (text === 'Done' || text === 'done') {
-                        console.log(`[Platform] Committing entry via "Done" button`);
-                        deepClick(btn);
-                        await new Promise(r => setTimeout(r, 700));
-                        return true;
-                    }
-                }
-                return false;
-            }
-
+            // One rule: ensure a block exists at index i, then fill block i.
+            //   - countEntryBlocks() is the DOM truth (blocks counted by first-field presence).
+            //   - Add only when there's no block at position i → can never duplicate, whether
+            //     the page came pre-populated, half-filled, or with an empty starter block.
+            //   - Every i is processed → no entry is dropped, and pre-existing blocks get
+            //     refilled so empty bits (e.g. "I currently work here", fieldOfStudy) complete.
+            //   - fillArrayEntry pins its queries to the i-th block internally, so passing
+            //     document is safe — no cross-entry bleed.
             for (let i = 0; i < arrayData.length; i++) {
                 throwIfStopRequested();
                 const entry = arrayData[i];
                 if (!entry || typeof entry !== 'object') continue;
-                console.log(`[Platform] Filling ${arrayPath}[${i}]:`, Object.keys(entry).join(', '));
 
-                if (i === 0) {
-                    // If this entry already exists on the page (saved application or a
-                    // previous fill), skip it entirely — refilling would duplicate it.
-                    if (entryAlreadyExistsOnPage(entry, arrayPath)) {
-                        console.log(`[Platform] ${arrayPath}[${i}] already exists on page — skipping`);
+                let addedNew = false;
+                if (countEntryBlocks() <= i) {
+                    if (addButtonFailures >= 3) { console.warn(`[Platform] Add button unavailable, stopping`); break; }
+                    const before = countEntryBlocks();
+                    await openArrayEntryPanel();
+                    if (countEntryBlocks() <= before) {
+                        addButtonFailures++;
+                        console.warn(`[Platform] Add did not create a new ${arrayPath} block — skipping [${i}]`);
                         continue;
                     }
-                    // For the first entry: the form may already be open on the page.
-                    // Try to fill it directly; if nothing is found, click Add first.
-                    let fieldsFilled = await tryFillEntry(entry, i);
-
-                        if (fieldsFilled === 0) {
-                            if (addButtonFailures >= 3) { console.warn(`[Platform] Add button unavailable, stopping`); break; }
-                            const entryScope = await openArrayEntryPanel();
-                            if (entryScope) {
-                                fieldsFilled = await tryFillEntry(entry, i, entryScope);
-                            } else {
-                                addButtonFailures++;
-                                console.warn(`[Platform] Could not open form for ${arrayPath}[0]`);
-                        }
-                    }
-
-                    if (fieldsFilled > 0) {
-                        entriesFilled++;
-                        console.log(`[Platform] ✅ Filled ${fieldsFilled} fields for ${arrayPath}[${i}]`);
-                    } else {
-                        console.warn(`[Platform] ⚠️ No fields filled for ${arrayPath}[${i}]`);
-                    }
-	                } else {
-	                    // For every subsequent entry:
-	                    // 1. Commit the currently-open entry (best-effort — some platforms auto-commit)
-	                    // 2. If this profile entry is not already rendered, click Add first
-	                    // 3. Fill only the newly-open section. Do not pour entry[i] into
-	                    //    leftover blank fields from entry[i - 1].
-	                    await commitOpenEntry();
-	                    if (entryAlreadyExistsOnPage(entry, arrayPath)) {
-	                        console.log(`[Platform] ${arrayPath}[${i}] already exists on page — not clicking Add`);
-	                        continue;
-	                    }
-		                    if (addButtonFailures >= 3) { console.warn(`[Platform] Add button unavailable, stopping`); break; }
-		                    const entryScope = await openArrayEntryPanel();
-		                    let fieldsFilled = 0;
-		                    if (!entryScope) {
-		                        addButtonFailures++;
-		                        console.warn(`[Platform] Could not open new form for ${arrayPath}[${i}], skipping to avoid cross-entry fill`);
-		                        continue;
-		                    }
-		                    fieldsFilled = await tryFillEntry(entry, i, entryScope);
-	                    if (fieldsFilled > 0) {
-	                        entriesFilled++;
-	                        console.log(`[Platform] ✅ Filled ${fieldsFilled} fields for ${arrayPath}[${i}]`);
-                    } else {
-                        console.warn(`[Platform] ⚠️ No fields filled for ${arrayPath}[${i}]`);
-                    }
+                    addedNew = true;
                 }
 
-                if (i < arrayData.length - 1) await new Promise(r => setTimeout(r, 400));
+                console.log(`[Platform] Filling ${arrayPath}[${i}]:`, Object.keys(entry).join(', '));
+                // Page-wide HTML-scan fallback only for a fresh block — never on refill, or it
+                // pours this entry into a stray empty block and duplicates it.
+                const n = await tryFillEntry(entry, i, document, addedNew);
+                if (n > 0) {
+                    entriesFilled++;
+                    console.log(`[Platform] ✅ Filled ${n} fields for ${arrayPath}[${i}]`);
+                } else {
+                    console.warn(`[Platform] ⚠️ No fields filled for ${arrayPath}[${i}]`);
+                }
+
+                if (i < arrayData.length - 1) await new Promise(r => setTimeout(r, 120));
             }
 
             return entriesFilled;
@@ -5325,12 +5598,10 @@
                     // Confirmed only when a genuinely new pill appears (count increased AND a
                     // text not already present shows up).
                     const checkPill = () => newlySelectedSkillTexts().length > 0;
+                    // Translate (polls, interval) → total timeout for waitFor.
                     const waitForPill = async (polls, interval) => {
-                        for (let c = 0; c < polls; c++) {
-                            await new Promise(r => setTimeout(r, interval));
-                            if (checkPill()) return true;
-                        }
-                        return false;
+                        const result = await waitFor(() => checkPill() ? true : null, { timeout: polls * interval });
+                        return !!result;
                     };
                     const clickWorkdaySkillOption = async (option) => {
                         const row = option.closest?.('[data-automation-id="menuItem"][role="option"], [role="option"]') || option;
@@ -5493,8 +5764,20 @@
                 const rawSearchTerm = String(displayValue).trim();
                 if (!rawSearchTerm) return false;
                 const isSchoolField = /school|university|institution/i.test(`${field.name || ''} ${field.label || ''}`);
+                const isDegreeField = /degree|qualification|education level|level of education/i.test(`${field.name || ''} ${field.label || ''}`);
 
-                const searchTerm = rawSearchTerm;
+                // Workday's degree prompt is a filter-as-you-type box over a FIXED option
+                // list ("Bachelor's Degree", "Master's Degree", ...). Typing the full stored
+                // value ("Bachelor of Science") filters the correct option OUT — it doesn't
+                // contain that substring — so nothing ever matches and the poll loop waits
+                // out its whole timeout. Type just the degree-level stem so the right option
+                // stays in the list; degree-aware scoring then settles on it immediately.
+                const degreeLevelStems = {
+                    highschool: 'High School', some_college: 'Some College', associate: 'Associate',
+                    bachelor: 'Bachelor', master: 'Master', doctorate: 'Doctor', certificate: 'Certificate'
+                };
+                const degreeLevel = isDegreeField ? getDegreeLevel(rawSearchTerm) : null;
+                const searchTerm = (degreeLevel && degreeLevelStems[degreeLevel]) || rawSearchTerm;
 
                 // Find the search input inside [data-automation-id="formField-{name}"]
                 let ssInput = null;
@@ -5591,11 +5874,57 @@
                 };
 
                 const scoreSingleSelectOption = (candidateText) => {
-                    return Math.max(
+                    const base = Math.max(
                         scoreExactFirstOption(candidateText, searchTerm),
                         scoreExactFirstOption(candidateText, rawSearchTerm)
                     );
+                    // Degree options ("Bachelor's Degree") rarely match a stored degree
+                    // value ("Bachelor of Science") on raw text — scoreExactFirstOption tops
+                    // out around 20. Degree-aware scoring maps both to a degree level and
+                    // returns ~88 for a level match, so the poll loop settles on the right
+                    // option immediately instead of burning the full grace/poll window.
+                    if (isDegreeField) {
+                        return Math.max(
+                            base,
+                            scoreDegreeOption(candidateText, searchTerm),
+                            scoreDegreeOption(candidateText, rawSearchTerm)
+                        );
+                    }
+                    return base;
                 };
+
+                // Degree fast path: the degree prompt is a FIXED, short option list, not a
+                // remote search. So just open the dropdown, pick the matching level, close —
+                // no typing (which would filter the right option out) and no grace-window
+                // polling for "similar" remote results. Falls through to the typing path
+                // below only if the list never renders or holds no degree match.
+                if (isDegreeField) {
+                    clickLikeUser(ssInputContainer || ssWidget || ssInput);
+                    ssInput.focus({ preventScroll: true });
+                    if (ssSearchButton) clickLikeUser(ssSearchButton);
+
+                    const ranked = (await waitFor(() => {
+                        const opts = getSingleSelectOptions()
+                            .map((opt, idx) => ({ opt, idx, text: getWorkdayOptionLabel(opt).trim(), }))
+                            .map(o => ({ ...o, score: scoreDegreeOption(o.text, rawSearchTerm) }))
+                            .sort((a, b) => b.score - a.score || a.idx - b.idx);
+                        return opts.some(o => o.score >= 80) ? opts : null;
+                    }, { timeout: 1500 })) || [];
+
+                    const degreeBest = ranked.find(r => r.score >= 80);
+                    if (degreeBest) {
+                        clickLikeUser(degreeBest.opt);
+                        console.log(`[Platform] Degree [${field.name}]="${rawSearchTerm}" -> "${degreeBest.text}" (score ${degreeBest.score})`);
+                        ssInput.dispatchEvent(new FocusEvent('blur', { bubbles: true }));
+                        ssInput.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
+                        await dismissWorkdayDropdown(ssInput, document.querySelector('[data-automation-id="applyFlowFooter"]') || document.querySelector('main') || document.body);
+                        markFieldFilled(ssInput, 'platform', fieldTracker);
+                        return true;
+                    }
+                    // No degree match in the open list — clear any open state and let the
+                    // generic typing path try (handles non-standard degree enumerations).
+                    await dismissWorkdayDropdown(ssInput);
+                }
 
                 await dismissWorkdayDropdown(ssInput);
                 await typeIntoSearch();
@@ -5612,7 +5941,9 @@
                 // before settling (Workday/moniker prompts fetch results asynchronously, so
                 // the exact match often arrives after some similar ones). Only fall back to
                 // the best similar option after a grace window passes with no exact match.
-                const exactMin = isSchoolField ? 100 : 95;
+                // Degree level matches score 88 — treat that as "exact" so the loop
+                // settles on the first poll rather than waiting out the similar-match grace.
+                const exactMin = isSchoolField ? 100 : (isDegreeField ? 88 : 95);
                 const similarMin = isSchoolField ? 85 : 40;
                 const rankOptionsNow = () => getSingleSelectOptions()
                     .map((opt, idx) => {
@@ -5691,9 +6022,11 @@
                     ssInput.dispatchEvent(new InputEvent('input', { bubbles: true, cancelable: true, inputType: 'deleteContentBackward' }));
                     await new Promise(r => setTimeout(r, 300));
                     let allOpts = getSingleSelectOptions();
-                    for (let i = 0; i < 8 && allOpts.length === 0; i++) {
-                        await new Promise(r => setTimeout(r, 200));
-                        allOpts = getSingleSelectOptions();
+                    if (allOpts.length === 0) {
+                        allOpts = (await waitFor(() => {
+                            const found = getSingleSelectOptions();
+                            return found.length > 0 ? found : null;
+                        }, { timeout: 1600 })) || [];
                     }
                     const otherOpt = allOpts.find(o => /\bothers?\b/.test(getWorkdayOptionLabel(o).trim().toLowerCase()));
                     if (otherOpt) {
@@ -5804,43 +6137,39 @@
                 // Wait for AJAX debounce before polling (iCIMS typically debounces 300-500ms)
                 await new Promise(r => setTimeout(r, 1500));
 
-                // Poll for results (up to ~5 more seconds)
+                // Wait via MutationObserver for results to render (up to ~5s).
                 const searchArea = dropdownCtnr || container;
                 let matched = false;
-                for (let poll = 0; poll < 20; poll++) {
-                    await new Promise(r => setTimeout(r, 250));
+                const visibleOpts = (await waitFor(() => {
                     const options = searchArea.querySelectorAll('.dropdown-result[role="option"], .dropdown-results li[role="option"]');
-                    const visibleOpts = Array.from(options).filter(o => {
+                    const found = Array.from(options).filter(o => {
                         const t = o.textContent.trim().toLowerCase();
                         if (!t) return false;
-                        // Skip placeholder and status items
                         if (t.includes('no result') || t.includes('make a selection') ||
                             t.includes('type to search') || t.includes('loading') ||
                             t.includes('please select')) return false;
                         return true;
                     });
+                    return found.length > 0 ? found : null;
+                }, { root: searchArea, timeout: 5000 })) || [];
 
-                    if (visibleOpts.length > 0) {
-                        // Try exact / partial match first
-                        let bestOpt = null;
-                        for (const opt of visibleOpts) {
-                            const optText = opt.textContent.trim().toLowerCase();
-                            if (optText === strLower || optText.includes(strLower) || strLower.includes(optText)) {
-                                bestOpt = opt;
-                                break;
-                            }
+                if (visibleOpts.length > 0) {
+                    let bestOpt = null;
+                    for (const opt of visibleOpts) {
+                        const optText = opt.textContent.trim().toLowerCase();
+                        if (optText === strLower || optText.includes(strLower) || strLower.includes(optText)) {
+                            bestOpt = opt;
+                            break;
                         }
-                        // Fall back to first visible option
-                        if (!bestOpt) bestOpt = visibleOpts[0];
-
-                        bestOpt.scrollIntoView({ block: 'nearest' });
-                        bestOpt.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
-                        bestOpt.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
-                        bestOpt.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-                        console.log(`[Platform/iCIMS] Selected "${bestOpt.textContent.trim()}" for ${name}`);
-                        matched = true;
-                        break;
                     }
+                    if (!bestOpt) bestOpt = visibleOpts[0];
+
+                    bestOpt.scrollIntoView({ block: 'nearest' });
+                    bestOpt.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+                    bestOpt.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
+                    bestOpt.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+                    console.log(`[Platform/iCIMS] Selected "${bestOpt.textContent.trim()}" for ${name}`);
+                    matched = true;
                 }
 
                 if (!matched) {
@@ -6529,6 +6858,8 @@
                     throwIfStopRequested();
                     if (task.type === 'field') {
                         await processPlatformField(task.field, profileData, fieldTracker);
+                        // Note: country dropdown re-render is awaited inside fillElement,
+                        // so processPlatformField only returns after the address section settles.
                         const delay = task.field.type === 'icims-dropdown' ? 4000 : 20;
                         await new Promise(r => setTimeout(r, delay));
                     } else if (task.type === 'array') {
@@ -6585,25 +6916,41 @@
                                 def.name === 'educationstartdate' || def.name === 'educationenddate' ||
                                 def.name === 'firstyearattended' || def.name === 'lastyearattended';
                             if (isDateField) {
+                                // Support {year,month} object (education) or date string (work exp)
+                                let tdYear = null, tdMonth = null;
+                                if (value && typeof value === 'object' && 'year' in value) {
+                                    tdYear = value.year || null; tdMonth = value.month || null;
+                                } else {
+                                    const ds = String(value).trim();
+                                    const sm = ds.match(/^(\d{1,2})[\/\-](\d{4})$/);
+                                    if (sm) { tdMonth = sm[1]; tdYear = sm[2]; }
+                                    if (!tdYear) { const iso = ds.match(/^(\d{4})[\/\-](\d{1,2})$/); if (iso) { tdYear = iso[1]; tdMonth = iso[2]; } }
+                                    if (!tdYear) {
+                                        const mn = { jan:1,january:1,feb:2,february:2,mar:3,march:3,apr:4,april:4,may:5,jun:6,june:6,jul:7,july:7,aug:8,august:8,sep:9,september:9,oct:10,october:10,nov:11,november:11,dec:12,december:12 };
+                                        const wm = ds.match(/^([a-zA-Z]+)\s+(\d{4})$/);
+                                        if (wm) { const m = mn[wm[1].toLowerCase()]; if (m) { tdMonth = String(m); tdYear = wm[2]; } }
+                                    }
+                                    if (!tdYear) { const yo = ds.match(/^(\d{4})$/); if (yo) tdYear = yo[1]; }
+                                }
+
+                                let tdFilled = false;
                                 const dateWrapper = container.querySelector('[data-automation-id="dateInputWrapper"]');
                                 if (dateWrapper && isElementVisible(dateWrapper) && !fieldTracker.filledElements.has(dateWrapper)) {
-                                    let month = null, year = null;
-                                    const dateStr = String(value).trim();
-                                    const slashMatch = dateStr.match(/^(\d{1,2})[\/\-](\d{4})$/);
-                                    if (slashMatch) { month = slashMatch[1]; year = slashMatch[2]; }
-                                    if (!year) { const iso = dateStr.match(/^(\d{4})[\/\-](\d{1,2})$/); if (iso) { year = iso[1]; month = iso[2]; } }
-                                    if (!year) {
-                                        const mn = { jan:1,january:1,feb:2,february:2,mar:3,march:3,apr:4,april:4,may:5,jun:6,june:6,jul:7,july:7,aug:8,august:8,sep:9,september:9,oct:10,october:10,nov:11,november:11,dec:12,december:12 };
-                                        const wm = dateStr.match(/^([a-zA-Z]+)\s+(\d{4})$/);
-                                        if (wm) { const m = mn[wm[1].toLowerCase()]; if (m) { month = String(m); year = wm[2]; } }
-                                    }
-                                    if (!year) { const ym = dateStr.match(/^(\d{4})$/); if (ym) year = ym[1]; }
                                     const mi = dateWrapper.querySelector('[data-automation-id="dateSectionMonth-input"]');
                                     const yi = dateWrapper.querySelector('[data-automation-id="dateSectionYear-input"]');
-                                    let dateFilled = false;
-                                    if (mi && month) { await fillElement(mi, month); dateFilled = true; }
-                                    if (yi && year) { await fillElement(yi, year); dateFilled = true; }
-                                    if (dateFilled) { markFieldFilled(dateWrapper, 'platform', fieldTracker); markFieldFilled(container, 'platform', fieldTracker); }
+                                    if (mi && tdMonth) { await fillElement(mi, tdMonth); tdFilled = true; }
+                                    if (yi && tdYear) { await fillElement(yi, tdYear); tdFilled = true; }
+                                    if (tdFilled) { markFieldFilled(dateWrapper, 'platform', fieldTracker); markFieldFilled(container, 'platform', fieldTracker); }
+                                }
+                                // Fallback: year-only spinbutton without dateInputWrapper
+                                if (!tdFilled && tdYear) {
+                                    const inp = container.querySelector('input[role="spinbutton"], input');
+                                    if (inp && isElementVisible(inp) && !fieldTracker.filledElements.has(inp)) {
+                                        if (await fillElement(inp, tdYear)) {
+                                            markFieldFilled(inp, 'platform', fieldTracker);
+                                            markFieldFilled(container, 'platform', fieldTracker);
+                                        }
+                                    }
                                 }
                                 await new Promise(r => setTimeout(r, 60));
                                 continue;
