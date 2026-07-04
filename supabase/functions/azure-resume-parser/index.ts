@@ -104,8 +104,9 @@ RETURN THIS EXACT JSON STRUCTURE:
   "education": [
     {
       "degree": "Full degree name (Bachelor of Science, Master of Arts, etc)",
+      "fieldOfStudy": "Major / field of study / concentration (e.g. Computer Science, Mechanical Engineering). Extract from phrases like 'B.S. in Computer Science', 'Major: Economics', 'Bachelor of Arts, Psychology'. Use empty string if not mentioned",
       "school": "Full institution name",
-      "location": "City, State/Country if mentioned", 
+      "location": "City, State/Country if mentioned",
       "startDate": {"year": "Start year as YYYY (e.g. 2019)", "month": "Start month as MM (e.g. 09). Use empty string if not mentioned"},
       "endDate": {"year": "End/graduation year as YYYY (e.g. 2023)", "month": "Graduation month as MM (e.g. 05). Use empty string if not mentioned"},
       "gpa": "GPA if mentioned (e.g. 3.8)",

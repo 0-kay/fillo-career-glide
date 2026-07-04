@@ -108,7 +108,7 @@ const ProfileList = () => {
     const personalDetails = profile.personal_details || {};
     const workExp = profile.work_experience?.[0]; // Most recent experience
     
-    const fullName = personalDetails.full_name || personalDetails.fullName || profile.name || 'Unknown User';
+    const fullName = profile.resume_metadata?.profile_name || [profile.first_name, profile.last_name].filter(Boolean).join(' ') || personalDetails.full_name || personalDetails.fullName || 'Unknown User';
     
     return {
       name: fullName,
@@ -292,9 +292,9 @@ const ProfileList = () => {
                       return <Badge variant="destructive">Failed</Badge>;
                     }
                     return (
-                      <Badge 
-                        variant={profile.completeness >= 90 ? "default" : "secondary"}
-                        className={profile.completeness >= 90 ? "bg-green-100 text-green-800" : ""}
+                      <Badge
+                        variant={profile.completeness >= 75 ? "default" : "secondary"}
+                        className={profile.completeness >= 75 ? "bg-green-100 text-green-800" : ""}
                       >
                         {profile.completeness}% complete
                       </Badge>
@@ -319,13 +319,15 @@ const ProfileList = () => {
                 </div>
               </div>
               
-              {profile.completeness < 90 && (
-                <div className="mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
-                  <p className="text-sm text-yellow-800">
-                    Complete your profile to improve auto-fill accuracy.
-                    {!stats.hasPersonalDetails && " Missing personal details."}
-                    {stats.experienceCount === 0 && " Add work experience."}
-                    {stats.skillsCount === 0 && " Add technical skills."}
+              {profile.completeness < 75 && (
+                <div className="mt-4 p-3 bg-orange-50 border border-orange-200 rounded-lg">
+                  <p className="text-sm text-orange-800 font-medium">
+                    Profile must be at least 75% filled to be used for filling.
+                  </p>
+                  <p className="text-xs text-orange-700 mt-1">
+                    {!stats.hasPersonalDetails && "Add personal details. "}
+                    {stats.experienceCount === 0 && "Add work experience. "}
+                    {stats.skillsCount === 0 && "Add technical skills. "}
                   </p>
                 </div>
               )}

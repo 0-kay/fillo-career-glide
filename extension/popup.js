@@ -171,7 +171,13 @@ class FilloPopup {
         return;
       }
 
-      this.profiles = profiles;
+      const readyProfiles = profiles.filter((p) => (p.completeness || 0) >= 75);
+      if (readyProfiles.length === 0) {
+        this.showAuth("No profiles are ready. Complete a profile to at least 75% in your Fillo account.");
+        return;
+      }
+
+      this.profiles = readyProfiles;
       this.populateProfiles();
       this.showMain();
       this.hideStatus();
@@ -188,9 +194,10 @@ class FilloPopup {
       const opt = document.createElement("option");
       opt.value = profile.id;
       opt.textContent =
-          profile.name ||
-          profile.full_name ||
-          `${profile.personal_details?.first_name || ""} ${profile.personal_details?.last_name || ""}`.trim() ||
+          profile.resume_metadata?.profile_name ||
+          [profile.first_name, profile.last_name].filter(Boolean).join(" ") ||
+          profile.personal_details?.fullName ||
+          profile.personal_details?.full_name ||
           "Unnamed Profile";
       this.elements.profileSelect.appendChild(opt);
     });
@@ -212,10 +219,14 @@ class FilloPopup {
 
   updateProfilePreview(profile) {
     const details = profile.personal_details || {};
-    const profileName = profile.name || details.fullName || "Unknown Name";
-    const email = profile.email || details.email || details.contact_email || "No email provided";
-    const filledFields = [details.first_name, details.last_name, details.email, details.phone, details.address?.line1].filter(Boolean).length;
-    const completeness = Math.round((filledFields / 5) * 100);
+    const profileName =
+      profile.resume_metadata?.profile_name ||
+      [profile.first_name, profile.last_name].filter(Boolean).join(" ") ||
+      details.fullName ||
+      details.full_name ||
+      "Unknown Name";
+    const email = details.email || details.contact_email || "No email provided";
+    const completeness = profile.completeness || 0;
     this.elements.previewName.textContent = profileName;
     this.elements.previewEmail.textContent = email;
     this.elements.previewCompleteness.textContent = `${completeness}% complete`;
