@@ -20,7 +20,7 @@ serve(async (req: Request) => {
     }
 
     const variations: Record<number, string[]> = {};
-    (fields as FieldInput[]).forEach((f, i) => {
+    fields.forEach((f: Parameters<typeof getFieldVariationsForOneField>[0], i: number) => {
       variations[i] = getFieldVariationsForOneField(f, fieldVariations);
     });
 
