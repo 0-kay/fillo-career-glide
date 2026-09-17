@@ -1,193 +1,97 @@
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { readEnv } from "../_shared/typesafe/client.ts";
+import { fail, json, preflight } from "../_shared/typesafe/http.ts";
+import { triageMissedFields } from "../_shared/typesafe/missed.ts";
+import { systemOne } from "../_shared/typesafe/runtime.deno.ts";
 
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
-}
-
-serve(async (req) => {
-  if (req.method === 'OPTIONS') {
-    return new Response(null, { headers: corsHeaders })
-  }
+serve(async (req: Request) => {
+  if (req.method === "OPTIONS") return preflight();
 
   try {
     const supabaseClient = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
-      { global: { headers: { Authorization: req.headers.get('Authorization')! } } }
-    )
+      readEnv("SUPABASE_URL") ?? "",
+      readEnv("SUPABASE_SERVICE_ROLE_KEY") ?? "",
+      { global: { headers: { Authorization: req.headers.get("Authorization")! } } },
+    );
 
-    const { missedFields, profileId, profileData, pageUrl } = await req.json()
+    const { missedFields = [], profileId, profileData, pageUrl } = await req.json();
 
-    // Get user from token
-    const { data: { user }, error: userError } = await supabaseClient.auth.getUser()
-    if (userError || !user) throw new Error('Unauthorized')
+    const { data: { user }, error: userError } = await supabaseClient.auth.getUser();
+    if (userError || !user) throw new Error("Unauthorized");
 
-    console.log(`🧠 Analyzing ${missedFields.length} missed fields for user ${user.id}`)
-
-    const openaiApiKey = Deno.env.get('OPENAI_API_KEY')
-    if (!openaiApiKey) throw new Error('OpenAI API key not configured')
-
-    // Enhanced AI prompt for structured output
-    const prompt = `
-You are a career profile expert. Analyze the following fields that could NOT be filled automatically on a job application.
-
-FORM FIELDS MISSED:
-${missedFields.map((f: any) => `- Label: "${f.label}", Placeholder: "${f.placeholder}", Name: "${f.name}", Type: "${f.type}"`).join('\n')}
-
-CURRENT PROFILE DATA (EXCERPT):
-${JSON.stringify(profileData, null, 2).substring(0, 2000)}
-
-PAGE URL: ${pageUrl}
-
-TASK:
-Provide a structured analysis of what's missing. Return a JSON object with:
-1. category: one of ["education", "experience", "skills", "personal", "certifications", "other"]
-2. priority: one of ["high", "medium", "low"] based on how common/important this field is
-3. suggestion: concise text (max 2 sentences) on what to add
-4. targetPath: the JSON path in the profile where data should be added (e.g., "education_history[0].graduation_date")
-5. missingDataType: one of ["text", "date", "boolean", "array", "number"]
-6. exampleValue: a realistic example value for this field
-
-RESPONSE FORMAT (JSON only, no markdown):
-{
-  "category": "education",
-  "priority": "high",
-  "suggestion": "Add graduation date to your MIT Computer Science degree.",
-  "targetPath": "education_history[0].graduation_date",
-  "missingDataType": "date",
-  "exampleValue": "06/2020"
-}
-`
-
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${openaiApiKey}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        model: 'gpt-3.5-turbo',
-        messages: [{ role: 'user', content: prompt }],
-        max_tokens: 500,
-        temperature: 0.3
-      })
-    })
-
-    if (!response.ok) throw new Error(`OpenAI API error: ${response.status}`)
-
-    const aiData = await response.json()
-    let structuredSuggestion
-
-    try {
-      const content = aiData.choices[0].message.content.trim()
-      // Remove markdown code blocks if present
-      const jsonContent = content.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
-      structuredSuggestion = JSON.parse(jsonContent)
-    } catch (parseError) {
-      console.error('Failed to parse AI response:', aiData.choices[0].message.content)
-      // Fallback to basic structure
-      structuredSuggestion = {
-        category: 'other',
-        priority: 'medium',
-        suggestion: aiData.choices[0].message.content.trim(),
-        targetPath: null,
-        missingDataType: 'text',
-        exampleValue: null
-      }
+    if (!Array.isArray(missedFields) || missedFields.length === 0) {
+      return json({ success: true, isDuplicate: false, suggestion: null });
     }
 
-    // Create field signature for deduplication
-    const fieldSignature = `${structuredSuggestion.category}_${structuredSuggestion.targetPath || 'unknown'}`
+    console.log(`🧠 Triaging ${missedFields.length} missed fields for user ${user.id}`);
 
-    // Check for duplicates in last 7 days
-    const { data: existingSuggestions } = await supabaseClient
-      .from('missed_fields')
-      .select('id, status, created_at')
-      .eq('profile_id', profileId)
-      .eq('field_signature', fieldSignature)
-      .gte('created_at', new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString())
-      .order('created_at', { ascending: false })
-      .limit(1)
+    const { suggestion, model, usage } = await triageMissedFields(
+      systemOne,
+      missedFields,
+      profileData,
+    );
 
-    if (existingSuggestions && existingSuggestions.length > 0) {
-      const existing = existingSuggestions[0]
+    console.log("🧠 Triage result:", { suggestion, model, usage });
 
-      // If already resolved, don't create new suggestion
-      if (existing.status === 'resolved') {
-        console.log('✅ Similar suggestion already resolved, skipping')
-        return new Response(
-          JSON.stringify({
-            success: true,
-            isDuplicate: true,
-            message: 'Similar suggestion already resolved'
-          }),
-          { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 }
-        )
+    const fieldSignature = `${suggestion.category}_${suggestion.targetPath ?? "unknown"}`;
+
+    const { data: existing } = await supabaseClient
+      .from("missed_fields")
+      .select("id, status, created_at")
+      .eq("profile_id", profileId)
+      .eq("field_signature", fieldSignature)
+      .gte("created_at", new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString())
+      .order("created_at", { ascending: false })
+      .limit(1);
+
+    if (existing && existing.length > 0) {
+      const prior = existing[0];
+
+      if (prior.status === "resolved") {
+        console.log("✅ Similar suggestion already resolved, skipping");
+        return json({ success: true, isDuplicate: true, message: "Similar suggestion already resolved" });
       }
 
-      // If still pending, just update timestamp
-      if (existing.status === 'pending') {
+      if (prior.status === "pending") {
         await supabaseClient
-          .from('missed_fields')
+          .from("missed_fields")
           .update({ created_at: new Date().toISOString() })
-          .eq('id', existing.id)
-
-        console.log('🔄 Updated timestamp on existing pending suggestion')
-        return new Response(
-          JSON.stringify({
-            success: true,
-            isDuplicate: true,
-            updated: true
-          }),
-          { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 }
-        )
+          .eq("id", prior.id);
+        console.log("🔄 Updated timestamp on existing pending suggestion");
+        return json({ success: true, isDuplicate: true, updated: true });
       }
     }
 
-    // Store in database with enhanced data
-    const { error: dbError, data: insertedData } = await supabaseClient
-      .from('missed_fields')
+    const { error: dbError, data: inserted } = await supabaseClient
+      .from("missed_fields")
       .insert({
         user_id: user.id,
         profile_id: profileId,
         field_data: missedFields,
         page_url: pageUrl,
-        ai_suggestion: structuredSuggestion.suggestion,
-        status: 'pending',
-        field_category: structuredSuggestion.category,
-        priority: structuredSuggestion.priority,
+        ai_suggestion: suggestion.suggestion,
+        status: "pending",
+        field_category: suggestion.category,
+        priority: suggestion.priority,
         suggested_action: {
-          targetPath: structuredSuggestion.targetPath,
-          missingDataType: structuredSuggestion.missingDataType,
-          exampleValue: structuredSuggestion.exampleValue
+          targetPath: suggestion.targetPath,
+          missingDataType: suggestion.missingDataType,
+          exampleValue: suggestion.exampleValue,
+          confidence: suggestion.confidence,
         },
-        field_signature: fieldSignature
+        field_signature: fieldSignature,
       })
       .select()
-      .single()
+      .single();
 
-    if (dbError) throw dbError
+    if (dbError) throw dbError;
 
-    console.log('✅ Created new suggestion:', insertedData.id)
+    console.log("✅ Created new suggestion:", inserted.id);
 
-    return new Response(
-      JSON.stringify({
-        success: true,
-        suggestion: structuredSuggestion,
-        isDuplicate: false,
-        id: insertedData.id
-      }),
-      { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 }
-    )
-
+    return json({ success: true, suggestion, isDuplicate: false, id: inserted.id });
   } catch (error) {
-    console.error('❌ AI Missed Fields Analysis Error:', error)
-    return new Response(
-      JSON.stringify({ success: false, error: (error as any).message }),
-      { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 }
-    )
+    console.error("❌ AI Missed Fields Analysis Error:", error);
+    return fail(error);
   }
-})
+});

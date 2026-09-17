@@ -5,7 +5,7 @@ export interface OptionMatch {
   matchedOptionIndex: number | null;
   confidence: number;
   reasoning: string;
-  source: "exact" | "typesafe" | "none";
+  source: "exact" | "typesafe" | "openai" | "none";
 }
 
 const normalize = (s: unknown) =>
