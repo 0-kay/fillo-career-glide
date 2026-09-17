@@ -144,3 +144,20 @@ live("missed field triage", () => {
     expect(rank[common.suggestion.priority]).toBeGreaterThan(rank[rare.suggestion.priority]);
   });
 });
+
+live("recall under a large profile", () => {
+  it("still fills correctly when the profile dwarfs the option cap", async () => {
+    const padded = { ...profile } as Record<string, unknown>;
+    for (let i = 0; i < 160; i++) padded[`unrelated_${i}`] = `unrelated value ${i}`;
+
+    const out = await analyzeFields(systemOne, fields, padded);
+    const correct = fields.filter((f, i) => {
+      const want = expected[f.name as string];
+      const got = out.results[i];
+      return want === null ? !got.shouldFill : got.shouldFill && got.value === want;
+    }).length;
+
+    console.log({ pool: out.candidateCount, correct: `${correct}/${fields.length}`, usage: out.usage });
+    expect(correct / fields.length).toBeGreaterThanOrEqual(0.8);
+  });
+});

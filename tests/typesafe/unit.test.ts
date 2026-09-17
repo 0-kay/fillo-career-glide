@@ -96,6 +96,29 @@ describe("rankCandidates", () => {
     });
     expect(ranked[0].value).toContain("@");
   });
+
+  it("bridges form vocabulary to profile vocabulary", () => {
+    // `currentEmployer` shares no token with `work_experience[0].company`.
+    const ranked = rankCandidates(flattenProfile(profile), {
+      name: "currentEmployer",
+      label: "Current Employer",
+      type: "text",
+    });
+    expect(ranked.slice(0, 5).map((c) => c.value)).toContain("Stripe");
+  });
+
+  it("keeps real profile data ahead of short filler keys when scores tie", () => {
+    const padded = { ...profile } as Record<string, unknown>;
+    for (let i = 0; i < 160; i++) padded[`zz_${i}`] = `filler ${i}`;
+
+    const ranked = rankCandidates(flattenProfile(padded), {
+      name: "currentEmployer",
+      label: "Current Employer",
+      type: "text",
+    }).slice(0, 150);
+
+    expect(ranked.map((c) => c.value)).toContain("Stripe");
+  });
 });
 
 describe("toIsoDate", () => {

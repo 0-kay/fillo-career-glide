@@ -109,6 +109,48 @@ const STOP = new Set([
   "name", "text", "this", "and", "for", "with", "are", "was", "has",
 ]);
 
+/**
+ * Form vocabulary rarely matches profile vocabulary: a field called `currentEmployer`
+ * has no token in common with `work_experience[0].company`. Without these, the right
+ * candidate scores zero and can be pruned out of the shortlist entirely.
+ */
+const ALIASES: Record<string, string[]> = {
+  employer: ["company", "organization", "organisation", "work", "experience"],
+  company: ["employer", "organization", "work", "experience"],
+  title: ["job", "position", "role", "occupation"],
+  position: ["title", "job", "role"],
+  role: ["title", "job", "position"],
+  school: ["university", "college", "institution", "education"],
+  university: ["school", "college", "institution", "education"],
+  college: ["school", "university", "institution", "education"],
+  degree: ["education", "qualification"],
+  major: ["field", "study", "discipline", "education"],
+  grad: ["graduation", "education", "completion"],
+  graduation: ["grad", "education", "completion"],
+  zip: ["postal", "postcode", "address"],
+  postal: ["zip", "postcode", "address"],
+  mobile: ["phone", "cell", "telephone", "contact"],
+  cell: ["phone", "mobile", "telephone"],
+  phone: ["mobile", "cell", "telephone", "contact"],
+  street: ["address", "line"],
+  residence: ["address", "city", "state"],
+  salary: ["compensation", "pay", "desired"],
+  compensation: ["salary", "pay", "desired"],
+  linkedin: ["profile", "social", "url"],
+  relocate: ["relocation", "willing", "move"],
+  surname: ["last", "family"],
+  forename: ["first", "given"],
+};
+
+function expand(tokens: Iterable<string>): Set<string> {
+  const out = new Set<string>();
+  for (const t of tokens) {
+    out.add(t);
+    for (const alias of ALIASES[t] ?? []) out.add(alias);
+  }
+  return out;
+}
+
 function tokenize(s: unknown): string[] {
   return String(s ?? "")
     .replace(/([a-z])([A-Z])/g, "$1 $2")
@@ -136,28 +178,31 @@ export function rankCandidates(
   field: FieldLike,
   variations: string[] = [],
 ): Candidate[] {
-  const wanted = new Set([
+  const wanted = expand([
     ...tokenize(field.name),
     ...tokenize(field.id),
     ...tokenize(field.label),
     ...tokenize(field.placeholder),
     ...variations.flatMap(tokenize),
   ]);
+  const wantedList = [...wanted];
 
-  const scored = cands.map((c) => {
+  const scored = cands.map((c, order) => {
     const pathTokens = tokenize(c.path);
     let hits = 0;
     for (const t of pathTokens) {
       if (wanted.has(t)) hits += 2;
-      else if ([...wanted].some((w) => w.includes(t) || t.includes(w))) hits += 1;
+      else if (wantedList.some((w) => w.includes(t) || t.includes(w))) hits += 1;
     }
     if (field.type === "email" && c.value.includes("@")) hits += 3;
     if (field.type === "tel" && /\d{7,}/.test(c.value.replace(/\D/g, ""))) hits += 3;
     if (field.type === "url" && /^https?:\/\//i.test(c.value)) hits += 2;
-    return { c, hits };
+    return { c, hits, order };
   });
 
-  scored.sort((a, b) => b.hits - a.hits || a.c.path.length - b.c.path.length);
+  // Ties keep profile order. Sorting ties by path length let short junk keys
+  // displace real data like work_experience[0].company out of the shortlist.
+  scored.sort((a, b) => b.hits - a.hits || a.order - b.order);
   return scored.map((s) => s.c);
 }
 
@@ -180,7 +225,9 @@ export function dedupeByValue(cands: Candidate[]): Candidate[] {
   return [...seen.values()];
 }
 
-export const MAX_OPTIONS = 60;
+// Choice accepts up to 255 labels. Pruning is the only way to lose a correct answer
+// outright, so the cap stays well above realistic profile sizes and leaves headroom.
+export const MAX_OPTIONS = 150;
 
 /** Full pipeline: flatten, add derived, dedupe, then prune only if over the cap. */
 export function candidatesForField(
