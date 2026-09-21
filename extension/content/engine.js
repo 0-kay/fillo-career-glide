@@ -2029,6 +2029,8 @@
                 // earlier, so scan every option before settling for the best fuzzy score.
                 let fuzzyOption = null;
                 let fuzzyIdx = -1;
+                const optionPolarity = t => (/^(yes|no)\b/.exec(t) || [])[1] || null;
+                const answerPolarity = optionPolarity(strLower);
                 for (let idx = 0; idx < targetEl.options.length; idx++) {
                     const o = targetEl.options[idx];
                     const optText = o.textContent.trim().toLowerCase();
@@ -2039,8 +2041,10 @@
                         break; // Exact match found, stop looking
                     }
 
-                    // Fallback to semantic similarity if no exact match exists
-                    if (optText && strLower) {
+                    // Fallback to semantic similarity if no exact match exists. The scorer ignores
+                    // negations, so "No, I do not have a disability" looks nearly as close to
+                    // "Yes, I have a disability…" as to its own option; never cross Yes/No.
+                    if (optText && strLower && !(answerPolarity && optionPolarity(optText) && optionPolarity(optText) !== answerPolarity)) {
                         const score = calculateSemanticScore(strLower, optText);
                         // Require at least a ~40% token overlap threshold
                         if (score > bestMatchScore && score > 0.4) {
@@ -2053,6 +2057,17 @@
                 if (!matchedOption && fuzzyOption) {
                     matchedOption = fuzzyOption;
                     bestMatchIdx = fuzzyIdx;
+                }
+                // A Yes/No answer with exactly one Yes/No option of that polarity is unambiguous
+                // even when the option carries extra wording ("No, … and have not had one…").
+                if (!matchedOption && answerPolarity) {
+                    const same = Array.from(targetEl.options)
+                        .map((o, idx) => ({ o, idx }))
+                        .filter(x => optionPolarity(x.o.textContent.trim().toLowerCase()) === answerPolarity);
+                    if (same.length === 1) {
+                        matchedOption = same[0].o;
+                        bestMatchIdx = same[0].idx;
+                    }
                 }
 
                 // Degree-aware matching for degree <select> fields — maps a stored value like
@@ -2097,6 +2112,12 @@
                 const nativeSetter = Object.getOwnPropertyDescriptor(
                     Object.getPrototypeOf(targetEl), 'value'
                 )?.set;
+                if (!matchedOption) {
+                    // Writing an unmatched string leaves the <select> with nothing selected while
+                    // reporting success. Leave it untouched and say so.
+                    console.warn(`[Fillo] No <select> option matches "${strVal}" for ${targetEl.name || targetEl.id || 'select'}`);
+                    return false;
+                }
                 if (nativeSetter) {
                     const finalVal = matchedOption
                         ? (targetEl.options[bestMatchIdx]?.value ?? strVal)
