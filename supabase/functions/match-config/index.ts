@@ -1048,6 +1048,40 @@ const MATCH_CONFIG = {
           "profilePath": "personal_details.linkedin"
         }
       ]
+    },
+    "*.ashbyhq.com": {
+      "platform": "ashby",
+      "fields": [
+        {
+          "name": "_systemfield_name",
+          "label": "Name",
+          "type": "text",
+          "required": true,
+          "profilePath": "personal_details.fullName",
+          "selector": "#_systemfield_name"
+        },
+        {
+          "name": "_systemfield_email",
+          "label": "Email",
+          "type": "email",
+          "required": true,
+          "profilePath": "personal_details.email",
+          "selector": "#_systemfield_email"
+        },
+        {
+          "name": "phone",
+          "label": "Phone Number",
+          "type": "tel",
+          "profilePath": "personal_details.phone",
+          "selector": "input[type='tel']"
+        },
+        {
+          "name": "linkedin_profile",
+          "label": "LinkedIn Profile",
+          "type": "text",
+          "profilePath": "personal_details.linkedin"
+        }
+      ]
     }
   },
   "mapping": {

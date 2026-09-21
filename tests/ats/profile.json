@@ -62,24 +62,84 @@
     },
     "screening_answers": [
       {
-        "key": "disability_status",
-        "question": "Disability status",
-        "answer": "No, I do not have a disability and have not had one in the past",
-        "answerType": "select",
-        "enabled": true
-      },
-      {
         "key": "work_authorization",
-        "question": "Are you legally authorized to work in the country where this job is located?",
+        "question": "Are you authorized to work lawfully in the United States?",
         "answer": "Yes",
         "answerType": "yes_no",
+        "keywords": [
+          "authorized",
+          "authorization",
+          "lawfully",
+          "work",
+          "united states",
+          "u.s.",
+          "us"
+        ],
         "enabled": true
       },
       {
         "key": "sponsorship",
-        "question": "Will you now or in the future require company sponsorship to work?",
+        "question": "Do you now or in the future require visa sponsorship to maintain work authorization?",
         "answer": "No",
         "answerType": "yes_no",
+        "keywords": [
+          "visa",
+          "sponsorship",
+          "sponsor",
+          "immigration",
+          "h-1b",
+          "employment-based",
+          "require"
+        ],
+        "enabled": true
+      },
+      {
+        "key": "veteran",
+        "question": "Please select your protected veteran status.",
+        "answer": "I am not a protected veteran",
+        "answerType": "select",
+        "keywords": [
+          "veteran",
+          "protected veteran",
+          "not protected veteran",
+          "vevraa",
+          "disabled veteran",
+          "recently separated veteran",
+          "campaign badge",
+          "armed forces service medal",
+          "opt out"
+        ],
+        "enabled": true
+      },
+      {
+        "key": "disability_status",
+        "question": "Please check one of the boxes below:",
+        "answer": "No, I do not have a disability and have not had one in the past",
+        "answerType": "select",
+        "keywords": [
+          "disability",
+          "disability status",
+          "self identified disability",
+          "ofccp",
+          "please check one of the boxes below",
+          "do not want to answer"
+        ],
+        "enabled": true
+      },
+      {
+        "key": "gender",
+        "question": "Please select your gender.",
+        "answer": "Female",
+        "answerType": "text",
+        "keywords": [
+          "gender",
+          "male",
+          "female",
+          "not listed",
+          "opt out",
+          "eeo",
+          "demographic"
+        ],
         "enabled": true
       }
     ]

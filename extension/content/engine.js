@@ -1885,6 +1885,22 @@
         return ranked[0] || null;
     }
 
+    // The question a radio group answers ("Veteran Status"), as opposed to one option's text.
+    // getFieldLabel(radio) returns the option's own label, so a group was being matched on its
+    // first option ("Male", "I identify as one or more…") instead of on the question.
+    function getRadioGroupQuestion(radio) {
+        const fieldset = radio?.closest?.('fieldset, [role="radiogroup"], [role="group"]');
+        if (!fieldset) return '';
+        const inputIds = new Set(Array.from(fieldset.querySelectorAll('input')).map(i => i.id).filter(Boolean));
+        let text = fieldset.querySelector('legend')?.textContent;
+        if (!text) {
+            const label = Array.from(fieldset.querySelectorAll('label'))
+                .find(l => !l.querySelector('input') && !inputIds.has(l.getAttribute('for') || ''));
+            text = label?.textContent;
+        }
+        return String(text || '').replace(/\*/g, '').replace(/\s+/g, ' ').trim();
+    }
+
     function getRadioOptionText(radio) {
         if (!radio) return '';
         const label = getFieldLabel(radio);
@@ -6509,7 +6525,7 @@
                 id: el.id || '',
                 type: tag === 'button' ? 'dropdown' : (el.type || 'text'),
                 placeholder: el.placeholder || '',
-                label: getFieldLabel(el) || '',
+                label: (type === 'radio' ? getRadioGroupQuestion(el) : '') || getFieldLabel(el) || '',
                 className: el.className || '',
                 context: getElementContext(el),
                 required: el.required || el.hasAttribute('required'),
@@ -7132,7 +7148,30 @@
                 }
                 const unmatchedFields = buildAIBatchQueue(fieldTracker);
                 let sqFilled = 0;
-                
+
+                // Yes/No button pairs (Ashby): <button data-option="yes|no"> under a labelled field.
+                // These aren't inputs, so buildAIBatchQueue never sees them. Answer only from the
+                // user's saved answers, and skip a pair that already has a selection.
+                for (const yesBtn of Array.from(document.querySelectorAll('button[data-option="yes"]'))) {
+                    throwIfStopRequested();
+                    const group = yesBtn.parentElement;
+                    const noBtn = group?.querySelector('button[data-option="no"]');
+                    if (!noBtn || !isElementVisible(yesBtn)) continue;
+                    if (yesBtn.getAttribute('aria-pressed') === 'true' || noBtn.getAttribute('aria-pressed') === 'true') continue;
+                    const fieldRoot = group.closest('[data-field-path]') || group.parentElement;
+                    const ynQuestion = (fieldRoot?.querySelector('label')?.textContent || '').replace(/\s+/g, ' ').trim();
+                    if (ynQuestion.length < 4) continue;
+                    const ynMatch = matchQuestionToAnswer(ynQuestion, screeningAnswers, questionPatterns, 'radio', ['Yes', 'No']);
+                    const ynAnswer = String(ynMatch?.answer ?? '').trim().toLowerCase();
+                    const ynBtn = /^(yes|true)\b/.test(ynAnswer) ? yesBtn : /^(no|false)\b/.test(ynAnswer) ? noBtn : null;
+                    if (!ynBtn) continue;
+                    ynBtn.click();
+                    markFieldFilled(ynBtn, 'generic_screening', fieldTracker);
+                    sqFilled++;
+                    relayLog('info', `🎯 Yes/No buttons: "${ynQuestion.substring(0, 40)}..." → ${ynBtn.getAttribute('data-option')}`);
+                    await new Promise(r => setTimeout(r, 60));
+                }
+
                 for (const fieldInfo of unmatchedFields) {
                     throwIfStopRequested();
                     // Try to match using the field's label or context
