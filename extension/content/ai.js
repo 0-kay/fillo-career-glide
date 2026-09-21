@@ -3,6 +3,18 @@
   const { fetchWithTimeout, relayLog } = ns.utils;
   const { getRawMappingConfig, loadMapping } = ns.mapping;
 
+  // The edge functions verify the caller's Fillo session. The bundled anon key is only the
+  // gateway `apikey`; it is not accepted as a credential.
+  async function aiHeaders(){
+    const { FILLO_AUTH_TOKEN } = await chrome.storage.local.get('FILLO_AUTH_TOKEN');
+    if (!FILLO_AUTH_TOKEN) throw new Error('Not signed in to Fillo');
+    return {
+      'Content-Type': 'application/json',
+      'apikey': AI_CONFIG.supabaseKey,
+      'Authorization': `Bearer ${FILLO_AUTH_TOKEN}`
+    };
+  }
+
   ns.ai.analyzeBatchFieldsWithAI = async function(fields, profileData, mappingConfig){
     try{
       const fieldVariations = await getRawMappingConfig();
@@ -28,7 +40,7 @@
       relayLog('log', '🧠 Sending batch AI request...', { fields: fields.length });
       const r = await fetch(`${AI_CONFIG.supabaseUrl}/functions/v1/ai-batch-analysis`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${AI_CONFIG.supabaseKey}` },
+        headers: await aiHeaders(),
         body: JSON.stringify(payload)
       });
       if (!r.ok) throw new Error(`Batch AI HTTP ${r.status}: ${r.statusText}`);
@@ -83,7 +95,7 @@
         context: typeof fieldInfo.context === 'string' ? fieldInfo.context : JSON.stringify(fieldInfo.context || {})
       }, profileData, mappingConfig, fieldVariations };
       const r = await fetchWithTimeout(`${AI_CONFIG.supabaseUrl}/functions/v1/ai-field-analysis`, {
-        method:'POST', headers:{ 'Content-Type':'application/json', 'Authorization': `Bearer ${AI_CONFIG.supabaseKey}` }, body: JSON.stringify(payload)
+        method:'POST', headers:await aiHeaders(), body: JSON.stringify(payload)
       }, 10000);
       if (!r.ok) throw new Error(`AI HTTP ${r.status}: ${r.statusText}`);
       const data = await r.json();
@@ -98,7 +110,7 @@
       const payload = { targetValue, options: optionsArray };
       const r = await fetchWithTimeout(`${AI_CONFIG.supabaseUrl}/functions/v1/ai-match-option`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${AI_CONFIG.supabaseKey}` },
+        headers: await aiHeaders(),
         body: JSON.stringify(payload)
       }, 8000);
 
@@ -153,7 +165,7 @@
       } catch (_) {}
       const r = await fetchWithTimeout(`${AI_CONFIG.supabaseUrl}/functions/v1/ai-screening-answer`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${AI_CONFIG.supabaseKey}` },
+        headers: await aiHeaders(),
         body: JSON.stringify(payload)
       }, 15000);
       if (!r.ok) throw new Error(`AI Screening Batch HTTP ${r.status}`);

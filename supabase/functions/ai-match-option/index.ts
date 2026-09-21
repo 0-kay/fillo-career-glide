@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { resolveProvider, withComparison } from "../_shared/typesafe/client.ts";
+import { requireUser } from "../_shared/typesafe/auth.ts";
 import { fail, json, preflight } from "../_shared/typesafe/http.ts";
 import { legacyMatchOption } from "../_shared/typesafe/legacy.ts";
 import { matchOption, type OptionMatch } from "../_shared/typesafe/options.ts";
@@ -7,6 +8,9 @@ import { systemOne } from "../_shared/typesafe/runtime.deno.ts";
 
 serve(async (req: Request) => {
   if (req.method === "OPTIONS") return preflight();
+
+  const auth = await requireUser(req);
+  if (auth instanceof Response) return auth;
 
   try {
     const { targetValue, options = [] } = await req.json();

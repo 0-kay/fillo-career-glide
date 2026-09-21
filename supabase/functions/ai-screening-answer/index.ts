@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { resolveProvider } from "../_shared/typesafe/client.ts";
+import { requireUser } from "../_shared/typesafe/auth.ts";
 import { json, preflight } from "../_shared/typesafe/http.ts";
 import { legacyClassifyScreening } from "../_shared/typesafe/legacy.ts";
 import { systemOne } from "../_shared/typesafe/runtime.deno.ts";
@@ -213,6 +214,9 @@ function skipAnswer(index: number, questionText: string) {
 
 serve(async (req: any) => {
   if (req.method === "OPTIONS") return preflight();
+
+  const auth = await requireUser(req);
+  if (auth instanceof Response) return auth;
 
   try {
     const { questions: rawQuestions, profileData } = await req.json();

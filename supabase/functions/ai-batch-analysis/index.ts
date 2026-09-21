@@ -2,12 +2,16 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { getFieldVariationsForOneField } from "../_shared/field-variations.ts";
 import { resolveProvider, withComparison } from "../_shared/typesafe/client.ts";
 import { analyzeFields, type FieldInput, type FieldResult } from "../_shared/typesafe/fields.ts";
+import { requireUser } from "../_shared/typesafe/auth.ts";
 import { fail, json, preflight } from "../_shared/typesafe/http.ts";
 import { legacyAnalyzeFields } from "../_shared/typesafe/legacy.ts";
 import { systemOne } from "../_shared/typesafe/runtime.deno.ts";
 
 serve(async (req: Request) => {
   if (req.method === "OPTIONS") return preflight();
+
+  const auth = await requireUser(req);
+  if (auth instanceof Response) return auth;
 
   try {
     const { fields = [], profileData, fieldVariations = {} } = await req.json();

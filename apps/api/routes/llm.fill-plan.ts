@@ -6,9 +6,20 @@ import { systemOne } from '../../../supabase/functions/_shared/typesafe/runtime.
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY! })
 
-function verifyJwt(authHeader?: string): { id: string } | null {
-  // TODO: verify Supabase JWT properly; stub acceptable initially
-  return authHeader ? { id: 'fake-user' } : null
+/** Verifies the caller's Supabase session against the Auth server. Fails closed. */
+async function verifyJwt(authHeader?: string): Promise<{ id: string } | null> {
+  const url = process.env.SUPABASE_URL
+  const anonKey = process.env.SUPABASE_ANON_KEY
+  const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7).trim() : ''
+  if (!url || !anonKey || !token) return null
+  try {
+    const res = await fetch(`${url}/auth/v1/user`, { headers: { Authorization: `Bearer ${token}`, apikey: anonKey } })
+    if (!res.ok) return null
+    const user = await res.json()
+    return user?.id ? { id: user.id as string } : null
+  } catch {
+    return null
+  }
 }
 
 /**
@@ -20,7 +31,7 @@ function verifyJwt(authHeader?: string): { id: string } | null {
  */
 export async function fillPlan(req: Request, res: Response) {
   try {
-    const user = verifyJwt(req.headers.authorization)
+    const user = await verifyJwt(req.headers.authorization)
     if (!user) return res.status(401).end()
 
     const { pageCtx, profileId } = req.body || {}
