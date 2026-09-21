@@ -6654,7 +6654,7 @@
                 allowRefill: false,
                 // iCIMS revert guard: tracks element → intended value so we can re-fill reversions
                 filledValues: isICIMS ? new Map() : null,
-                strategyStats: { platform: 0, classifier: 0, generic: 0, detected: 0, generic_screening: 0 }
+                strategyStats: { platform: 0, classifier: 0, generic: 0, detected: 0, generic_screening: 0, ai: 0 }
             };
 
             // Step 0: If detected fields with profile mappings are available, use them first
@@ -7138,6 +7138,40 @@
                 }
             }
 
+            // Step 5.5: AI fallback. Runs only after every rule-based step, and only for
+            // fields still empty. The server returns a path into the user's own profile
+            // (never free text), so a value can only be one the profile contains.
+            if (AI_CONFIG.fallbackEnabled && ns.ai?.analyzeBatchFieldsWithAI) {
+                try {
+                    throwIfStopRequested();
+                    const AI_FALLBACK_MIN_CONFIDENCE = 70; // server scores 0-100
+                    const AI_FALLBACK_MAX_FIELDS = 40;
+                    const skipTypes = new Set(['file', 'password', 'hidden', 'submit', 'button', 'checkbox', 'radio']);
+                    const leftovers = buildAIBatchQueue(fieldTracker)
+                        .filter(f => !skipTypes.has(String(f.type).toLowerCase()))
+                        .slice(0, AI_FALLBACK_MAX_FIELDS);
+                    if (leftovers.length > 0) {
+                        const wire = leftovers.map(({element, ...info}) => info);
+                        const aiResults = await ns.ai.analyzeBatchFieldsWithAI(wire, profileData, mappingConfig);
+                        let aiFilled = 0;
+                        for (const r of aiResults) {
+                            throwIfStopRequested();
+                            const target = leftovers[r.fieldIndex]?.element;
+                            if (!target || !r.shouldFill || r.value == null || String(r.value).trim() === '') continue;
+                            if (!(r.confidence >= AI_FALLBACK_MIN_CONFIDENCE)) continue;
+                            if (await fillElement(target, r.value)) {
+                                markFieldFilled(target, 'ai', fieldTracker);
+                                aiFilled++;
+                            }
+                        }
+                        relayLog('info', `AI fallback filled ${aiFilled}/${leftovers.length} leftover fields`);
+                    }
+                } catch (e) {
+                    if (e?.message === 'FILLO_STOPPED') throw e;
+                    console.warn('[Fillo] AI fallback failed; continuing with rule-based results:', e);
+                }
+            }
+
             // Step 6: iCIMS revert guard — persistent watcher that re-fills any field iCIMS
             // overwrites after our fill. iCIMS parse XHR can return well after fill completes,
             // so a fixed-pass approach isn't enough — we poll for 15 seconds and re-fill on sight.
@@ -7180,6 +7214,7 @@
                                fieldTracker.strategyStats.classifier +
                                fieldTracker.strategyStats.generic +
                                fieldTracker.strategyStats.generic_screening +
+                               (fieldTracker.strategyStats.ai || 0) +
                                detectedFilled;
 
             // Step 8.5: iCIMS post-parse watcher.

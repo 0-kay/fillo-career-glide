@@ -62,11 +62,11 @@ export async function fillPlan(req: Request, res: Response) {
 
     const call = (step1.choices[0].message as any).tool_calls?.[0]
 
-    // ownership is enforced inside the RPCs
+    // The RPCs are service_role-only and scope by the user id verified above
     const profile = call?.function?.name === 'get_profile'
-      ? (await mcpRpc(profileId ? 'get_application_profile' : 'get_default_profile_for_user', {
-          profile_id: profileId, user_id: user.id
-        })).data
+      ? (await (profileId
+          ? mcpRpc('get_application_profile', { profile_id: profileId, user_id: user.id })
+          : mcpRpc('get_default_profile_for_user', { user_id: user.id }))).data
       : (await mcpRpc('get_default_profile_for_user', { user_id: user.id })).data
 
     const inputs: FieldInput[] = pageCtx.inputs.map((input: any) => ({
