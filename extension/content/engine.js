@@ -1982,7 +1982,9 @@
                         matches += 1;
                         oWords[exactIdx] = null;
                     } else {
-                        const partialIdx = oWords.findIndex(ow => ow && (ow.includes(tw) || tw.includes(ow)));
+                        // Prefix-only: "engineer"~"engineering" is a real match, but "male" inside
+                        // "female" (or "authorized" inside "unauthorized") is the opposite answer.
+                        const partialIdx = oWords.findIndex(ow => ow && (ow.startsWith(tw) || tw.startsWith(ow)));
                         if (partialIdx !== -1) {
                             matches += 0.5;
                             oWords[partialIdx] = null;
@@ -2023,7 +2025,11 @@
                 let bestMatchIdx = -1;
                 let bestMatchScore = 0; // Semantic score ranges from 0 to 1
 
-                for (let idx = 0; !matchedOption && idx < targetEl.options.length; idx++) {
+                // An exact match anywhere in the list beats any fuzzy candidate that appears
+                // earlier, so scan every option before settling for the best fuzzy score.
+                let fuzzyOption = null;
+                let fuzzyIdx = -1;
+                for (let idx = 0; idx < targetEl.options.length; idx++) {
                     const o = targetEl.options[idx];
                     const optText = o.textContent.trim().toLowerCase();
 
@@ -2033,16 +2039,20 @@
                         break; // Exact match found, stop looking
                     }
 
-                    // Fallback to semantic similarity if exact match fails
+                    // Fallback to semantic similarity if no exact match exists
                     if (optText && strLower) {
                         const score = calculateSemanticScore(strLower, optText);
                         // Require at least a ~40% token overlap threshold
                         if (score > bestMatchScore && score > 0.4) {
                             bestMatchScore = score;
-                            matchedOption = o;
-                            bestMatchIdx = idx;
+                            fuzzyOption = o;
+                            fuzzyIdx = idx;
                         }
                     }
+                }
+                if (!matchedOption && fuzzyOption) {
+                    matchedOption = fuzzyOption;
+                    bestMatchIdx = fuzzyIdx;
                 }
 
                 // Degree-aware matching for degree <select> fields — maps a stored value like
@@ -2823,9 +2833,15 @@
 
         if (mappingName && [field.name, field.id, field.automationId.replace(/^formField-/, ''), field.fkitId].some(v => normalizeFieldText(v) === mappingName)) score += 35;
         if (mappingLabel && normalizeFieldText(field.label) === mappingLabel) score += 30;
-        if (mappingKey && fieldText.includes(mappingKey)) score += 15;
-        if (mappingName && fieldText.includes(mappingName)) score += 12;
-        if (mappingLabel && mappingLabel.length > 3 && fieldText.includes(mappingLabel)) score += 12;
+        // A long label is a question or instruction, not a field name. Words like "country"
+        // inside "…require sponsorship to work in the country where…" must not select the
+        // Country mapping, so substring matching only applies to short labels. Exact-label
+        // matches above and the screening `patterns` below are unaffected.
+        const labelWordCount = normalizeFieldText(field.label || '').split(' ').filter(Boolean).length;
+        const containText = labelWordCount > 8 ? '' : fieldText;
+        if (mappingKey && containText.includes(mappingKey)) score += 15;
+        if (mappingName && containText.includes(mappingName)) score += 12;
+        if (mappingLabel && mappingLabel.length > 3 && containText.includes(mappingLabel)) score += 12;
 
         for (const pattern of mapping.patterns || []) {
             const normalizedPattern = normalizeFieldText(pattern);
@@ -3434,6 +3450,16 @@
     function getProfileValueForPath(profileData, path) {
         const keys = Array.isArray(path) ? path : String(path || '').split('.');
         if (keys.length === 1 && keys[0] === '__today') return new Date();
+
+        // Virtual path for "current company" style fields. It can't be written as
+        // work_experience.0.company because work_experience.* paths are routed to the
+        // repeated-section filler, not to plain inputs.
+        if (keys.length === 1 && keys[0] === '__current_company') {
+            const jobs = Array.isArray(profileData?.work_experience) ? profileData.work_experience : [];
+            const isCurrent = j => j?.is_current === true || /^(present|current|now)$/i.test(String(j?.end_date || '').trim());
+            const job = jobs.find(isCurrent) || jobs[0];
+            return job?.company || job?.employer || job?.company_name || null;
+        }
 
         // Name paths: prefer personal_details (the applicant's real name) over the
         // top-level first_name/last_name columns, which can hold a stale profile

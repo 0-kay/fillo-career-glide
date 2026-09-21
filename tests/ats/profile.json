@@ -19,13 +19,69 @@
       "country": "United States of America"
     }
   },
-  "technical_skills": ["TypeScript", "Go", "PostgreSQL", "Kubernetes", "React"],
+  "technical_skills": [
+    "TypeScript",
+    "Go",
+    "PostgreSQL",
+    "Kubernetes",
+    "React"
+  ],
   "education_history": [
-    { "school": "Massachusetts Institute of Technology", "degree": "Bachelor of Science", "field_of_study": "Computer Science", "gpa": "3.8", "graduation_date": "06/2018" }
+    {
+      "school": "Massachusetts Institute of Technology",
+      "degree": "Bachelor of Science",
+      "field_of_study": "Computer Science",
+      "gpa": "3.8",
+      "graduation_date": "06/2018"
+    }
   ],
   "work_experience": [
-    { "company": "Stripe", "job_title": "Senior Software Engineer", "start_date": "03/2021", "end_date": "", "is_current": true, "location": "San Francisco, CA", "description": "Led payments reliability work." },
-    { "company": "Airbnb", "job_title": "Software Engineer", "start_date": "07/2018", "end_date": "02/2021", "is_current": false, "location": "San Francisco, CA", "description": "Built host onboarding flows." }
+    {
+      "company": "Stripe",
+      "job_title": "Senior Software Engineer",
+      "start_date": "03/2021",
+      "end_date": "",
+      "is_current": true,
+      "location": "San Francisco, CA",
+      "description": "Led payments reliability work."
+    },
+    {
+      "company": "Airbnb",
+      "job_title": "Software Engineer",
+      "start_date": "07/2018",
+      "end_date": "02/2021",
+      "is_current": false,
+      "location": "San Francisco, CA",
+      "description": "Built host onboarding flows."
+    }
   ],
-  "job_preferences": { "eeo": { "gender": "Female", "disability_status": "No, I do not have a disability" } }
+  "job_preferences": {
+    "eeo": {
+      "gender": "Female",
+      "disability_status": "No, I do not have a disability"
+    },
+    "screening_answers": [
+      {
+        "key": "disability_status",
+        "question": "Disability status",
+        "answer": "No, I do not have a disability and have not had one in the past",
+        "answerType": "select",
+        "enabled": true
+      },
+      {
+        "key": "work_authorization",
+        "question": "Are you legally authorized to work in the country where this job is located?",
+        "answer": "Yes",
+        "answerType": "yes_no",
+        "enabled": true
+      },
+      {
+        "key": "sponsorship",
+        "question": "Will you now or in the future require company sponsorship to work?",
+        "answer": "No",
+        "answerType": "yes_no",
+        "enabled": true
+      }
+    ]
+  }
 }
