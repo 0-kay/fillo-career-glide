@@ -1,0 +1,109 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Fillo ATS harness</title>
+<style>
+  body { font: 14px system-ui, sans-serif; margin: 0; display: grid; grid-template-columns: 1fr 420px; }
+  #fixture { padding: 16px; max-width: 760px; }
+  #panel { position: sticky; top: 0; height: 100vh; overflow: auto; border-left: 1px solid #ccc; padding: 12px; box-sizing: border-box; background: #fafafa; }
+  input, select, textarea { margin: 2px 0; }
+  pre { white-space: pre-wrap; font-size: 12px; }
+</style>
+</head>
+<body>
+<main id="fixture"></main>
+<aside id="panel"><b>Fillo ATS harness</b><pre id="report">loading…</pre></aside>
+<script>
+// Runs the real extension content scripts against a saved application form, in a real
+// browser (so the engine's visibility/layout checks behave). No extension install needed.
+//   ?fixture=lever            fixture file under fixtures/
+//   &platform=workday         optional: pin the platform (the page host is localhost)
+//   &auto=1                   run the fill as soon as the page is ready
+const q = new URLSearchParams(location.search);
+const fixture = q.get('fixture') || 'lever';
+const pinnedPlatform = q.get('platform') || null;
+const $report = document.getElementById('report');
+const log = (m) => { $report.textContent += '\n' + m; };
+
+const store = {};
+window.chrome = {
+  runtime: { id: 'harness', getManifest: () => ({ version: '0.0.0-harness' }), getURL: (p) => p, onMessage: { addListener() {} }, sendMessage: () => Promise.resolve({}), lastError: null },
+  storage: { local: {
+    get: async (k) => (typeof k === 'string' ? { [k]: store[k] } : {}),
+    set: async (o) => { Object.assign(store, o); },
+    remove: async (k) => { delete store[k]; },
+  } },
+};
+
+// Serve the production match config instead of calling Supabase.
+const realFetch = window.fetch.bind(window);
+window.fetch = async (url, opts) => {
+  if (String(url).includes('/functions/v1/match-config')) return realFetch('generated/match-config.json');
+  if (String(url).includes('/functions/v1/ai-')) return new Response(JSON.stringify({ success: false }), { status: 401 });
+  return realFetch(url, opts);
+};
+
+const SCRIPTS = ['namespace', 'config', 'utils', 'domain-detector', 'mapping', 'ai', 'planner', 'engine'];
+const loadScript = (src) => new Promise((res, rej) => {
+  const s = document.createElement('script'); s.src = src; s.onload = res; s.onerror = () => rej(new Error('failed ' + src));
+  document.head.appendChild(s);
+});
+
+function labelFor(el) {
+  const byFor = el.id && document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
+  const txt = (byFor?.textContent || el.closest('label')?.textContent ||
+    el.closest('li, .application-question, .field, .application-field, div')?.textContent || '');
+  return txt.replace(/\s+/g, ' ').trim().slice(0, 60);
+}
+
+function snapshot() {
+  const rows = [];
+  const seenGroups = new Set();
+  for (const el of document.querySelectorAll('#fixture input, #fixture select, #fixture textarea')) {
+    const type = (el.type || el.tagName).toLowerCase();
+    if (type === 'hidden' || type === 'submit' || type === 'button') continue;
+    if (type === 'radio' || type === 'checkbox') {
+      const key = type + ':' + (el.name || el.id);
+      if (seenGroups.has(key)) continue; seenGroups.add(key);
+      const group = el.name ? [...document.querySelectorAll(`#fixture input[name="${CSS.escape(el.name)}"]`)] : [el];
+      const on = group.filter((g) => g.checked).map((g) => g.value);
+      rows.push({ key: el.name || el.id, type, label: labelFor(el), value: on.join(', '), filled: on.length > 0 });
+      continue;
+    }
+    let value = el.value || '';
+    if (el.tagName === 'SELECT') value = el.selectedIndex > 0 ? el.options[el.selectedIndex].text : '';
+    rows.push({ key: el.name || el.id, type, label: labelFor(el), value, filled: value.trim() !== '' && type !== 'file' });
+  }
+  return rows;
+}
+
+async function runFill() {
+  const profile = await (await realFetch('profile.json')).json();
+  const ns = window.__Fillo;
+  if (pinnedPlatform) ns.domainDetector.detectPlatform = async () => pinnedPlatform;
+  const t0 = performance.now();
+  let result, error = null;
+  try { result = await ns.engine.handleFillForm(profile, false); } catch (e) { error = String(e && e.message || e); }
+  const rows = snapshot();
+  const filled = rows.filter((r) => r.filled);
+  window.__result = { fixture, platform: pinnedPlatform, ms: Math.round(performance.now() - t0), error, result, total: rows.length, filled: filled.length, rows };
+  $report.textContent = `${fixture} (platform=${pinnedPlatform || 'none'}): ${filled.length}/${rows.length} filled in ${window.__result.ms}ms` +
+    (error ? `\nERROR: ${error}` : '') + '\n\n' +
+    rows.map((r) => `${r.filled ? '✔' : '·'} [${r.type}] ${r.key} — ${r.label}${r.filled ? ' → ' + r.value : ''}`).join('\n');
+  return window.__result;
+}
+window.runFill = runFill;
+
+(async () => {
+  try {
+    document.getElementById('fixture').innerHTML = await (await realFetch(`fixtures/${fixture}.html`)).text();
+    for (const s of SCRIPTS) await loadScript(`../../extension/content/${s}.js`);
+    $report.textContent = 'ready';
+    window.__ready = true;
+    if (q.get('auto')) await runFill();
+  } catch (e) { $report.textContent = 'harness error: ' + e.message; }
+})();
+</script>
+</body>
+</html>

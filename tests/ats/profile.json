@@ -1,0 +1,31 @@
+{
+  "first_name": "Amara",
+  "middle_name": "",
+  "last_name": "Okonkwo",
+  "personal_details": {
+    "fullName": "Amara Okonkwo",
+    "email": "amara.okonkwo@example.com",
+    "phone": "4155550142",
+    "countryPhoneCode": "United States of America (+1)",
+    "phoneType": "Mobile",
+    "linkedin": "https://linkedin.com/in/amaraokonkwo",
+    "website": "https://amara.dev",
+    "address": {
+      "line1": "1200 Market Street",
+      "line2": "Apt 8B",
+      "city": "San Francisco",
+      "state": "California",
+      "postalCode": "94102",
+      "country": "United States of America"
+    }
+  },
+  "technical_skills": ["TypeScript", "Go", "PostgreSQL", "Kubernetes", "React"],
+  "education_history": [
+    { "school": "Massachusetts Institute of Technology", "degree": "Bachelor of Science", "field_of_study": "Computer Science", "gpa": "3.8", "graduation_date": "06/2018" }
+  ],
+  "work_experience": [
+    { "company": "Stripe", "job_title": "Senior Software Engineer", "start_date": "03/2021", "end_date": "", "is_current": true, "location": "San Francisco, CA", "description": "Led payments reliability work." },
+    { "company": "Airbnb", "job_title": "Software Engineer", "start_date": "07/2018", "end_date": "02/2021", "is_current": false, "location": "San Francisco, CA", "description": "Built host onboarding flows." }
+  ],
+  "job_preferences": { "eeo": { "gender": "Female", "disability_status": "No, I do not have a disability" } }
+}
