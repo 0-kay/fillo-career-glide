@@ -134,23 +134,41 @@ export type Database = {
       profiles: {
         Row: {
           created_at: string | null
+          current_period_end: string | null
           email: string | null
           full_name: string | null
           id: string
+          plan: string
+          price_interval: string | null
+          stripe_customer_id: string | null
+          stripe_subscription_id: string | null
+          subscription_status: string
           updated_at: string | null
         }
         Insert: {
           created_at?: string | null
+          current_period_end?: string | null
           email?: string | null
           full_name?: string | null
           id: string
+          plan?: string
+          price_interval?: string | null
+          stripe_customer_id?: string | null
+          stripe_subscription_id?: string | null
+          subscription_status?: string
           updated_at?: string | null
         }
         Update: {
           created_at?: string | null
+          current_period_end?: string | null
           email?: string | null
           full_name?: string | null
           id?: string
+          plan?: string
+          price_interval?: string | null
+          stripe_customer_id?: string | null
+          stripe_subscription_id?: string | null
+          subscription_status?: string
           updated_at?: string | null
         }
         Relationships: []
@@ -160,7 +178,25 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      can_run_fill: {
+        Args: Record<PropertyKey, never>
+        Returns: boolean
+      }
+      get_fill_usage: {
+        Args: Record<PropertyKey, never>
+        Returns: {
+          used: number
+          cap: number | null
+        }[]
+      }
+      log_fill_usage: {
+        Args: Record<PropertyKey, never>
+        Returns: undefined
+      }
+      max_profiles_allowed: {
+        Args: Record<PropertyKey, never>
+        Returns: number | null
+      }
     }
     Enums: {
       [_ in never]: never

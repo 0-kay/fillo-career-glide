@@ -396,7 +396,8 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
       const initialResult = await createProfile(skeletonProfile);
       
       if (initialResult.error) {
-        throw new Error('Failed to start resume processing');
+        const dbMessage = (initialResult.error as { message?: string })?.message;
+        throw new Error(dbMessage || 'Failed to start resume processing');
       }
 
       const profileId = initialResult.data?.id;
