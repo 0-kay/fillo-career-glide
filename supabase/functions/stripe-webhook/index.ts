@@ -26,14 +26,18 @@ serve(async (req: Request) => {
   }
 
   const body = await req.text();
-  const stripe = getStripe();
 
+  let stripe: ReturnType<typeof getStripe>;
   let event: Stripe.Event;
   try {
+    // getStripe() throws if STRIPE_SECRET_KEY isn't set yet — treat that the same as
+    // a bad signature below rather than letting it escape as an unhandled 500 with no
+    // useful body (confirmed live: that's exactly what happens without this try).
+    stripe = getStripe();
     // constructEventAsync (not the sync constructEvent) — Deno has no Node crypto module.
     event = await stripe.webhooks.constructEventAsync(body, signature, secret);
   } catch (err) {
-    console.error("stripe-webhook: bad signature", err);
+    console.error("stripe-webhook: bad signature or not configured", err);
     return new Response("Invalid signature", { status: 400 });
   }
 

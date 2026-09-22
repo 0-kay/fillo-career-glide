@@ -17,14 +17,20 @@ alter table public.profiles
 
 -- "Users can update their own profile" (existing policy) is row-level only — it does
 -- not stop a signed-in user from updating their OWN plan/subscription columns directly
--- via the client SDK, which would let them grant themselves Pro for free. Revoke
--- column-level UPDATE on the billing columns from authenticated; only the stripe-*
--- edge functions (via the service-role key, which bypasses grants and RLS) may write
--- them. full_name/email and other existing columns are unaffected.
-revoke update (
-  stripe_customer_id, stripe_subscription_id, plan, subscription_status,
-  price_interval, current_period_end
-) on public.profiles from authenticated;
+-- via the client SDK, which would let them grant themselves Pro for free.
+--
+-- A column-level REVOKE alone does NOT achieve this: Supabase's default setup already
+-- grants table-wide UPDATE to `authenticated`, and Postgres checks column access via
+-- EITHER the table-wide grant OR a column grant — revoking a column grant that was
+-- never separately made has no effect while the table-wide grant still covers it
+-- (confirmed live: authenticated could still update `plan` after a column-only
+-- revoke). The only way to actually restrict specific columns is to revoke the
+-- table-wide grant entirely and re-grant UPDATE on just the allowed columns.
+--
+-- Only the stripe-* edge functions (via the service-role key, which bypasses grants
+-- and RLS entirely) may write the billing columns.
+revoke update on public.profiles from authenticated;
+grant update (full_name, email, updated_at) on public.profiles to authenticated;
 
 -- One row per completed autofill run, used only to count usage for the free-tier quota.
 create table if not exists public.fill_usage_events (
