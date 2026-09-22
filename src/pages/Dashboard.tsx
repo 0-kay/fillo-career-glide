@@ -130,7 +130,7 @@ const Dashboard = () => {
                   {stats.completeProfiles} fully complete
                 </p>
               </div>
-              <FileText className="h-8 w-8 text-blue-600" />
+              <FileText className="h-8 w-8 text-brand" />
             </div>
           </Card>
           

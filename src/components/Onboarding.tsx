@@ -66,14 +66,14 @@ const Onboarding = ({ onComplete }: OnboardingProps) => {
           {currentStep === 1 && (
             <div className="text-center">
               <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-6">
-                <Upload className="h-8 w-8 text-blue-600" />
+                <Upload className="h-8 w-8 text-brand" />
               </div>
               <h3 className="text-2xl font-bold text-gray-900 mb-4">Welcome to Fillo!</h3>
               <p className="text-gray-600 mb-8 max-w-2xl mx-auto">
                 Let's get you set up with your first application profile. We'll start by uploading your resume 
                 and parsing your information automatically.
               </p>
-              <Button onClick={() => setCurrentStep(2)} className="bg-blue-600 hover:bg-blue-700">
+              <Button onClick={() => setCurrentStep(2)} className="bg-brand hover:bg-brand-dark">
                 Get Started
                 <ArrowRight className="ml-2 h-4 w-4" />
               </Button>
@@ -94,7 +94,7 @@ const Onboarding = ({ onComplete }: OnboardingProps) => {
                 Your resume has been parsed and your application profile is ready to use. You can now start 
                 auto-filling job applications or create additional profiles for different roles.
               </p>
-              <Button onClick={handleComplete} className="bg-blue-600 hover:bg-blue-700">
+              <Button onClick={handleComplete} className="bg-brand hover:bg-brand-dark">
                 Go to Dashboard
                 <ArrowRight className="ml-2 h-4 w-4" />
               </Button>

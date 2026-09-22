@@ -124,7 +124,7 @@ const Settings = () => {
           {/* Account Settings */}
           <Card className="p-6">
             <div className="flex items-center space-x-3 mb-6">
-              <User className="h-5 w-5 text-blue-600" />
+              <User className="h-5 w-5 text-brand" />
               <h3 className="text-lg font-semibold text-gray-900">Account Settings</h3>
             </div>
 
@@ -152,7 +152,7 @@ const Settings = () => {
 
             <div className="mt-6">
               <Button
-                className="bg-blue-600 hover:bg-blue-700"
+                className="bg-brand hover:bg-brand-dark"
                 onClick={handleSaveAccount}
                 disabled={savingAccount || !user}
               >
@@ -165,7 +165,7 @@ const Settings = () => {
           {/* Notification Settings */}
           <Card className="p-6">
             <div className="flex items-center space-x-3 mb-6">
-              <Bell className="h-5 w-5 text-blue-600" />
+              <Bell className="h-5 w-5 text-brand" />
               <h3 className="text-lg font-semibold text-gray-900">Notifications</h3>
               <span className="text-xs font-medium text-gray-400 uppercase tracking-wide">Coming soon</span>
             </div>
@@ -191,7 +191,7 @@ const Settings = () => {
           {/* Extension Settings */}
           <Card className="p-6">
             <div className="flex items-center space-x-3 mb-6">
-              <Chrome className="h-5 w-5 text-blue-600" />
+              <Chrome className="h-5 w-5 text-brand" />
               <h3 className="text-lg font-semibold text-gray-900">Extension Settings</h3>
               <span className="text-xs font-medium text-gray-400 uppercase tracking-wide">Coming soon</span>
             </div>
@@ -217,7 +217,7 @@ const Settings = () => {
           {/* Privacy & Security */}
           <Card className="p-6">
             <div className="flex items-center space-x-3 mb-6">
-              <Shield className="h-5 w-5 text-blue-600" />
+              <Shield className="h-5 w-5 text-brand" />
               <h3 className="text-lg font-semibold text-gray-900">Privacy & Security</h3>
             </div>
 

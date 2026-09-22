@@ -259,7 +259,7 @@ const Auth = () => {
               <div className="text-right">
                 <button
                   type="button"
-                  className="text-sm text-blue-600 hover:text-blue-700 hover:underline"
+                  className="text-sm text-brand hover:text-brand-dark hover:underline"
                   disabled={loading}
                 >
                   Forgot password?
@@ -270,7 +270,7 @@ const Auth = () => {
             {/* Submit Button */}
             <Button 
               type="submit" 
-              className="w-full h-12 bg-blue-600 hover:bg-blue-700"
+              className="w-full h-12 bg-brand hover:bg-brand-dark"
               disabled={loading}
             >
               {loading ? 'Loading...' : (isSignUp ? 'Create Account' : 'Sign In')}
@@ -283,7 +283,7 @@ const Auth = () => {
               {isSignUp ? 'Already have an account?' : "Don't have an account?"}{' '}
               <button
                 onClick={() => setIsSignUp(!isSignUp)}
-                className="text-blue-600 hover:text-blue-700 hover:underline font-medium"
+                className="text-brand hover:text-brand-dark hover:underline font-medium"
                 disabled={loading}
               >
                 {isSignUp ? 'Sign in' : 'Sign up'}
@@ -296,9 +296,9 @@ const Auth = () => {
             <div className="mt-6 text-center">
               <p className="text-xs text-gray-500">
                 By creating an account, you agree to our{' '}
-                <a href="#" className="text-blue-600 hover:underline">Terms of Service</a>{' '}
+                <a href="#" className="text-brand hover:underline">Terms of Service</a>{' '}
                 and{' '}
-                <a href="#" className="text-blue-600 hover:underline">Privacy Policy</a>
+                <a href="#" className="text-brand hover:underline">Privacy Policy</a>
               </p>
             </div>
           )}

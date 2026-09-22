@@ -151,7 +151,7 @@ const ProfileList = () => {
         <p className="text-gray-600 mb-4">
           Create your first application profile to get started with auto-filling job applications.
         </p>
-        <Button onClick={() => setShowUpload(true)} className="bg-blue-600 hover:bg-blue-700">
+        <Button onClick={() => setShowUpload(true)} className="bg-brand hover:bg-brand-dark">
           <Plus className="h-4 w-4 mr-2" />
           Upload Resume
         </Button>
@@ -164,7 +164,7 @@ const ProfileList = () => {
       <div className="space-y-4">
         <div className="flex justify-between items-center">
           <h2 className="text-xl font-semibold text-gray-900">Your Profiles</h2>
-          <Button onClick={() => setShowUpload(true)} className="bg-blue-600 hover:bg-blue-700">
+          <Button onClick={() => setShowUpload(true)} className="bg-brand hover:bg-brand-dark">
             <Plus className="h-4 w-4 mr-2" />
             Upload Resume
           </Button>
@@ -179,7 +179,7 @@ const ProfileList = () => {
               <div className="flex items-start justify-between mb-4">
                 <div className="flex items-start space-x-4 flex-1">
                   <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center flex-shrink-0">
-                    <User className="h-6 w-6 text-blue-600" />
+                    <User className="h-6 w-6 text-brand" />
                   </div>
                   <div className="flex-1 min-w-0">
                     <h3 className="font-semibold text-gray-900 truncate">{summary.name}</h3>
