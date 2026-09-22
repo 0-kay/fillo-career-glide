@@ -1,162 +1,48 @@
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { getFieldVariationsForOneField } from '../_shared/field-variations.ts'
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { getFieldVariationsForOneField } from "../_shared/field-variations.ts";
+import { resolveProvider } from "../_shared/typesafe/client.ts";
+import { analyzeSingleField } from "../_shared/typesafe/fields.ts";
+import { requireUser } from "../_shared/typesafe/auth.ts";
+import { fail, json, preflight } from "../_shared/typesafe/http.ts";
+import { legacyAnalyzeFields } from "../_shared/typesafe/legacy.ts";
+import { systemOne } from "../_shared/typesafe/runtime.deno.ts";
 
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
-}
+serve(async (req: Request) => {
+  if (req.method === "OPTIONS") return preflight();
 
-serve(async (req) => {
-  // Handle CORS preflight requests
-  if (req.method === 'OPTIONS') {
-    return new Response(null, { headers: corsHeaders })
-  }
+  const auth = await requireUser(req);
+  if (auth instanceof Response) return auth;
 
   try {
-    const { fieldInfo, profileData, mappingConfig = [], fieldVariations = {} } = await req.json()
-    
-    console.log('🧠 Enhanced AI Field Analysis Request:', { 
-      fieldInfo: fieldInfo.name, 
-      mappingCount: mappingConfig.length,
-      variationKeys: Object.keys(fieldVariations)
-    })
-    
-    // Get OpenAI API key from environment
-    const openaiApiKey = Deno.env.get('OPENAI_API_KEY')
-    if (!openaiApiKey) {
-      throw new Error('OpenAI API key not configured')
+    const { fieldInfo, profileData, fieldVariations = {} } = await req.json();
+    const provider = resolveProvider();
+
+    console.log("🧠 Field analysis:", { field: fieldInfo?.name, provider });
+
+    if (provider === "openai") {
+      const [result] = await legacyAnalyzeFields([fieldInfo], profileData);
+      return json({ success: true, analysis: result });
     }
 
-    const relatedVariations = getFieldVariationsForOneField(fieldInfo, fieldVariations)
+    const variations = getFieldVariationsForOneField(fieldInfo, fieldVariations);
+    const outcome = await analyzeSingleField(systemOne, fieldInfo, profileData, variations);
+    const analysis = outcome.results[0];
 
-    // Prepare comprehensive AI prompt
-    const prompt = `
-You are an expert form-filling AI assistant. Analyze this form field and determine what profile data should fill it.
+    console.log("🧠 Field analysis result:", analysis);
 
-FORM FIELD ANALYSIS:
-- Name Attribute: "${fieldInfo.name}"
-- ID Attribute: "${fieldInfo.id}"
-- Type: "${fieldInfo.type}"
-- Placeholder: "${fieldInfo.placeholder}"
-- Label Text: "${fieldInfo.label}"
-- CSS Classes: "${fieldInfo.className}"
-- Context Text: "${fieldInfo.context}"
-- Sibling Text: "${fieldInfo.siblingText}"
-- Required: ${fieldInfo.required}
-- Max Length: ${fieldInfo.maxLength}
-
-KNOWN FIELD VARIATIONS:
-${relatedVariations.length > 0 ? 
-  `These field names are known to be related: ${relatedVariations.join(', ')}` : 
-  'No direct variations found in mapping database'
-}
-
-COMPLETE PROFILE DATA AVAILABLE:
-${JSON.stringify(profileData, null, 2)}
-
-INTELLIGENT MATCHING RULES:
-1. Analyze field semantics, not just exact name matches
-2. Consider context clues from labels, placeholders, and surrounding text
-3. Handle variations like "firstName" vs "first_name" vs "fname"
-4. Support all data types: text, email, phone, dates, booleans, etc.
-5. Be flexible with date formats and phone number formats
-6. Consider conditional logic (e.g., "Do you have experience?" → yes if work_experience exists)
-7. Handle array data intelligently (use first item, count, or summary)
-8. Support both US and international formats
-
-SPECIAL FIELD TYPES TO HANDLE:
-- Names: first_name, last_name, full_name, middle_name, and other related variations
-- Contact: email, phone, address, linkedin, github, portfolio, and other related variations
-- Dates: start_date, end_date, graduation_date (format as needed), and other related variations
-- Experience: years_of_experience, job_title, company, description, and other related variations
-- Education: degree, school, gpa, major, and other related variations
-- Skills: technical_skills, soft_skills, languages, certifications, and other related variations
-- Preferences: salary, location, job_type, remote_work, and other related variations
-- Consent: background_check, drug_test, willing_to_relocate, and other related variations
-- Arrays: work_experience[], education_history[], projects[], and other related variations
-
-RESPONSE FORMAT (JSON ONLY):
-{
-  "shouldFill": true/false,
-  "value": "exact value to fill",
-  "confidence": 85,
-  "reasoning": "detailed explanation of why this match makes sense",
-  "dataPath": "path.to.data.used",
-  "fieldType": "detected field type"
-}
-
-CRITICAL GUIDELINES:
-- Only suggest filling if confidence >= 65
-- For boolean/checkbox fields, use true/false
-- For dates, use appropriate format (MM/DD/YYYY or YYYY-MM-DD)
-- For arrays, use first item or aggregate appropriately  
-- For numbers, provide clean numeric values
-- Consider field context to avoid mismatches
-- Never fill passwords, payment info, or sensitive data
-- Be smart about field relationships and semantics
-`
-
-    // Call OpenAI API with enhanced context
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${openaiApiKey}`,
-        'Content-Type': 'application/json'
+    return json({
+      success: true,
+      analysis,
+      debug: {
+        provider: "typesafe",
+        model: outcome.model,
+        usage: outcome.usage,
+        candidates: outcome.candidateCount,
+        fieldVariations: variations,
       },
-      body: JSON.stringify({
-        model: 'gpt-3.5-turbo',
-        messages: [{ role: 'user', content: prompt }],
-        max_tokens: 300,
-        temperature: 0.1
-      })
-    })
-
-    if (!response.ok) {
-      throw new Error(`OpenAI API error: ${response.status}`)
-    }
-
-    const data = await response.json()
-    let aiResponse
-    
-    try {
-      aiResponse = JSON.parse(data.choices[0].message.content)
-    } catch (parseError) {
-      console.error('❌ Failed to parse AI response:', data.choices[0].message.content)
-      throw new Error('Invalid AI response format')
-    }
-    
-    console.log('🧠 Enhanced AI Analysis Result:', aiResponse)
-    
-    // Return the AI analysis result
-    return new Response(
-      JSON.stringify({
-        success: true,
-        analysis: aiResponse,
-        debug: {
-          fieldVariations: relatedVariations,
-          profileDataKeys: Object.keys(profileData)
-        }
-      }),
-      {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        status: 200,
-      }
-    )
-
+    });
   } catch (error) {
-    console.error('❌ AI Field Analysis Error:', error)
-    
-    return new Response(
-      JSON.stringify({
-        success: false,
-        error: error.message
-      }),
-      {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        status: 500,
-      }
-    )
+    console.error("❌ AI Field Analysis Error:", error);
+    return fail(error);
   }
-}) 
+});

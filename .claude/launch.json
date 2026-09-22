@@ -1,0 +1,31 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "kao-foundation-dev",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "--prefix",
+        "/Users/kayodeojedele/WebstormProjects/kao-foundation",
+        "run",
+        "dev"
+      ],
+      "port": 5173
+    },
+    {
+      "name": "fillo-web-dev",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "port": 8080
+    },
+    {
+      "name": "fillo-ats-harness",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "/Users/kayodeojedele/Documents/projects/fillo-career-glide/tests/ats/serve.mjs",
+        "8765"
+      ],
+      "port": 8765
+    }
+  ]
+}

@@ -1,0 +1,147 @@
+{
+  "first_name": "Amara",
+  "middle_name": "",
+  "last_name": "Okonkwo",
+  "personal_details": {
+    "fullName": "Amara Okonkwo",
+    "email": "amara.okonkwo@example.com",
+    "phone": "4155550142",
+    "countryPhoneCode": "United States of America (+1)",
+    "phoneType": "Mobile",
+    "linkedin": "https://linkedin.com/in/amaraokonkwo",
+    "website": "https://amara.dev",
+    "address": {
+      "line1": "1200 Market Street",
+      "line2": "Apt 8B",
+      "city": "San Francisco",
+      "state": "California",
+      "postalCode": "94102",
+      "country": "United States of America"
+    }
+  },
+  "technical_skills": [
+    "TypeScript",
+    "Go",
+    "PostgreSQL",
+    "Kubernetes",
+    "React"
+  ],
+  "education_history": [
+    {
+      "school": "Massachusetts Institute of Technology",
+      "degree": "Bachelor of Science",
+      "field_of_study": "Computer Science",
+      "gpa": "3.8",
+      "graduation_date": "06/2018"
+    }
+  ],
+  "work_experience": [
+    {
+      "company": "Stripe",
+      "job_title": "Senior Software Engineer",
+      "start_date": "03/2021",
+      "end_date": "",
+      "is_current": true,
+      "location": "San Francisco, CA",
+      "description": "Led payments reliability work."
+    },
+    {
+      "company": "Airbnb",
+      "job_title": "Software Engineer",
+      "start_date": "07/2018",
+      "end_date": "02/2021",
+      "is_current": false,
+      "location": "San Francisco, CA",
+      "description": "Built host onboarding flows."
+    }
+  ],
+  "job_preferences": {
+    "eeo": {
+      "gender": "Female",
+      "disability_status": "No, I do not have a disability"
+    },
+    "screening_answers": [
+      {
+        "key": "work_authorization",
+        "question": "Are you authorized to work lawfully in the United States?",
+        "answer": "Yes",
+        "answerType": "yes_no",
+        "keywords": [
+          "authorized",
+          "authorization",
+          "lawfully",
+          "work",
+          "united states",
+          "u.s.",
+          "us"
+        ],
+        "enabled": true
+      },
+      {
+        "key": "sponsorship",
+        "question": "Do you now or in the future require visa sponsorship to maintain work authorization?",
+        "answer": "No",
+        "answerType": "yes_no",
+        "keywords": [
+          "visa",
+          "sponsorship",
+          "sponsor",
+          "immigration",
+          "h-1b",
+          "employment-based",
+          "require"
+        ],
+        "enabled": true
+      },
+      {
+        "key": "veteran",
+        "question": "Please select your protected veteran status.",
+        "answer": "I am not a protected veteran",
+        "answerType": "select",
+        "keywords": [
+          "veteran",
+          "protected veteran",
+          "not protected veteran",
+          "vevraa",
+          "disabled veteran",
+          "recently separated veteran",
+          "campaign badge",
+          "armed forces service medal",
+          "opt out"
+        ],
+        "enabled": true
+      },
+      {
+        "key": "disability_status",
+        "question": "Please check one of the boxes below:",
+        "answer": "No, I do not have a disability and have not had one in the past",
+        "answerType": "select",
+        "keywords": [
+          "disability",
+          "disability status",
+          "self identified disability",
+          "ofccp",
+          "please check one of the boxes below",
+          "do not want to answer"
+        ],
+        "enabled": true
+      },
+      {
+        "key": "gender",
+        "question": "Please select your gender.",
+        "answer": "Female",
+        "answerType": "text",
+        "keywords": [
+          "gender",
+          "male",
+          "female",
+          "not listed",
+          "opt out",
+          "eeo",
+          "demographic"
+        ],
+        "enabled": true
+      }
+    ]
+  }
+}

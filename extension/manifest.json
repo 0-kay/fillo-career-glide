@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Fillo Auto-Fill",
+  "name": "Fyllo Auto-Fill",
   "version": "1.0.0",
-  "description": "Auto-fill job applications with your Fillo resume profiles",
+  "description": "Auto-fill job applications with your Fyllo resume profiles",
   "permissions": [
     "storage",
     "activeTab",
@@ -61,7 +61,7 @@
   },
   "action": {
     "default_popup": "popup.html",
-    "default_title": "Fillo Auto-Fill",
+    "default_title": "Fyllo Auto-Fill",
     "default_icon": {
       "16": "icons/icon16.png",
       "48": "icons/icon48.png",

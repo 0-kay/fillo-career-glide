@@ -9,6 +9,7 @@ import { ArrowLeft, Mail, Lock, User, Eye, EyeOff } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import { useToast } from '@/hooks/use-toast';
+import Logo from '@/components/Logo';
 
 const Auth = () => {
   const [isSignUp, setIsSignUp] = useState(false);
@@ -112,10 +113,8 @@ const Auth = () => {
         <Card className="w-full max-w-md p-8 shadow-xl border-0">
           {/* Logo */}
           <div className="flex items-center justify-center mb-8">
-            <div className="w-10 h-10 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-lg flex items-center justify-center mr-3">
-              <span className="text-white font-bold text-lg">F</span>
-            </div>
-            <span className="text-2xl font-bold text-gray-900">Fillo</span>
+            <Logo className="w-10 h-10 mr-3" />
+            <span className="text-2xl font-bold text-gray-900">Fyllo</span>
           </div>
 
           {/* Header Text */}
@@ -260,7 +259,7 @@ const Auth = () => {
               <div className="text-right">
                 <button
                   type="button"
-                  className="text-sm text-blue-600 hover:text-blue-700 hover:underline"
+                  className="text-sm text-brand hover:text-brand-dark hover:underline"
                   disabled={loading}
                 >
                   Forgot password?
@@ -271,7 +270,7 @@ const Auth = () => {
             {/* Submit Button */}
             <Button 
               type="submit" 
-              className="w-full h-12 bg-blue-600 hover:bg-blue-700"
+              className="w-full h-12 bg-brand hover:bg-brand-dark"
               disabled={loading}
             >
               {loading ? 'Loading...' : (isSignUp ? 'Create Account' : 'Sign In')}
@@ -284,7 +283,7 @@ const Auth = () => {
               {isSignUp ? 'Already have an account?' : "Don't have an account?"}{' '}
               <button
                 onClick={() => setIsSignUp(!isSignUp)}
-                className="text-blue-600 hover:text-blue-700 hover:underline font-medium"
+                className="text-brand hover:text-brand-dark hover:underline font-medium"
                 disabled={loading}
               >
                 {isSignUp ? 'Sign in' : 'Sign up'}
@@ -297,9 +296,9 @@ const Auth = () => {
             <div className="mt-6 text-center">
               <p className="text-xs text-gray-500">
                 By creating an account, you agree to our{' '}
-                <a href="#" className="text-blue-600 hover:underline">Terms of Service</a>{' '}
+                <a href="#" className="text-brand hover:underline">Terms of Service</a>{' '}
                 and{' '}
-                <a href="#" className="text-blue-600 hover:underline">Privacy Policy</a>
+                <a href="#" className="text-brand hover:underline">Privacy Policy</a>
               </p>
             </div>
           )}

@@ -4,6 +4,7 @@
 
   ns.config.AI_CONFIG = {
     enabled: false,  // Disabled – use Supabase match data for field matching, no AI calls
+    fallbackEnabled: false,  // After all rules run, ask the AI to fill fields that are still empty
     supabaseUrl: 'https://yuojrygcrcpajiglbekd.supabase.co',
     supabaseKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inl1b2pyeWdjcmNwYWppZ2xiZWtkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTEyMzAzMjksImV4cCI6MjA2NjgwNjMyOX0.9dYnQRjtSocxmb9gCw0fOf4GfPk2mUQNcrkOqwu8Rck'
   };

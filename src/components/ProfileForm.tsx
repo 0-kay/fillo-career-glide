@@ -278,7 +278,7 @@ const ProfileForm = ({ initialData, onSave, onBack }: ProfileFormProps) => {
           <ArrowLeft className="mr-2 h-4 w-4" />
           Back to Upload
         </Button>
-        <Button onClick={handleSave} className="bg-blue-600 hover:bg-blue-700">
+        <Button onClick={handleSave} className="bg-brand hover:bg-brand-dark">
           Save Profile
         </Button>
       </div>

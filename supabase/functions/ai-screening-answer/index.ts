@@ -1,13 +1,10 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-
-declare const Deno: { env: { get(key: string): string | undefined } };
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-};
+import { resolveProvider } from "../_shared/typesafe/client.ts";
+import { requireUser } from "../_shared/typesafe/auth.ts";
+import { json, preflight } from "../_shared/typesafe/http.ts";
+import { legacyClassifyScreening } from "../_shared/typesafe/legacy.ts";
+import { systemOne } from "../_shared/typesafe/runtime.deno.ts";
+import { classifyScreeningQuestions } from "../_shared/typesafe/screening.ts";
 
 const MIN_SCREENING_CONFIDENCE = 60;
 
@@ -215,70 +212,11 @@ function skipAnswer(index: number, questionText: string) {
   return { index, question: questionText, intent: null, value: null, answerText: null, answer: null, confidence: 0 };
 }
 
-// AI is used only as a constrained classifier: it returns the index into savedAnswers
-// (or -1 to skip). It never generates answer text — all answer data comes from savedAnswers.
-async function aiClassifyBatch(
-  unmatched: Array<{ originalIndex: number; questionText: string }>,
-  savedAnswers: ScreeningAnswer[],
-  openaiApiKey: string
-): Promise<Map<number, number>> {
-  const savedList = savedAnswers
-    .map((sa, i) => `${i}: "${sa.question}"`)
-    .join("\n");
-
-  const questionList = unmatched
-    .map((u, i) => `${i}: "${u.questionText}"`)
-    .join("\n");
-
-  const prompt = `You are matching job application questions to a list of pre-saved screening answers.
-For each question below, return the index of the best matching saved answer, or -1 if none applies.
-
-SAVED ANSWERS:
-${savedList}
-
-QUESTIONS TO CLASSIFY (return one number per line, in order):
-${questionList}
-
-Rules:
-- Match by semantic meaning, not exact wording ("work permit" = "work authorization", "eligible to work" = "authorized to work")
-- Only match if you are confident the question is asking the same thing as the saved answer
-- Return -1 if the question doesn't clearly map to any saved answer
-- Output ONLY a JSON array of integers, e.g. [2, -1, 0]`;
-
-  const response = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${openaiApiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: "gpt-4o-mini",
-      messages: [{ role: "user", content: prompt }],
-      max_tokens: 100,
-      temperature: 0,
-    }),
-  });
-
-  if (!response.ok) throw new Error(`OpenAI error: ${response.status}`);
-
-  const data = await response.json();
-  const raw = data.choices[0].message.content.trim();
-  const jsonMatch = raw.match(/\[[\s\S]*?\]/);
-  const indices: number[] = JSON.parse(jsonMatch ? jsonMatch[0] : raw);
-
-  const result = new Map<number, number>();
-  unmatched.forEach((u, pos) => {
-    const savedIdx = typeof indices[pos] === "number" ? indices[pos] : -1;
-    if (savedIdx >= 0 && savedIdx < savedAnswers.length) {
-      result.set(u.originalIndex, savedIdx);
-    }
-  });
-  return result;
-}
-
 serve(async (req: any) => {
-  if (req.method === "OPTIONS")
-    return new Response(null, { headers: corsHeaders });
+  if (req.method === "OPTIONS") return preflight();
+
+  const auth = await requireUser(req);
+  if (auth instanceof Response) return auth;
 
   try {
     const { questions: rawQuestions, profileData } = await req.json();
@@ -300,11 +238,7 @@ serve(async (req: any) => {
           .filter((q) => q.questionText)
       : [];
 
-    if (questions.length === 0)
-      return new Response(
-        JSON.stringify({ success: true, answers: [] }),
-        { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 }
-      );
+    if (questions.length === 0) return json({ success: true, answers: [] });
 
     console.log("🎯 Screening batch:", { questions: questions.length, savedAnswers: savedAnswers.length });
 
@@ -323,30 +257,40 @@ serve(async (req: any) => {
       }
     }
 
-    // Pass 2: AI classifier for unmatched questions (only returns an index, never generates text)
+    // Pass 2: the model only ever returns an index into savedAnswers, so answer text
+    // always comes from what the applicant wrote.
     if (unmatched.length > 0 && savedAnswers.length > 0) {
-      const openaiApiKey = Deno.env.get("OPENAI_API_KEY");
-      if (openaiApiKey) {
-        try {
-          console.log(`🤖 AI classifying ${unmatched.length} unmatched questions`);
-          const aiMap = await aiClassifyBatch(unmatched, savedAnswers, openaiApiKey);
-          for (const { originalIndex, questionText } of unmatched) {
-            const savedIdx = aiMap.get(originalIndex);
-            if (savedIdx !== undefined) {
-              const sa = savedAnswers[savedIdx];
-              console.log(`🤖 AI classified: "${questionText.substring(0, 50)}" → saved[${savedIdx}] "${sa.question.substring(0, 40)}"`);
-              answers[originalIndex] = buildAnswer(originalIndex, questionText, sa, 0.75);
-            } else {
-              console.log(`⏭️  No match: "${questionText.substring(0, 60)}"`);
-              answers[originalIndex] = skipAnswer(originalIndex, questionText);
-            }
+      const provider = resolveProvider();
+      try {
+        console.log(`🤖 Classifying ${unmatched.length} unmatched questions via ${provider}`);
+
+        const matched = new Map<number, { savedIndex: number; confidence: number }>();
+        if (provider === "openai") {
+          const legacy = await legacyClassifyScreening(unmatched, savedAnswers);
+          for (const [originalIndex, savedIndex] of legacy) {
+            matched.set(originalIndex, { savedIndex, confidence: 75 });
           }
-        } catch (e: any) {
-          console.warn("⚠️ AI classifier failed, skipping unmatched:", e.message);
-          for (const { originalIndex, questionText } of unmatched)
-            answers[originalIndex] = skipAnswer(originalIndex, questionText);
+        } else {
+          const out = await classifyScreeningQuestions(systemOne, unmatched, savedAnswers, {
+            minConfidence: MIN_SCREENING_CONFIDENCE,
+          });
+          for (const [originalIndex, m] of out.matches) matched.set(originalIndex, m);
+          console.log("🤖 Classifier usage:", { model: out.model, usage: out.usage });
         }
-      } else {
+
+        for (const { originalIndex, questionText } of unmatched) {
+          const hit = matched.get(originalIndex);
+          if (hit) {
+            const sa = savedAnswers[hit.savedIndex];
+            console.log(`🤖 Classified: "${questionText.substring(0, 50)}" → saved[${hit.savedIndex}] "${sa.question.substring(0, 40)}" (${hit.confidence}%)`);
+            answers[originalIndex] = buildAnswer(originalIndex, questionText, sa, hit.confidence / 100);
+          } else {
+            console.log(`⏭️  No match: "${questionText.substring(0, 60)}"`);
+            answers[originalIndex] = skipAnswer(originalIndex, questionText);
+          }
+        }
+      } catch (e: any) {
+        console.warn("⚠️ Classifier failed, skipping unmatched:", e.message);
         for (const { originalIndex, questionText } of unmatched)
           answers[originalIndex] = skipAnswer(originalIndex, questionText);
       }
@@ -357,15 +301,9 @@ serve(async (req: any) => {
 
     console.log("📋 Screening results:", answers.map(a => ({ q: a.question?.substring(0, 40), v: a.value, c: a.confidence })));
 
-    return new Response(
-      JSON.stringify({ success: true, answers }),
-      { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 }
-    );
+    return json({ success: true, answers });
   } catch (error: any) {
     console.error("❌ Screening Batch Error:", error);
-    return new Response(
-      JSON.stringify({ success: false, error: error.message }),
-      { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 500 }
-    );
+    return json({ success: false, error: error.message }, 500);
   }
 });

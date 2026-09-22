@@ -760,7 +760,7 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
   if (uploading) {
     return (
       <div className="text-center py-12">
-        <Loader2 className="h-12 w-12 animate-spin text-blue-600 mx-auto mb-4" />
+        <Loader2 className="h-12 w-12 animate-spin text-brand mx-auto mb-4" />
         <h3 className="text-lg font-semibold text-gray-900 mb-2">Processing Resume</h3>
         <p className="text-gray-600">Please wait...</p>
       </div>
@@ -803,7 +803,7 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
             className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
           />
           
-          <Button className="bg-blue-600 hover:bg-blue-700">
+          <Button className="bg-brand hover:bg-brand-dark">
             Browse Files
           </Button>
         </div>
@@ -811,7 +811,7 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
         <div className="border rounded-lg p-6">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-3">
-              <FileText className="h-8 w-8 text-blue-600" />
+              <FileText className="h-8 w-8 text-brand" />
               <div>
                 <p className="font-medium text-gray-900">{selectedFile.name}</p>
                 <p className="text-sm text-gray-600">

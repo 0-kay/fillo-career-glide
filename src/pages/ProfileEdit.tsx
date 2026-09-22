@@ -11,6 +11,7 @@ import { useProfiles } from '@/hooks/useProfiles';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/hooks/useAuth';
 import ScreeningQuestionsDialog, { ScreeningAnswer } from '@/components/ScreeningQuestionsDialog';
+import Logo from '@/components/Logo';
 
 type EduDate = { year?: string; month?: string } | string | null | undefined;
 
@@ -326,7 +327,7 @@ const ProfileEdit = () => {
             {value.includes('•') ? (
               value.split('•').filter(item => item.trim()).map((item: string, itemIndex: number) => (
                 <div key={itemIndex} className="mb-1 flex items-start">
-                  <span className="text-blue-600 mr-2 mt-0.5">•</span>
+                  <span className="text-brand mr-2 mt-0.5">•</span>
                   <span className="flex-1">{item.trim()}</span>
                 </div>
               ))
@@ -365,7 +366,7 @@ const ProfileEdit = () => {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 flex items-center justify-center">
         <div className="text-center">
-          <Loader2 className="h-12 w-12 animate-spin text-blue-600 mx-auto mb-4" />
+          <Loader2 className="h-12 w-12 animate-spin text-brand mx-auto mb-4" />
           <p className="text-gray-600">Loading profile data...</p>
         </div>
       </div>
@@ -400,10 +401,8 @@ const ProfileEdit = () => {
               </Link>
             </div>
             <div className="flex items-center space-x-3">
-              <div className="w-8 h-8 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-lg flex items-center justify-center">
-                <span className="text-white font-bold text-sm">F</span>
-              </div>
-              <span className="text-2xl font-bold text-gray-900">Fillo</span>
+              <Logo className="w-8 h-8" />
+              <span className="text-2xl font-bold text-gray-900">Fyllo</span>
             </div>
           </div>
         </div>
@@ -428,7 +427,7 @@ const ProfileEdit = () => {
           {/* Profile Name */}
           <Card className="p-6">
             <div className="flex items-center mb-4">
-              <User className="h-5 w-5 mr-2 text-blue-600" />
+              <User className="h-5 w-5 mr-2 text-brand" />
               <h4 className="font-semibold text-gray-900">Profile Name</h4>
             </div>
             <Input
@@ -442,7 +441,7 @@ const ProfileEdit = () => {
           {/* Personal Information */}
           <Card className="p-6">
             <div className="flex items-center mb-4">
-              <User className="h-5 w-5 mr-2 text-blue-600" />
+              <User className="h-5 w-5 mr-2 text-brand" />
               <h4 className="font-semibold text-gray-900">Personal Information</h4>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -634,7 +633,7 @@ const ProfileEdit = () => {
           {/* Technical Skills */}
           <Card className="p-6">
             <div className="flex items-center mb-4">
-              <Code className="h-5 w-5 mr-2 text-blue-600" />
+              <Code className="h-5 w-5 mr-2 text-brand" />
               <h4 className="font-semibold text-gray-900">Technical Skills</h4>
             </div>
             
@@ -687,7 +686,7 @@ const ProfileEdit = () => {
           {formData.toolsTechnologies?.all && formData.toolsTechnologies.all.length > 0 && (
             <Card className="p-6">
               <div className="flex items-center mb-4">
-                <Settings className="h-5 w-5 mr-2 text-blue-600" />
+                <Settings className="h-5 w-5 mr-2 text-brand" />
                 <h4 className="font-semibold text-gray-900">Tools & Technologies</h4>
               </div>
               <div className="flex flex-wrap gap-2">
@@ -702,14 +701,14 @@ const ProfileEdit = () => {
           <Card className="p-6">
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center">
-                <Briefcase className="h-5 w-5 mr-2 text-blue-600" />
+                <Briefcase className="h-5 w-5 mr-2 text-brand" />
                 <h4 className="font-semibold text-gray-900">Work Experience</h4>
               </div>
               <Button 
                 size="sm" 
                 onClick={handleSave} 
                 disabled={saving}
-                className="bg-blue-600 hover:bg-blue-700"
+                className="bg-brand hover:bg-brand-dark"
               >
                 {saving ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Save className="h-3 w-3 mr-1" />}
                 Save All Changes
@@ -828,7 +827,7 @@ const ProfileEdit = () => {
           {/* Education */}
           <Card className="p-6">
             <div className="flex items-center mb-4">
-              <GraduationCap className="h-5 w-5 mr-2 text-blue-600" />
+              <GraduationCap className="h-5 w-5 mr-2 text-brand" />
               <h4 className="font-semibold text-gray-900">Education</h4>
             </div>
             <div className="space-y-4">
@@ -922,7 +921,7 @@ const ProfileEdit = () => {
           {formData.projects && formData.projects.length > 0 && (
             <Card className="p-6">
               <div className="flex items-center mb-4">
-                <Code className="h-5 w-5 mr-2 text-blue-600" />
+                <Code className="h-5 w-5 mr-2 text-brand" />
                 <h4 className="font-semibold text-gray-900">Projects</h4>
               </div>
               <div className="space-y-4">
@@ -1050,7 +1049,7 @@ const ProfileEdit = () => {
           {formData.certifications && formData.certifications.length > 0 && (
             <Card className="p-6">
               <div className="flex items-center mb-4">
-                <Award className="h-5 w-5 mr-2 text-blue-600" />
+                <Award className="h-5 w-5 mr-2 text-brand" />
                 <h4 className="font-semibold text-gray-900">Certifications & Licenses</h4>
               </div>
               <div className="space-y-4">
@@ -1115,7 +1114,7 @@ const ProfileEdit = () => {
           {formData.awards && formData.awards.length > 0 && (
             <Card className="p-6">
               <div className="flex items-center mb-4">
-                <Trophy className="h-5 w-5 mr-2 text-blue-600" />
+                <Trophy className="h-5 w-5 mr-2 text-brand" />
                 <h4 className="font-semibold text-gray-900">Awards & Honors</h4>
               </div>
               <div className="space-y-4">
@@ -1171,7 +1170,7 @@ const ProfileEdit = () => {
           {formData.volunteerExperience && formData.volunteerExperience.length > 0 && (
             <Card className="p-6">
               <div className="flex items-center mb-4">
-                <Users className="h-5 w-5 mr-2 text-blue-600" />
+                <Users className="h-5 w-5 mr-2 text-brand" />
                 <h4 className="font-semibold text-gray-900">Volunteer Experience</h4>
               </div>
               <div className="space-y-4">
@@ -1245,7 +1244,7 @@ const ProfileEdit = () => {
           {formData.languages && formData.languages.length > 0 && (
             <Card className="p-6">
               <div className="flex items-center mb-4">
-                <Globe className="h-5 w-5 mr-2 text-blue-600" />
+                <Globe className="h-5 w-5 mr-2 text-brand" />
                 <h4 className="font-semibold text-gray-900">Languages</h4>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1282,7 +1281,7 @@ const ProfileEdit = () => {
           <Card className="p-6">
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center">
-                <ClipboardCheck className="h-5 w-5 mr-2 text-blue-600" />
+                <ClipboardCheck className="h-5 w-5 mr-2 text-brand" />
                 <h4 className="font-semibold text-gray-900">Screening Questions</h4>
               </div>
               <Button
@@ -1309,7 +1308,7 @@ const ProfileEdit = () => {
                 No screening answers configured.{' '}
                 <button
                   type="button"
-                  className="text-blue-600 hover:underline"
+                  className="text-brand hover:underline"
                   onClick={() => setShowScreeningDialog(true)}
                 >
                   Add answers
@@ -1333,7 +1332,7 @@ const ProfileEdit = () => {
             <Link to="/dashboard">
               <Button variant="outline">Cancel</Button>
             </Link>
-            <Button onClick={handleSave} disabled={saving} className="bg-blue-600 hover:bg-blue-700">
+            <Button onClick={handleSave} disabled={saving} className="bg-brand hover:bg-brand-dark">
               {saving ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />

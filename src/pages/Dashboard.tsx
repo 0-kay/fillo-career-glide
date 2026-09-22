@@ -9,6 +9,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { useProfiles } from '@/hooks/useProfiles';
 import Onboarding from '@/components/Onboarding';
 import ProfileList from '@/components/ProfileList';
+import Logo from '@/components/Logo';
 
 const Dashboard = () => {
   const [showOnboarding, setShowOnboarding] = useState(false);
@@ -81,10 +82,8 @@ const Dashboard = () => {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center h-16">
             <div className="flex items-center space-x-3">
-              <div className="w-8 h-8 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-lg flex items-center justify-center">
-                <span className="text-white font-bold text-sm">F</span>
-              </div>
-              <span className="text-2xl font-bold text-gray-900">Fillo</span>
+              <Logo className="w-8 h-8" />
+              <span className="text-2xl font-bold text-gray-900">Fyllo</span>
             </div>
             <div className="flex items-center space-x-4">
               <Link to="/settings">
@@ -131,7 +130,7 @@ const Dashboard = () => {
                   {stats.completeProfiles} fully complete
                 </p>
               </div>
-              <FileText className="h-8 w-8 text-blue-600" />
+              <FileText className="h-8 w-8 text-brand" />
             </div>
           </Card>
           

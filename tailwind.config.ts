@@ -18,7 +18,18 @@ export default {
 			}
 		},
 		extend: {
+			fontFamily: {
+				sans: ['Poppins', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+				display: ['Space Grotesk', 'ui-sans-serif', 'system-ui', 'sans-serif']
+			},
 			colors: {
+				// FylloAI brand palette (FYLLOAI BRAND IDENTITY GUIDELINES.pdf): Electric Purple
+				// + Indigo, used for primary actions and brand moments.
+				brand: {
+					DEFAULT: '#8A2BE2',
+					dark: '#4B0082',
+					foreground: '#FFFFFF'
+				},
 				border: 'hsl(var(--border))',
 				input: 'hsl(var(--input))',
 				ring: 'hsl(var(--ring))',

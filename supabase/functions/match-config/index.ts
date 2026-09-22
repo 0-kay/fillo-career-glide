@@ -714,9 +714,9 @@ const MATCH_CONFIG = {
         {
           "name": "location",
           "label": "City",
-          "type": "text",
+          "type": "sr-autocomplete",
           "required": false,
-          "selector": "[data-test='piersonal-info-location'] spl-autocomplete",
+          "selector": "[data-test='personal-info-location'] spl-autocomplete",
           "dataTest": "location-autocomplete",
           "dataSrId": "location-autocomplete-search",
           "profilePath": "personal_details.city"
@@ -921,6 +921,167 @@ const MATCH_CONFIG = {
           ]
         }
       }
+    },
+    "*.lever.co": {
+      "platform": "lever",
+      "fields": [
+        {
+          "name": "name",
+          "label": "Full name",
+          "type": "text",
+          "required": true,
+          "profilePath": "personal_details.fullName",
+          "selector": "input[name='name']"
+        },
+        {
+          "name": "email",
+          "label": "Email",
+          "type": "email",
+          "required": true,
+          "profilePath": "personal_details.email",
+          "selector": "input[name='email']"
+        },
+        {
+          "name": "phone",
+          "label": "Phone",
+          "type": "text",
+          "required": true,
+          "profilePath": "personal_details.phone",
+          "selector": "input[name='phone']"
+        },
+        {
+          "name": "location",
+          "label": "Current location",
+          "type": "text",
+          "profilePath": "personal_details.address.city",
+          "selector": "input[name='location']"
+        },
+        {
+          "name": "org",
+          "label": "Current company",
+          "type": "text",
+          "profilePath": "__current_company",
+          "selector": "input[name='org']"
+        },
+        {
+          "name": "urls[LinkedIn]",
+          "label": "LinkedIn URL",
+          "type": "text",
+          "profilePath": "personal_details.linkedin",
+          "selector": "input[name='urls[LinkedIn]']"
+        },
+        {
+          "name": "urls[Other Website]",
+          "label": "Other Website URL",
+          "type": "text",
+          "profilePath": "personal_details.website",
+          "selector": "input[name='urls[Other Website]']"
+        },
+        {
+          "name": "eeo[gender]",
+          "label": "Gender",
+          "type": "dropdown",
+          "profilePath": "job_preferences.eeo.gender",
+          "selector": "select[name='eeo[gender]']"
+        },
+        {
+          "name": "eeo[disability]",
+          "label": "Disability status",
+          "type": "dropdown",
+          "profilePath": "job_preferences.eeo.disability_status",
+          "selector": "select[name='eeo[disability]']"
+        }
+      ]
+    },
+    "*.greenhouse.io": {
+      "platform": "greenhouse",
+      "fields": [
+        {
+          "name": "first_name",
+          "label": "First Name",
+          "type": "text",
+          "required": true,
+          "profilePath": "first_name",
+          "selector": "#first_name"
+        },
+        {
+          "name": "last_name",
+          "label": "Last Name",
+          "type": "text",
+          "required": true,
+          "profilePath": "last_name",
+          "selector": "#last_name"
+        },
+        {
+          "name": "email",
+          "label": "Email",
+          "type": "email",
+          "required": true,
+          "profilePath": "personal_details.email",
+          "selector": "#email"
+        },
+        {
+          "name": "phone",
+          "label": "Phone",
+          "type": "tel",
+          "profilePath": "personal_details.phone",
+          "selector": "#phone"
+        },
+        {
+          "name": "candidate-location",
+          "label": "Location (City)",
+          "type": "text",
+          "profilePath": "personal_details.address.city",
+          "selector": "#candidate-location"
+        },
+        {
+          "name": "country",
+          "label": "Country",
+          "type": "text",
+          "profilePath": "personal_details.address.country",
+          "selector": "#country"
+        },
+        {
+          "name": "linkedin_profile",
+          "label": "LinkedIn Profile",
+          "type": "text",
+          "profilePath": "personal_details.linkedin"
+        }
+      ]
+    },
+    "*.ashbyhq.com": {
+      "platform": "ashby",
+      "fields": [
+        {
+          "name": "_systemfield_name",
+          "label": "Name",
+          "type": "text",
+          "required": true,
+          "profilePath": "personal_details.fullName",
+          "selector": "#_systemfield_name"
+        },
+        {
+          "name": "_systemfield_email",
+          "label": "Email",
+          "type": "email",
+          "required": true,
+          "profilePath": "personal_details.email",
+          "selector": "#_systemfield_email"
+        },
+        {
+          "name": "phone",
+          "label": "Phone Number",
+          "type": "tel",
+          "profilePath": "personal_details.phone",
+          "selector": "input[type='tel']"
+        },
+        {
+          "name": "linkedin_profile",
+          "label": "LinkedIn Profile",
+          "type": "text",
+          "profilePath": "personal_details.linkedin"
+        }
+      ]
     }
   },
   "mapping": {

@@ -1885,6 +1885,22 @@
         return ranked[0] || null;
     }
 
+    // The question a radio group answers ("Veteran Status"), as opposed to one option's text.
+    // getFieldLabel(radio) returns the option's own label, so a group was being matched on its
+    // first option ("Male", "I identify as one or more…") instead of on the question.
+    function getRadioGroupQuestion(radio) {
+        const fieldset = radio?.closest?.('fieldset, [role="radiogroup"], [role="group"]');
+        if (!fieldset) return '';
+        const inputIds = new Set(Array.from(fieldset.querySelectorAll('input')).map(i => i.id).filter(Boolean));
+        let text = fieldset.querySelector('legend')?.textContent;
+        if (!text) {
+            const label = Array.from(fieldset.querySelectorAll('label'))
+                .find(l => !l.querySelector('input') && !inputIds.has(l.getAttribute('for') || ''));
+            text = label?.textContent;
+        }
+        return String(text || '').replace(/\*/g, '').replace(/\s+/g, ' ').trim();
+    }
+
     function getRadioOptionText(radio) {
         if (!radio) return '';
         const label = getFieldLabel(radio);
@@ -1922,18 +1938,29 @@
             // Include listbox/combobox buttons so Workday wrapper divs do not get filled directly.
             function findRealInput(root) {
                 const sel = 'input, textarea, select, button[aria-haspopup="listbox"], button[role="combobox"], [role="combobox"]';
-                const found = root.querySelector(sel);
-                if (found) return found;
 
-                // Check all children that might have their own shadow roots
-                const children = root.querySelectorAll('*');
-                for (const child of children) {
-                    if (child.shadowRoot) {
-                        const inner = findRealInput(child.shadowRoot);
-                        if (inner) return inner;
+                // Collect every matching control anywhere in this shadow tree (including nested
+                // shadow roots), not just the first. Some web-component fields nest an unrelated
+                // search/combobox control (e.g. a phone field's country-code picker) ahead of the
+                // actual target input in DOM order — SmartRecruiters' phone field puts the country
+                // search box before the digits <input>. Taking "first match" silently typed the
+                // phone number into the country search box instead.
+                const collect = (node) => {
+                    const found = Array.from(node.querySelectorAll(sel));
+                    for (const child of node.querySelectorAll('*')) {
+                        if (child.shadowRoot) found.push(...collect(child.shadowRoot));
                     }
-                }
-                return null;
+                    return found;
+                };
+                const candidates = collect(root);
+                if (!candidates.length) return null;
+
+                // Prefer a plain native control over a search/combobox one when both exist —
+                // the combobox path is only correct when it's the sole way in (Workday-style
+                // searchable selects), which single-candidate cases still hit below.
+                const isPlain = (el) => ['input', 'textarea', 'select'].includes(el.tagName.toLowerCase())
+                    && el.getAttribute('role') !== 'combobox';
+                return candidates.find(isPlain) || candidates[0];
             }
 
             let targetEl = element;
@@ -1982,7 +2009,9 @@
                         matches += 1;
                         oWords[exactIdx] = null;
                     } else {
-                        const partialIdx = oWords.findIndex(ow => ow && (ow.includes(tw) || tw.includes(ow)));
+                        // Prefix-only: "engineer"~"engineering" is a real match, but "male" inside
+                        // "female" (or "authorized" inside "unauthorized") is the opposite answer.
+                        const partialIdx = oWords.findIndex(ow => ow && (ow.startsWith(tw) || tw.startsWith(ow)));
                         if (partialIdx !== -1) {
                             matches += 0.5;
                             oWords[partialIdx] = null;
@@ -2023,7 +2052,13 @@
                 let bestMatchIdx = -1;
                 let bestMatchScore = 0; // Semantic score ranges from 0 to 1
 
-                for (let idx = 0; !matchedOption && idx < targetEl.options.length; idx++) {
+                // An exact match anywhere in the list beats any fuzzy candidate that appears
+                // earlier, so scan every option before settling for the best fuzzy score.
+                let fuzzyOption = null;
+                let fuzzyIdx = -1;
+                const optionPolarity = t => (/^(yes|no)\b/.exec(t) || [])[1] || null;
+                const answerPolarity = optionPolarity(strLower);
+                for (let idx = 0; idx < targetEl.options.length; idx++) {
                     const o = targetEl.options[idx];
                     const optText = o.textContent.trim().toLowerCase();
 
@@ -2033,15 +2068,32 @@
                         break; // Exact match found, stop looking
                     }
 
-                    // Fallback to semantic similarity if exact match fails
-                    if (optText && strLower) {
+                    // Fallback to semantic similarity if no exact match exists. The scorer ignores
+                    // negations, so "No, I do not have a disability" looks nearly as close to
+                    // "Yes, I have a disability…" as to its own option; never cross Yes/No.
+                    if (optText && strLower && !(answerPolarity && optionPolarity(optText) && optionPolarity(optText) !== answerPolarity)) {
                         const score = calculateSemanticScore(strLower, optText);
                         // Require at least a ~40% token overlap threshold
                         if (score > bestMatchScore && score > 0.4) {
                             bestMatchScore = score;
-                            matchedOption = o;
-                            bestMatchIdx = idx;
+                            fuzzyOption = o;
+                            fuzzyIdx = idx;
                         }
+                    }
+                }
+                if (!matchedOption && fuzzyOption) {
+                    matchedOption = fuzzyOption;
+                    bestMatchIdx = fuzzyIdx;
+                }
+                // A Yes/No answer with exactly one Yes/No option of that polarity is unambiguous
+                // even when the option carries extra wording ("No, … and have not had one…").
+                if (!matchedOption && answerPolarity) {
+                    const same = Array.from(targetEl.options)
+                        .map((o, idx) => ({ o, idx }))
+                        .filter(x => optionPolarity(x.o.textContent.trim().toLowerCase()) === answerPolarity);
+                    if (same.length === 1) {
+                        matchedOption = same[0].o;
+                        bestMatchIdx = same[0].idx;
                     }
                 }
 
@@ -2087,6 +2139,12 @@
                 const nativeSetter = Object.getOwnPropertyDescriptor(
                     Object.getPrototypeOf(targetEl), 'value'
                 )?.set;
+                if (!matchedOption) {
+                    // Writing an unmatched string leaves the <select> with nothing selected while
+                    // reporting success. Leave it untouched and say so.
+                    console.warn(`[Fillo] No <select> option matches "${strVal}" for ${targetEl.name || targetEl.id || 'select'}`);
+                    return false;
+                }
                 if (nativeSetter) {
                     const finalVal = matchedOption
                         ? (targetEl.options[bestMatchIdx]?.value ?? strVal)
@@ -2823,9 +2881,15 @@
 
         if (mappingName && [field.name, field.id, field.automationId.replace(/^formField-/, ''), field.fkitId].some(v => normalizeFieldText(v) === mappingName)) score += 35;
         if (mappingLabel && normalizeFieldText(field.label) === mappingLabel) score += 30;
-        if (mappingKey && fieldText.includes(mappingKey)) score += 15;
-        if (mappingName && fieldText.includes(mappingName)) score += 12;
-        if (mappingLabel && mappingLabel.length > 3 && fieldText.includes(mappingLabel)) score += 12;
+        // A long label is a question or instruction, not a field name. Words like "country"
+        // inside "…require sponsorship to work in the country where…" must not select the
+        // Country mapping, so substring matching only applies to short labels. Exact-label
+        // matches above and the screening `patterns` below are unaffected.
+        const labelWordCount = normalizeFieldText(field.label || '').split(' ').filter(Boolean).length;
+        const containText = labelWordCount > 8 ? '' : fieldText;
+        if (mappingKey && containText.includes(mappingKey)) score += 15;
+        if (mappingName && containText.includes(mappingName)) score += 12;
+        if (mappingLabel && mappingLabel.length > 3 && containText.includes(mappingLabel)) score += 12;
 
         for (const pattern of mapping.patterns || []) {
             const normalizedPattern = normalizeFieldText(pattern);
@@ -3434,6 +3498,16 @@
     function getProfileValueForPath(profileData, path) {
         const keys = Array.isArray(path) ? path : String(path || '').split('.');
         if (keys.length === 1 && keys[0] === '__today') return new Date();
+
+        // Virtual path for "current company" style fields. It can't be written as
+        // work_experience.0.company because work_experience.* paths are routed to the
+        // repeated-section filler, not to plain inputs.
+        if (keys.length === 1 && keys[0] === '__current_company') {
+            const jobs = Array.isArray(profileData?.work_experience) ? profileData.work_experience : [];
+            const isCurrent = j => j?.is_current === true || /^(present|current|now)$/i.test(String(j?.end_date || '').trim());
+            const job = jobs.find(isCurrent) || jobs[0];
+            return job?.company || job?.employer || job?.company_name || null;
+        }
 
         // Name paths: prefer personal_details (the applicant's real name) over the
         // top-level first_name/last_name columns, which can hold a stale profile
@@ -6048,6 +6122,69 @@
                 return false;
             }
 
+            // SmartRecruiters location autocomplete (spl-autocomplete): typing alone doesn't
+            // persist a value — the component clears itself and marks aria-invalid unless a
+            // suggestion is explicitly clicked. The suggestion list renders as <spl-select-option>
+            // elements portalled elsewhere in the document, not inside the field's own shadow tree,
+            // so it has to be searched for document-wide.
+            if (field.type === 'sr-autocomplete') {
+                const strVal = String(displayValue);
+                let host = null;
+                for (const sel of selectors) {
+                    try { host = document.querySelector(sel); } catch (_) { continue; }
+                    if (host) break;
+                }
+                if (!host) return false;
+
+                const findRealInput = (root) => {
+                    const found = root.querySelector('input');
+                    if (found) return found;
+                    for (const child of root.querySelectorAll('*')) {
+                        if (child.shadowRoot) {
+                            const inner = findRealInput(child.shadowRoot);
+                            if (inner) return inner;
+                        }
+                    }
+                    return null;
+                };
+                const input = findRealInput(host) || (host.shadowRoot && findRealInput(host.shadowRoot));
+                if (!input) return false;
+
+                input.focus({ preventScroll: true });
+                const nativeSetter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input), 'value')?.set;
+                if (nativeSetter) nativeSetter.call(input, '');
+                else input.value = '';
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+                if (!document.execCommand('insertText', false, strVal)) {
+                    if (nativeSetter) nativeSetter.call(input, strVal);
+                    else input.value = strVal;
+                    input.dispatchEvent(new InputEvent('input', { bubbles: true, cancelable: true, inputType: 'insertText', data: strVal }));
+                }
+
+                const findOptionsDoc = (root) => {
+                    let found = Array.from(root.querySelectorAll('spl-select-option'));
+                    for (const child of root.querySelectorAll('*')) {
+                        if (child.shadowRoot) found = found.concat(findOptionsDoc(child.shadowRoot));
+                    }
+                    return found;
+                };
+                const options = (await waitFor(() => {
+                    const found = findOptionsDoc(document).filter(o => isElementVisible(o));
+                    return found.length ? found : null;
+                }, { timeout: 2000 })) || [];
+
+                const strLower = strVal.toLowerCase();
+                const best = options.find(o => (o.textContent || '').trim().toLowerCase().startsWith(strLower)) || options[0];
+                if (!best) {
+                    console.log(`[Platform/SmartRecruiters] No autocomplete option matched "${strVal}" for ${field.name}`);
+                    dispatchKey(input, 'Escape', 'Escape', 27);
+                    return false;
+                }
+                best.click();
+                await new Promise(r => setTimeout(r, 300));
+                return String(input.value || '').trim().length > 0;
+            }
+
             // iCIMS custom dropdown: type character-by-character into search, pick first match
             if (field.type === 'icims-dropdown') {
                 const strVal = String(displayValue);
@@ -6462,7 +6599,7 @@
                 id: el.id || '',
                 type: tag === 'button' ? 'dropdown' : (el.type || 'text'),
                 placeholder: el.placeholder || '',
-                label: getFieldLabel(el) || '',
+                label: (type === 'radio' ? getRadioGroupQuestion(el) : '') || getFieldLabel(el) || '',
                 className: el.className || '',
                 context: getElementContext(el),
                 required: el.required || el.hasAttribute('required'),
@@ -6654,7 +6791,7 @@
                 allowRefill: false,
                 // iCIMS revert guard: tracks element → intended value so we can re-fill reversions
                 filledValues: isICIMS ? new Map() : null,
-                strategyStats: { platform: 0, classifier: 0, generic: 0, detected: 0, generic_screening: 0 }
+                strategyStats: { platform: 0, classifier: 0, generic: 0, detected: 0, generic_screening: 0, ai: 0 }
             };
 
             // Step 0: If detected fields with profile mappings are available, use them first
@@ -7085,7 +7222,30 @@
                 }
                 const unmatchedFields = buildAIBatchQueue(fieldTracker);
                 let sqFilled = 0;
-                
+
+                // Yes/No button pairs (Ashby): <button data-option="yes|no"> under a labelled field.
+                // These aren't inputs, so buildAIBatchQueue never sees them. Answer only from the
+                // user's saved answers, and skip a pair that already has a selection.
+                for (const yesBtn of Array.from(document.querySelectorAll('button[data-option="yes"]'))) {
+                    throwIfStopRequested();
+                    const group = yesBtn.parentElement;
+                    const noBtn = group?.querySelector('button[data-option="no"]');
+                    if (!noBtn || !isElementVisible(yesBtn)) continue;
+                    if (yesBtn.getAttribute('aria-pressed') === 'true' || noBtn.getAttribute('aria-pressed') === 'true') continue;
+                    const fieldRoot = group.closest('[data-field-path]') || group.parentElement;
+                    const ynQuestion = (fieldRoot?.querySelector('label')?.textContent || '').replace(/\s+/g, ' ').trim();
+                    if (ynQuestion.length < 4) continue;
+                    const ynMatch = matchQuestionToAnswer(ynQuestion, screeningAnswers, questionPatterns, 'radio', ['Yes', 'No']);
+                    const ynAnswer = String(ynMatch?.answer ?? '').trim().toLowerCase();
+                    const ynBtn = /^(yes|true)\b/.test(ynAnswer) ? yesBtn : /^(no|false)\b/.test(ynAnswer) ? noBtn : null;
+                    if (!ynBtn) continue;
+                    ynBtn.click();
+                    markFieldFilled(ynBtn, 'generic_screening', fieldTracker);
+                    sqFilled++;
+                    relayLog('info', `🎯 Yes/No buttons: "${ynQuestion.substring(0, 40)}..." → ${ynBtn.getAttribute('data-option')}`);
+                    await new Promise(r => setTimeout(r, 60));
+                }
+
                 for (const fieldInfo of unmatchedFields) {
                     throwIfStopRequested();
                     // Try to match using the field's label or context
@@ -7138,6 +7298,40 @@
                 }
             }
 
+            // Step 5.5: AI fallback. Runs only after every rule-based step, and only for
+            // fields still empty. The server returns a path into the user's own profile
+            // (never free text), so a value can only be one the profile contains.
+            if (AI_CONFIG.fallbackEnabled && ns.ai?.analyzeBatchFieldsWithAI) {
+                try {
+                    throwIfStopRequested();
+                    const AI_FALLBACK_MIN_CONFIDENCE = 70; // server scores 0-100
+                    const AI_FALLBACK_MAX_FIELDS = 40;
+                    const skipTypes = new Set(['file', 'password', 'hidden', 'submit', 'button', 'checkbox', 'radio']);
+                    const leftovers = buildAIBatchQueue(fieldTracker)
+                        .filter(f => !skipTypes.has(String(f.type).toLowerCase()))
+                        .slice(0, AI_FALLBACK_MAX_FIELDS);
+                    if (leftovers.length > 0) {
+                        const wire = leftovers.map(({element, ...info}) => info);
+                        const aiResults = await ns.ai.analyzeBatchFieldsWithAI(wire, profileData, mappingConfig);
+                        let aiFilled = 0;
+                        for (const r of aiResults) {
+                            throwIfStopRequested();
+                            const target = leftovers[r.fieldIndex]?.element;
+                            if (!target || !r.shouldFill || r.value == null || String(r.value).trim() === '') continue;
+                            if (!(r.confidence >= AI_FALLBACK_MIN_CONFIDENCE)) continue;
+                            if (await fillElement(target, r.value)) {
+                                markFieldFilled(target, 'ai', fieldTracker);
+                                aiFilled++;
+                            }
+                        }
+                        relayLog('info', `AI fallback filled ${aiFilled}/${leftovers.length} leftover fields`);
+                    }
+                } catch (e) {
+                    if (e?.message === 'FILLO_STOPPED') throw e;
+                    console.warn('[Fillo] AI fallback failed; continuing with rule-based results:', e);
+                }
+            }
+
             // Step 6: iCIMS revert guard — persistent watcher that re-fills any field iCIMS
             // overwrites after our fill. iCIMS parse XHR can return well after fill completes,
             // so a fixed-pass approach isn't enough — we poll for 15 seconds and re-fill on sight.
@@ -7180,6 +7374,7 @@
                                fieldTracker.strategyStats.classifier +
                                fieldTracker.strategyStats.generic +
                                fieldTracker.strategyStats.generic_screening +
+                               (fieldTracker.strategyStats.ai || 0) +
                                detectedFilled;
 
             // Step 8.5: iCIMS post-parse watcher.
