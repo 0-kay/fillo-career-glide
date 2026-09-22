@@ -5,6 +5,7 @@ import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { ArrowRight, Upload, RefreshCw, CheckCircle, Users, Clock, Target } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import Logo from '@/components/Logo';
 
 const LandingPage = () => {
   return (
@@ -14,9 +15,7 @@ const LandingPage = () => {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center h-16">
             <div className="flex items-center space-x-3">
-              <div className="w-8 h-8 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-lg flex items-center justify-center">
-                <span className="text-white font-bold text-sm">F</span>
-              </div>
+              <Logo className="w-8 h-8" />
               <span className="text-2xl font-bold text-gray-900">Fillo</span>
             </div>
             <div className="flex items-center space-x-4">
@@ -160,9 +159,7 @@ const LandingPage = () => {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center">
             <div className="flex items-center space-x-3">
-              <div className="w-8 h-8 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-lg flex items-center justify-center">
-                <span className="text-white font-bold text-sm">F</span>
-              </div>
+              <Logo className="w-8 h-8" />
               <span className="text-xl font-bold text-gray-900">Fillo</span>
             </div>
             <p className="text-gray-500">© {new Date().getFullYear()} Fillo. All rights reserved.</p>

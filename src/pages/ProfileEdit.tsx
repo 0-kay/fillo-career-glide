@@ -11,6 +11,7 @@ import { useProfiles } from '@/hooks/useProfiles';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/hooks/useAuth';
 import ScreeningQuestionsDialog, { ScreeningAnswer } from '@/components/ScreeningQuestionsDialog';
+import Logo from '@/components/Logo';
 
 type EduDate = { year?: string; month?: string } | string | null | undefined;
 
@@ -400,9 +401,7 @@ const ProfileEdit = () => {
               </Link>
             </div>
             <div className="flex items-center space-x-3">
-              <div className="w-8 h-8 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-lg flex items-center justify-center">
-                <span className="text-white font-bold text-sm">F</span>
-              </div>
+              <Logo className="w-8 h-8" />
               <span className="text-2xl font-bold text-gray-900">Fillo</span>
             </div>
           </div>

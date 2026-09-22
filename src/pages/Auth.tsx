@@ -9,6 +9,7 @@ import { ArrowLeft, Mail, Lock, User, Eye, EyeOff } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import { useToast } from '@/hooks/use-toast';
+import Logo from '@/components/Logo';
 
 const Auth = () => {
   const [isSignUp, setIsSignUp] = useState(false);
@@ -112,9 +113,7 @@ const Auth = () => {
         <Card className="w-full max-w-md p-8 shadow-xl border-0">
           {/* Logo */}
           <div className="flex items-center justify-center mb-8">
-            <div className="w-10 h-10 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-lg flex items-center justify-center mr-3">
-              <span className="text-white font-bold text-lg">F</span>
-            </div>
+            <Logo className="w-10 h-10 mr-3" />
             <span className="text-2xl font-bold text-gray-900">Fillo</span>
           </div>
 
