@@ -40,7 +40,7 @@ const LandingPage = () => {
       <section className="py-20 px-4 sm:px-6 lg:px-8">
         <div className="max-w-7xl mx-auto text-center">
           <Badge className="mb-6 bg-blue-100 text-blue-800 border-blue-200">
-            🚀 Now supporting Workday & ICIMS
+            🚀 Now supporting Workday, iCIMS, Greenhouse, Lever, Ashby & SmartRecruiters
           </Badge>
           
           <h1 className="text-5xl md:text-6xl font-bold text-gray-900 mb-6 leading-tight">
@@ -122,7 +122,7 @@ const LandingPage = () => {
               </div>
               <h3 className="text-xl font-semibold text-gray-900 mb-4">3. Auto-Fill Applications</h3>
               <p className="text-gray-600">
-                Click once to fill any job application form on Workday, ICIMS, and more.
+                Click once to fill any job application form on Workday, iCIMS, Greenhouse, Lever, Ashby, SmartRecruiters, and more.
               </p>
             </Card>
           </div>
@@ -216,7 +216,7 @@ const LandingPage = () => {
               </div>
               <span className="text-xl font-bold text-gray-900">Fillo</span>
             </div>
-            <p className="text-gray-500">© 2025 Fillo. All rights reserved.</p>
+            <p className="text-gray-500">© {new Date().getFullYear()} Fillo. All rights reserved.</p>
           </div>
         </div>
       </footer>
