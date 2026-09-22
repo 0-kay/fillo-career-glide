@@ -14,7 +14,7 @@ const Onboarding = ({ onComplete }: OnboardingProps) => {
   const [profileCreated, setProfileCreated] = useState(false);
 
   const steps = [
-    { id: 1, title: 'Welcome', description: 'Get started with Fillo' },
+    { id: 1, title: 'Welcome', description: 'Get started with Fyllo' },
     { id: 2, title: 'Upload Resume', description: 'Let us parse your information' },
     { id: 3, title: 'Complete', description: 'Your profile is ready!' }
   ];
@@ -68,7 +68,7 @@ const Onboarding = ({ onComplete }: OnboardingProps) => {
               <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-6">
                 <Upload className="h-8 w-8 text-brand" />
               </div>
-              <h3 className="text-2xl font-bold text-gray-900 mb-4">Welcome to Fillo!</h3>
+              <h3 className="text-2xl font-bold text-gray-900 mb-4">Welcome to Fyllo!</h3>
               <p className="text-gray-600 mb-8 max-w-2xl mx-auto">
                 Let's get you set up with your first application profile. We'll start by uploading your resume 
                 and parsing your information automatically.

@@ -83,7 +83,7 @@ const Dashboard = () => {
           <div className="flex justify-between items-center h-16">
             <div className="flex items-center space-x-3">
               <Logo className="w-8 h-8" />
-              <span className="text-2xl font-bold text-gray-900">Fillo</span>
+              <span className="text-2xl font-bold text-gray-900">Fyllo</span>
             </div>
             <div className="flex items-center space-x-4">
               <Link to="/settings">

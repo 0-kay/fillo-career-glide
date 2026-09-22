@@ -114,7 +114,7 @@ const Auth = () => {
           {/* Logo */}
           <div className="flex items-center justify-center mb-8">
             <Logo className="w-10 h-10 mr-3" />
-            <span className="text-2xl font-bold text-gray-900">Fillo</span>
+            <span className="text-2xl font-bold text-gray-900">Fyllo</span>
           </div>
 
           {/* Header Text */}

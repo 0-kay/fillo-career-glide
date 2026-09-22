@@ -20,7 +20,7 @@ export default {
 		extend: {
 			fontFamily: {
 				sans: ['Poppins', 'ui-sans-serif', 'system-ui', 'sans-serif'],
-				display: ['Audiowide', 'ui-sans-serif', 'system-ui', 'sans-serif']
+				display: ['Space Grotesk', 'ui-sans-serif', 'system-ui', 'sans-serif']
 			},
 			colors: {
 				// FylloAI brand palette (FYLLOAI BRAND IDENTITY GUIDELINES.pdf): Electric Purple

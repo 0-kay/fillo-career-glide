@@ -16,7 +16,7 @@ const LandingPage = () => {
           <div className="flex justify-between items-center h-16">
             <div className="flex items-center space-x-3">
               <Logo className="w-8 h-8" />
-              <span className="text-2xl font-bold text-gray-900">Fillo</span>
+              <span className="text-2xl font-bold text-gray-900">Fyllo</span>
             </div>
             <div className="flex items-center space-x-4">
               <Link to="/auth">
@@ -48,7 +48,7 @@ const LandingPage = () => {
           </h1>
           
           <p className="text-xl text-gray-600 mb-8 max-w-3xl mx-auto leading-relaxed">
-            Stop wasting hours on repetitive job applications. Fillo is the smart autofill assistant that makes applying to jobs effortless—starting with the platforms you already use.
+            Stop wasting hours on repetitive job applications. Fyllo is the smart autofill assistant that makes applying to jobs effortless—starting with the platforms you already use.
           </p>
           
           <div className="flex justify-center mb-12">
@@ -67,7 +67,7 @@ const LandingPage = () => {
         <div className="max-w-7xl mx-auto">
           <div className="text-center mb-16">
             <h2 className="text-4xl font-display text-gray-900 mb-4">
-              How Fillo Works
+              How Fyllo Works
             </h2>
             <p className="text-xl text-gray-600 max-w-2xl mx-auto">
               Three simple steps to transform your job application experience
@@ -140,7 +140,7 @@ const LandingPage = () => {
             Ready to apply smarter, not harder?
           </h2>
           <p className="text-xl text-white/90 mb-8">
-            Make your application process effortless with Fillo.
+            Make your application process effortless with Fyllo.
           </p>
           
           <div className="flex justify-center">
@@ -160,9 +160,9 @@ const LandingPage = () => {
           <div className="flex justify-between items-center">
             <div className="flex items-center space-x-3">
               <Logo className="w-8 h-8" />
-              <span className="text-xl font-bold text-gray-900">Fillo</span>
+              <span className="text-xl font-bold text-gray-900">Fyllo</span>
             </div>
-            <p className="text-gray-500">© {new Date().getFullYear()} Fillo. All rights reserved.</p>
+            <p className="text-gray-500">© {new Date().getFullYear()} Fyllo. All rights reserved.</p>
           </div>
         </div>
       </footer>

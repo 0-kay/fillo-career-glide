@@ -167,13 +167,13 @@ class FilloPopup {
 
       if (!res.ok) throw new Error(`API Error: ${res.status} ${res.statusText}`);
       if (!Array.isArray(profiles) || profiles.length === 0) {
-        this.showAuth("No profiles found. Please create one in your Fillo account.");
+        this.showAuth("No profiles found. Please create one in your Fyllo account.");
         return;
       }
 
       const readyProfiles = profiles.filter((p) => (p.completeness || 0) >= 75);
       if (readyProfiles.length === 0) {
-        this.showAuth("No profiles are ready. Complete a profile to at least 75% in your Fillo account.");
+        this.showAuth("No profiles are ready. Complete a profile to at least 75% in your Fyllo account.");
         return;
       }
 
