@@ -162,7 +162,10 @@ const LandingPage = () => {
               <Logo className="w-8 h-8" />
               <span className="text-xl font-bold text-gray-900">Fyllo</span>
             </div>
-            <p className="text-gray-500">© {new Date().getFullYear()} Fyllo. All rights reserved.</p>
+            <div className="flex items-center space-x-6">
+              <Link to="/privacy" className="text-gray-500 hover:text-gray-900">Privacy Policy</Link>
+              <p className="text-gray-500">© {new Date().getFullYear()} Fyllo. All rights reserved.</p>
+            </div>
           </div>
         </div>
       </footer>

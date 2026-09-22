@@ -1192,12 +1192,15 @@ class FilloPopup {
 
   async openWebApp() {
     console.log("🌐 Opening Fillo web app...");
-    await chrome.tabs.create({ url: "http://localhost:8080" });
+    await chrome.tabs.create({ url: ENV_CONFIG.WEB_APP_ORIGIN });
     this.showStatus("Please sign in, then click refresh.", "info");
   }
 
   showHelp() {
-    chrome.tabs.create({ url: chrome.runtime.getURL("test-ai-form.html") });
+    this.showStatus(
+      "Select a profile, then click ⚡ Fill Application Form on any job application page. Use 🔍 Detect Fields to preview what the extension sees first.",
+      "info"
+    );
   }
 
   // ---------- UI ----------

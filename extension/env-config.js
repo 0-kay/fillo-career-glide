@@ -9,14 +9,13 @@ const ENV_CONFIG = {
   SUPABASE_URL: 'https://yuojrygcrcpajiglbekd.supabase.co',
 
   // Web app origin - update this with your deployed web app URL
-  WEB_APP_ORIGIN: 'http://localhost:8080',
+  WEB_APP_ORIGIN: 'https://www.fylloai.com',
 
   // Alternative origins for development
   ALLOWED_ORIGINS: [
+    'https://www.fylloai.com',
     'http://localhost:8080',
-    'http://127.0.0.1:8080',
-    // Add your production domain here when deployed
-    // 'https://app.fillo.com'
+    'http://127.0.0.1:8080'
   ]
 };
 
