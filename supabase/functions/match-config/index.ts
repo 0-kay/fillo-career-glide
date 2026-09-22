@@ -714,9 +714,9 @@ const MATCH_CONFIG = {
         {
           "name": "location",
           "label": "City",
-          "type": "text",
+          "type": "sr-autocomplete",
           "required": false,
-          "selector": "[data-test='piersonal-info-location'] spl-autocomplete",
+          "selector": "[data-test='personal-info-location'] spl-autocomplete",
           "dataTest": "location-autocomplete",
           "dataSrId": "location-autocomplete-search",
           "profilePath": "personal_details.city"

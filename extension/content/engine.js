@@ -1938,18 +1938,29 @@
             // Include listbox/combobox buttons so Workday wrapper divs do not get filled directly.
             function findRealInput(root) {
                 const sel = 'input, textarea, select, button[aria-haspopup="listbox"], button[role="combobox"], [role="combobox"]';
-                const found = root.querySelector(sel);
-                if (found) return found;
 
-                // Check all children that might have their own shadow roots
-                const children = root.querySelectorAll('*');
-                for (const child of children) {
-                    if (child.shadowRoot) {
-                        const inner = findRealInput(child.shadowRoot);
-                        if (inner) return inner;
+                // Collect every matching control anywhere in this shadow tree (including nested
+                // shadow roots), not just the first. Some web-component fields nest an unrelated
+                // search/combobox control (e.g. a phone field's country-code picker) ahead of the
+                // actual target input in DOM order — SmartRecruiters' phone field puts the country
+                // search box before the digits <input>. Taking "first match" silently typed the
+                // phone number into the country search box instead.
+                const collect = (node) => {
+                    const found = Array.from(node.querySelectorAll(sel));
+                    for (const child of node.querySelectorAll('*')) {
+                        if (child.shadowRoot) found.push(...collect(child.shadowRoot));
                     }
-                }
-                return null;
+                    return found;
+                };
+                const candidates = collect(root);
+                if (!candidates.length) return null;
+
+                // Prefer a plain native control over a search/combobox one when both exist —
+                // the combobox path is only correct when it's the sole way in (Workday-style
+                // searchable selects), which single-candidate cases still hit below.
+                const isPlain = (el) => ['input', 'textarea', 'select'].includes(el.tagName.toLowerCase())
+                    && el.getAttribute('role') !== 'combobox';
+                return candidates.find(isPlain) || candidates[0];
             }
 
             let targetEl = element;
@@ -6109,6 +6120,69 @@
                 await dismissWorkdayDropdown(ssInput);
                 console.log(`[Platform] No single-select option matched for ${field.name}: ${searchTerm}`);
                 return false;
+            }
+
+            // SmartRecruiters location autocomplete (spl-autocomplete): typing alone doesn't
+            // persist a value — the component clears itself and marks aria-invalid unless a
+            // suggestion is explicitly clicked. The suggestion list renders as <spl-select-option>
+            // elements portalled elsewhere in the document, not inside the field's own shadow tree,
+            // so it has to be searched for document-wide.
+            if (field.type === 'sr-autocomplete') {
+                const strVal = String(displayValue);
+                let host = null;
+                for (const sel of selectors) {
+                    try { host = document.querySelector(sel); } catch (_) { continue; }
+                    if (host) break;
+                }
+                if (!host) return false;
+
+                const findRealInput = (root) => {
+                    const found = root.querySelector('input');
+                    if (found) return found;
+                    for (const child of root.querySelectorAll('*')) {
+                        if (child.shadowRoot) {
+                            const inner = findRealInput(child.shadowRoot);
+                            if (inner) return inner;
+                        }
+                    }
+                    return null;
+                };
+                const input = findRealInput(host) || (host.shadowRoot && findRealInput(host.shadowRoot));
+                if (!input) return false;
+
+                input.focus({ preventScroll: true });
+                const nativeSetter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input), 'value')?.set;
+                if (nativeSetter) nativeSetter.call(input, '');
+                else input.value = '';
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+                if (!document.execCommand('insertText', false, strVal)) {
+                    if (nativeSetter) nativeSetter.call(input, strVal);
+                    else input.value = strVal;
+                    input.dispatchEvent(new InputEvent('input', { bubbles: true, cancelable: true, inputType: 'insertText', data: strVal }));
+                }
+
+                const findOptionsDoc = (root) => {
+                    let found = Array.from(root.querySelectorAll('spl-select-option'));
+                    for (const child of root.querySelectorAll('*')) {
+                        if (child.shadowRoot) found = found.concat(findOptionsDoc(child.shadowRoot));
+                    }
+                    return found;
+                };
+                const options = (await waitFor(() => {
+                    const found = findOptionsDoc(document).filter(o => isElementVisible(o));
+                    return found.length ? found : null;
+                }, { timeout: 2000 })) || [];
+
+                const strLower = strVal.toLowerCase();
+                const best = options.find(o => (o.textContent || '').trim().toLowerCase().startsWith(strLower)) || options[0];
+                if (!best) {
+                    console.log(`[Platform/SmartRecruiters] No autocomplete option matched "${strVal}" for ${field.name}`);
+                    dispatchKey(input, 'Escape', 'Escape', 27);
+                    return false;
+                }
+                best.click();
+                await new Promise(r => setTimeout(r, 300));
+                return String(input.value || '').trim().length > 0;
             }
 
             // iCIMS custom dropdown: type character-by-character into search, pick first match
