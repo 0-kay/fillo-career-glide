@@ -12,6 +12,24 @@ import { useAuth } from '@/hooks/useAuth';
 import { useToast } from '@/hooks/use-toast';
 import Logo from '@/components/Logo';
 
+// supabase.functions.invoke() surfaces any non-2xx response as a generic
+// FunctionsHttpError ("Edge Function returned a non-2xx status code") and
+// discards the response body — our functions put the real reason in
+// `{ error }` on that body via the shared `fail()` helper, so read it back
+// from the error's `context` (the raw Response) instead of trusting error.message.
+async function extractFunctionErrorMessage(error: unknown): Promise<string> {
+  const context = (error as { context?: Response })?.context;
+  if (context && typeof context.json === 'function') {
+    try {
+      const body = await context.clone().json();
+      if (body?.error) return String(body.error);
+    } catch {
+      // response body wasn't JSON — fall through to the generic message
+    }
+  }
+  return error instanceof Error ? error.message : 'Please try again.';
+}
+
 const Settings = () => {
   const { user } = useAuth();
   const { toast } = useToast();
@@ -67,7 +85,7 @@ const Settings = () => {
     setBillingLoading(interval);
     try {
       const { data, error } = await supabase.functions.invoke('stripe-checkout', { body: { interval } });
-      if (error) throw error;
+      if (error) throw new Error(await extractFunctionErrorMessage(error));
       if (!data?.url) throw new Error(data?.error || 'Could not start checkout');
       window.location.href = data.url;
     } catch (error) {
@@ -84,7 +102,7 @@ const Settings = () => {
     setBillingLoading('portal');
     try {
       const { data, error } = await supabase.functions.invoke('stripe-portal');
-      if (error) throw error;
+      if (error) throw new Error(await extractFunctionErrorMessage(error));
       if (!data?.url) throw new Error(data?.error || 'Could not open billing portal');
       window.location.href = data.url;
     } catch (error) {

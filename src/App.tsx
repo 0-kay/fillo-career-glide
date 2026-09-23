@@ -12,6 +12,7 @@ import NotFound from "./pages/NotFound";
 import Settings from "./pages/Settings";
 import ProfileEdit from "./pages/ProfileEdit";
 import Privacy from "./pages/Privacy";
+import Pricing from "./pages/Pricing";
 
 const queryClient = new QueryClient();
 
@@ -36,6 +37,7 @@ const App = () => (
             <Route path="/settings" element={<Settings />} />
             <Route path="/profile/edit/:id" element={<ProfileEdit />} />
             <Route path="/privacy" element={<Privacy />} />
+            <Route path="/pricing" element={<Pricing />} />
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
             <Route path="*" element={<NotFound />} />
           </Routes>
