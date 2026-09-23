@@ -1,4 +1,4 @@
-import Stripe from "https://esm.sh/stripe@17.4.0?target=deno";
+import Stripe from "https://esm.sh/stripe@18.5.0?target=deno";
 import { readEnv } from "../typesafe/client.ts";
 
 /** Shared Stripe client for edge functions. Deno has no Node http module, so Stripe
@@ -8,7 +8,7 @@ export function getStripe(): Stripe {
   if (!key) throw new Error("STRIPE_SECRET_KEY is not set");
   return new Stripe(key, {
     httpClient: Stripe.createFetchHttpClient(),
-    apiVersion: "2024-12-18.acacia",
+    apiVersion: "2025-03-31.basil",
   });
 }
 

@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import type Stripe from "https://esm.sh/stripe@17.4.0?target=deno";
+import type Stripe from "https://esm.sh/stripe@18.5.0?target=deno";
 import { readEnv } from "../_shared/typesafe/client.ts";
 import { getStripe } from "../_shared/stripe/client.ts";
 import { getServiceClient } from "../_shared/stripe/supabase.ts";

@@ -19,6 +19,11 @@ const LandingPage = () => {
               <span className="text-2xl font-bold text-gray-900">Fyllo</span>
             </div>
             <div className="flex items-center space-x-4">
+              <Link to="/pricing">
+                <Button variant="ghost" className="text-gray-600 hover:text-gray-900">
+                  Pricing
+                </Button>
+              </Link>
               <Link to="/auth">
                 <Button variant="ghost" className="text-gray-600 hover:text-gray-900">
                   Sign In
