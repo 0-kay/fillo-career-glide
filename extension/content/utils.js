@@ -26,6 +26,33 @@
     };
   };
 
+  // Calls a Supabase RPC as the signed-in user (Postgres function under RLS/SECURITY
+  // DEFINER), used for the free/pro fill-quota check and usage logging. Never throws —
+  // billing checks must not be able to break the core autofill feature; callers treat
+  // a null result as "couldn't check, don't block."
+  utils.callSupabaseRpc = async function(name, body = {}){
+    try {
+      const supabaseUrl = ns.config?.AI_CONFIG?.supabaseUrl;
+      if (!supabaseUrl) return null;
+      const { FILLO_AUTH_TOKEN } = await chrome.storage.local.get('FILLO_AUTH_TOKEN');
+      if (!FILLO_AUTH_TOKEN) return null; // not signed in — nothing to check yet
+
+      const headers = utils.getSupabaseHeaders(FILLO_AUTH_TOKEN);
+      if (!headers) return null;
+
+      const res = await utils.fetchWithTimeout(`${supabaseUrl}/rest/v1/rpc/${name}`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(body),
+      }, 8000);
+      if (!res.ok) return null;
+      return await res.json();
+    } catch (e) {
+      console.warn(`[Fillo] Supabase RPC ${name} failed (ignored):`, e?.message || e);
+      return null;
+    }
+  };
+
   utils.parseMatchTableRow = function(row){
     if (!row) return null;
 

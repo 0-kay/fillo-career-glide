@@ -3,6 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Poppins:wght@400;500;600;700&display=swap">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body class="popup">
@@ -10,7 +12,7 @@
     <!-- Header -->
     <div class="popup-header">
       <div class="logo">
-        <div class="logo-icon">F</div>
+        <div class="logo-icon"><img src="icons/icon48.png" alt="Fyllo"></div>
         <span class="logo-text">Fyllo</span>
       </div>
       <div class="subtitle">Auto-Fill Assistant</div>
@@ -94,12 +96,12 @@
     <!-- AI Status Section -->
     <div id="ai-config-section" class="section hidden">
       <h3>🧠 AI Status</h3>
-      <p class="help-text">AI-powered form filling is enabled via Supabase</p>
-      
+      <p class="help-text">Field matching runs against your Supabase-backed profile data</p>
+
       <div class="ai-info">
         <div class="status-row">
-          <span class="label">AI Engine:</span>
-          <span class="value">OpenAI GPT-3.5-turbo</span>
+          <span class="label">Matching:</span>
+          <span class="value">Rule-based field mapping</span>
         </div>
         <div class="status-row">
           <span class="label">Provider:</span>
@@ -128,6 +130,7 @@
     </div>
   </div>
 
+  <script src="env-config.js"></script>
   <script src="popup.js"></script>
 </body>
 </html> 

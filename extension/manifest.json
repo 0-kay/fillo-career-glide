@@ -44,6 +44,7 @@
     },
     {
       "matches": [
+        "https://www.fylloai.com/*",
         "http://localhost:*/*",
         "http://127.0.0.1:*/*"
       ],
@@ -55,6 +56,7 @@
   ],
   "externally_connectable": {
     "matches": [
+      "https://www.fylloai.com/*",
       "http://localhost:5173/*",
       "http://localhost:*/*"
     ]

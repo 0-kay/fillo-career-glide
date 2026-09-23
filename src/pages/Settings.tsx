@@ -5,7 +5,7 @@ import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
-import { ArrowLeft, User, Bell, Shield, Chrome, Loader2 } from 'lucide-react';
+import { ArrowLeft, User, Bell, Shield, Chrome, Loader2, CreditCard } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
@@ -24,11 +24,78 @@ const Settings = () => {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [savingPassword, setSavingPassword] = useState(false);
 
+  const [plan, setPlan] = useState<'free' | 'pro'>('free');
+  const [currentPeriodEnd, setCurrentPeriodEnd] = useState<string | null>(null);
+  const [usage, setUsage] = useState<{ used: number; cap: number | null }>({ used: 0, cap: 5 });
+  const [billingLoading, setBillingLoading] = useState<'month' | 'year' | 'portal' | null>(null);
+
   useEffect(() => {
     if (!user) return;
     setFullName((user.user_metadata?.full_name as string | undefined) ?? '');
     setEmail(user.email ?? '');
   }, [user]);
+
+  useEffect(() => {
+    if (!user) return;
+    (async () => {
+      const [{ data: profileRow }, { data: usageRow }] = await Promise.all([
+        supabase.from('profiles').select('plan, current_period_end').eq('id', user.id).single(),
+        supabase.rpc('get_fill_usage').single(),
+      ]);
+      if (profileRow) {
+        setPlan(profileRow.plan === 'pro' ? 'pro' : 'free');
+        setCurrentPeriodEnd(profileRow.current_period_end);
+      }
+      if (usageRow) setUsage({ used: usageRow.used ?? 0, cap: usageRow.cap ?? null });
+    })();
+  }, [user]);
+
+  // Stripe Checkout redirects back here with ?checkout=success|cancelled.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const checkout = params.get('checkout');
+    if (!checkout) return;
+    if (checkout === 'success') {
+      toast({ title: 'Welcome to Pro!', description: 'Your subscription is active.' });
+    } else if (checkout === 'cancelled') {
+      toast({ title: 'Checkout cancelled', description: 'No changes were made to your plan.' });
+    }
+    window.history.replaceState({}, '', '/settings');
+  }, [toast]);
+
+  const handleUpgrade = async (interval: 'month' | 'year') => {
+    setBillingLoading(interval);
+    try {
+      const { data, error } = await supabase.functions.invoke('stripe-checkout', { body: { interval } });
+      if (error) throw error;
+      if (!data?.url) throw new Error(data?.error || 'Could not start checkout');
+      window.location.href = data.url;
+    } catch (error) {
+      toast({
+        title: 'Could not start checkout',
+        description: error instanceof Error ? error.message : 'Please try again.',
+        variant: 'destructive',
+      });
+      setBillingLoading(null);
+    }
+  };
+
+  const handleManageBilling = async () => {
+    setBillingLoading('portal');
+    try {
+      const { data, error } = await supabase.functions.invoke('stripe-portal');
+      if (error) throw error;
+      if (!data?.url) throw new Error(data?.error || 'Could not open billing portal');
+      window.location.href = data.url;
+    } catch (error) {
+      toast({
+        title: 'Could not open billing portal',
+        description: error instanceof Error ? error.message : 'Please try again.',
+        variant: 'destructive',
+      });
+      setBillingLoading(null);
+    }
+  };
 
   const handleSaveAccount = async () => {
     if (!user) return;
@@ -160,6 +227,74 @@ const Settings = () => {
                 Save Changes
               </Button>
             </div>
+          </Card>
+
+          {/* Billing & Plan */}
+          <Card className="p-6">
+            <div className="flex items-center space-x-3 mb-6">
+              <CreditCard className="h-5 w-5 text-brand" />
+              <h3 className="text-lg font-semibold text-gray-900">Billing & Plan</h3>
+              <span
+                className={`text-xs font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full ${
+                  plan === 'pro' ? 'bg-brand/10 text-brand-dark' : 'bg-gray-100 text-gray-600'
+                }`}
+              >
+                {plan === 'pro' ? 'Pro' : 'Free'}
+              </span>
+            </div>
+
+            {plan === 'pro' ? (
+              <div className="space-y-4">
+                <p className="text-sm text-gray-600">
+                  You're on the Pro plan
+                  {currentPeriodEnd ? ` — renews ${new Date(currentPeriodEnd).toLocaleDateString()}` : ''}.
+                  Unlimited profiles, unlimited autofills, full AI assistance.
+                </p>
+                <Button variant="outline" onClick={handleManageBilling} disabled={billingLoading === 'portal'}>
+                  {billingLoading === 'portal' && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                  Manage Billing
+                </Button>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <div>
+                  <p className="text-sm text-gray-600 mb-1">
+                    {usage.cap != null
+                      ? `${usage.used} of ${usage.cap} autofills used this month`
+                      : `${usage.used} autofills this month`}
+                  </p>
+                  {usage.cap != null && (
+                    <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-brand"
+                        style={{ width: `${Math.min(100, (usage.used / usage.cap) * 100)}%` }}
+                      />
+                    </div>
+                  )}
+                  <p className="text-xs text-gray-500 mt-2">
+                    Free plan: 1 profile, 5 autofills/month, limited AI assistance.
+                  </p>
+                </div>
+                <div className="flex flex-col sm:flex-row gap-3">
+                  <Button
+                    className="bg-brand hover:bg-brand-dark"
+                    onClick={() => handleUpgrade('month')}
+                    disabled={billingLoading !== null}
+                  >
+                    {billingLoading === 'month' && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                    Upgrade — $9/month
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => handleUpgrade('year')}
+                    disabled={billingLoading !== null}
+                  >
+                    {billingLoading === 'year' && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                    Upgrade — $90/year
+                  </Button>
+                </div>
+              </div>
+            )}
           </Card>
 
           {/* Notification Settings */}

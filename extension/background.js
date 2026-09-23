@@ -18,14 +18,20 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 });
 
 
+const ALLOWED_EXTERNAL_ORIGINS = [
+  'https://www.fylloai.com',
+  'http://localhost:5173',
+  'http://localhost:8080'
+];
+
 chrome.runtime.onMessageExternal.addListener((request, sender, sendResponse) => {
-  if (sender.origin === 'http://localhost:5173' || sender.origin === 'http://localhost:8080') {
+  if (ALLOWED_EXTERNAL_ORIGINS.includes(sender.origin)) {
     console.log('Received message:', request);
-     chrome.storage.local.set({ FILLO_AUTH_TOKEN: request.accessToken })
- 
+    chrome.storage.local.set({ FILLO_AUTH_TOKEN: request.accessToken })
+
     sendResponse({ success: true, result: 'token sent' });
   }
-  return true; 
+  return true;
 });
 
 

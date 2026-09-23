@@ -6,7 +6,7 @@
 
   // Listen for postMessage from the web app
   window.addEventListener('message', async (event) => {
-    // Only accept messages from the same origin (localhost)
+    // Only accept messages from the same page (this script only runs on the Fyllo web app and localhost dev origins, per manifest.json)
     if (event.source !== window) {
       return;
     }

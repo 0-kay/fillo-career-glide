@@ -6757,6 +6757,17 @@
             relayLog('info', '🚀 Starting manual fill run', { useAI: false, url: location.href, hasDetectedFields: !!detectedFields, hasResume: !!resumeDataUri });
             throwIfStopRequested();
 
+            // Free-plan monthly fill quota. Fails open: if the check itself can't
+            // complete (offline, not signed in, function not deployed yet), we don't
+            // block the core feature over a billing hiccup — only an explicit `false`
+            // stops the run.
+            const fillAllowed = await ns.utils.callSupabaseRpc('can_run_fill');
+            if (fillAllowed === false) {
+                ns.utils.showNotification('⭐ Free plan limit reached (5 fills/month). Upgrade to Pro for unlimited autofills.', 'error');
+                relayLog('info', 'Fill blocked: free-tier monthly quota reached');
+                return { filled: 0, message: 'Free plan monthly limit reached — upgrade to Pro.' };
+            }
+
             if (window.location.hostname.includes('icims.com')) {
                 const alreadyUploaded = await waitForIcmsResumeUpload(100);
                 if (!alreadyUploaded) {
@@ -7376,6 +7387,12 @@
                                fieldTracker.strategyStats.generic_screening +
                                (fieldTracker.strategyStats.ai || 0) +
                                detectedFilled;
+
+            // Best-effort usage logging for the free-plan quota meter — not exact
+            // metering, so a rare double-count (e.g. the iCIMS re-fill below) is fine.
+            if (totalFilled > 0) {
+                ns.utils.callSupabaseRpc('log_fill_usage').catch(() => {});
+            }
 
             // Step 8.5: iCIMS post-parse watcher.
             // If we filled nothing (resume parse hadn't returned yet), watch for iCIMS to
