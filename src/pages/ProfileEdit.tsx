@@ -1,17 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Card } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { Textarea } from '@/components/ui/textarea';
-import { ArrowLeft, Plus, X, Save, Loader2, ExternalLink, Award, Globe, Briefcase, GraduationCap, Code, Users, Trophy, BookOpen, User, Settings, ClipboardCheck } from 'lucide-react';
 import { Link, useParams, useNavigate } from 'react-router-dom';
 import { useProfiles } from '@/hooks/useProfiles';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/hooks/useAuth';
 import ScreeningQuestionsDialog, { ScreeningAnswer } from '@/components/ScreeningQuestionsDialog';
-import Logo from '@/components/Logo';
+import AppShell from '@/components/fyllo/AppShell';
+import '@/components/fyllo/fyllo.css';
 
 type EduDate = { year?: string; month?: string } | string | null | undefined;
 
@@ -46,6 +40,8 @@ const ProfileEdit = () => {
   const [formData, setFormData] = useState<any>(null);
   const [newSkill, setNewSkill] = useState('');
   const [showScreeningDialog, setShowScreeningDialog] = useState(false);
+  const [section, setSection] = useState('personal');
+  const [saved, setSaved] = useState(false);
 
   useEffect(() => {
     if (authLoading) return; // Wait until authentication check is complete
@@ -221,6 +217,7 @@ const ProfileEdit = () => {
           title: "Success",
           description: "Profile updated successfully",
         });
+        setSaved(true);
         navigate('/dashboard');
       }
     } catch (error) {
@@ -234,114 +231,6 @@ const ProfileEdit = () => {
       setSaving(false);
     }
   };
-
-  // EditableField component for inline editing
-  const EditableField = ({ 
-    value, 
-    onSave, 
-    fieldKey, 
-    type = 'text', 
-    multiline = false,
-    placeholder = "Click to edit...",
-    className = ""
-  }: {
-    value: string;
-    onSave: (value: string) => void;
-    fieldKey: string;
-    type?: string;
-    multiline?: boolean;
-    placeholder?: string;
-    className?: string;
-  }) => {
-    const [editValue, setEditValue] = useState(value || '');
-    const [isEditing, setIsEditing] = useState(false);
-
-    const handleEdit = () => {
-      setIsEditing(true);
-      setEditValue(value || '');
-    };
-
-    const handleSaveField = () => {
-      onSave(editValue);
-      setIsEditing(false);
-    };
-
-    const handleCancel = () => {
-      setEditValue(value || '');
-      setIsEditing(false);
-    };
-
-    const handleKeyDown = (e: React.KeyboardEvent) => {
-      if (e.key === 'Enter' && !multiline) {
-        handleSaveField();
-      } else if (e.key === 'Escape') {
-        handleCancel();
-      }
-    };
-
-    if (isEditing) {
-      return (
-        <div className="space-y-2">
-          {multiline ? (
-            <Textarea
-              value={editValue}
-              onChange={(e) => setEditValue(e.target.value)}
-              onKeyDown={handleKeyDown}
-              className={`min-h-[100px] ${className}`}
-              placeholder={placeholder}
-              autoFocus
-            />
-          ) : (
-            <Input
-              type={type}
-              value={editValue}
-              onChange={(e) => setEditValue(e.target.value)}
-              onKeyDown={handleKeyDown}
-              className={className}
-              placeholder={placeholder}
-              autoFocus
-            />
-          )}
-          <div className="flex gap-2">
-            <Button size="sm" onClick={handleSaveField}>
-              <Save className="h-3 w-3 mr-1" />
-              Save
-            </Button>
-            <Button size="sm" variant="outline" onClick={handleCancel}>
-              <X className="h-3 w-3 mr-1" />
-              Cancel
-            </Button>
-          </div>
-        </div>
-      );
-    }
-
-    return (
-      <div 
-        className={`cursor-pointer hover:bg-gray-50 p-2 rounded border border-transparent hover:border-gray-200 transition-colors min-h-[2rem] flex items-start ${className}`}
-        onClick={handleEdit}
-        title="Click to edit"
-      >
-        {value ? (
-          <div className="w-full">
-            {value.includes('•') ? (
-              value.split('•').filter(item => item.trim()).map((item: string, itemIndex: number) => (
-                <div key={itemIndex} className="mb-1 flex items-start">
-                  <span className="text-brand mr-2 mt-0.5">•</span>
-                  <span className="flex-1">{item.trim()}</span>
-                </div>
-              ))
-            ) : (
-              <span className="whitespace-pre-line">{value}</span>
-            )}
-          </div>
-        ) : (
-          <span className="text-gray-400 italic">{placeholder}</span>
-        )}
-      </div>
-    );
-  };
-
   // Helper to update nested fields
   const updateNestedField = (section: string, index: number, field: string, value: string) => {
     setFormData((prev: any) => {
@@ -361,996 +250,479 @@ const ProfileEdit = () => {
       return { ...prev, educationHistory: history };
     });
   };
+  const fd = formData;
+  const pd = fd?.personalDetails || {};
+  const skillsAll: string[] = fd?.technicalSkills?.all || [];
+  const tools: string[] = fd?.toolsTechnologies?.all || [];
+  const len = (k: string) => (fd?.[k] || []).length;
+
+  const completeness = (() => {
+    const q = fd?.resumeMetadata?.extractionQuality?.dataCompleteness;
+    if (q !== undefined && q !== null && !isNaN(Number(q))) return Math.round(Number(q));
+    const checks = [pd.fullName, pd.email, pd.phone, pd.summary, pd.address?.city, skillsAll.length, len('workExperience'), len('educationHistory')];
+    return Math.round((checks.filter(Boolean).length / checks.length) * 100);
+  })();
+
+  const sections = [
+    { id: 'personal', label: 'Personal details', meta: '' },
+    { id: 'experience', label: 'Work experience', meta: String(len('workExperience')) },
+    { id: 'skills', label: 'Skills', meta: String(skillsAll.length) },
+    ...(tools.length ? [{ id: 'tools', label: 'Tools & technologies', meta: String(tools.length) }] : []),
+    { id: 'answers', label: 'Screening answers', meta: String(len('screeningAnswers')) },
+    { id: 'resume', label: 'Résumé preview', meta: '' },
+    { id: 'education', label: 'Education', meta: String(len('educationHistory')) },
+    ...(len('projects') ? [{ id: 'projects', label: 'Projects', meta: String(len('projects')) }] : []),
+    ...(len('certifications') ? [{ id: 'certs', label: 'Certifications & licenses', meta: String(len('certifications')) }] : []),
+    ...(len('awards') ? [{ id: 'awards', label: 'Awards & honors', meta: String(len('awards')) }] : []),
+    ...(len('volunteerExperience') ? [{ id: 'volunteer', label: 'Volunteer experience', meta: String(len('volunteerExperience')) }] : []),
+    ...(len('languages') ? [{ id: 'languages', label: 'Languages', meta: String(len('languages')) }] : []),
+  ];
+
+  const shell = (inner: React.ReactNode) => <AppShell>{inner}</AppShell>;
 
   if (loading) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 flex items-center justify-center">
-        <div className="text-center">
-          <Loader2 className="h-12 w-12 animate-spin text-brand mx-auto mb-4" />
-          <p className="text-gray-600">Loading profile data...</p>
-        </div>
-      </div>
+    return shell(
+      <main style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 14, padding: 80 }}>
+        <div className="fy-spin" style={{ width: 32, height: 32 }} />
+        <p style={{ margin: 0, color: '#6C6577', fontSize: 14 }}>Loading profile data…</p>
+      </main>
     );
   }
 
-  if (!formData) {
+  if (!fd) {
+    return shell(
+      <main style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 16, padding: 80 }}>
+        <p style={{ margin: 0, color: '#6C6577' }}>Profile not found</p>
+        <Link to="/dashboard" className="fy-btn fy-dark" style={{ height: 44, padding: '0 20px', borderRadius: 999, fontSize: 14 }}>Back to Dashboard</Link>
+      </main>
+    );
+  }
+
+  const fileName = fd.resumeMetadata?.fileName;
+  const initial = ((fd.profileName || 'P').trim()[0] || 'P').toUpperCase();
+  const saveLabel = saving ? 'Saving…' : saved ? 'Saved' : 'Save changes';
+  const addr = pd.address || {};
+  const contactLine = [[addr.city, addr.state].filter(Boolean).join(', '), pd.email, pd.phone, pd.linkedin].filter(Boolean).join(' · ');
+  const fmtDates = (o: any) => [o?.startDate, o?.endDate].filter(Boolean).join(' – ');
+  const groupTitle = { margin: 0, fontSize: 18, fontWeight: 500 } as const;
+
+  const eduDefs: FieldDef[] = [
+    { label: 'Degree', key: 'degree', ph: 'e.g., Bachelor of Science', bold: true },
+    { label: 'Institution', key: 'school', ph: 'Enter school or university' },
+    { label: 'Field of study', key: 'fieldOfStudy', ph: 'e.g., Computer Science' },
+    { label: 'Location', key: 'location', ph: 'e.g., Boston, MA' },
+    { label: 'Start date', key: 'startDate', ph: 'e.g., 9/2018 or 2018', get: (o) => formatEduDate(o?.startDate), set: (i, v) => updateEducationDate(i, 'startDate', v) },
+    { label: 'End date / graduation', key: 'endDate', ph: 'e.g., 5/2022 or 2022', get: (o) => formatEduDate(o?.endDate), set: (i, v) => updateEducationDate(i, 'endDate', v) },
+    { label: 'GPA', key: 'gpa', ph: 'e.g., 3.8' },
+    { label: 'Details', key: 'description', ph: 'Relevant coursework, honors, activities. Use • for bullet points.', multi: true },
+  ];
+
+  return shell(
+    <main data-screen-label="Profile" style={{ maxWidth: 1200, width: '100%', margin: '0 auto', padding: 'clamp(28px,4vw,48px) 24px 120px', display: 'flex', flexDirection: 'column', gap: 36 }}>
+      <Link to="/dashboard" style={{ alignSelf: 'flex-start', padding: '6px 0', fontSize: 14, color: '#6C6577' }}>← Profiles</Link>
+      <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'flex-end', gap: '20px 40px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 18 }}>
+          <div aria-hidden="true" className="sg" style={{ width: 64, height: 64, borderRadius: 18, background: '#8A2BE2', color: '#fff', fontWeight: 600, fontSize: 24, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{initial}</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <h1 className="sg" style={{ margin: 0, fontWeight: 500, fontSize: 'clamp(30px,3.4vw,42px)', lineHeight: 1.05, letterSpacing: '-0.035em' }}>{fd.profileName || 'Untitled Profile'}</h1>
+            {fileName && <span style={{ fontSize: 14, color: '#6C6577' }}>From {fileName} · Default profile</span>}
+          </div>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
+          <div style={{ flex: '0 0 180px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 13 }}><span style={{ color: '#6C6577' }}>Complete</span><span style={{ fontWeight: 500 }}>{completeness}%</span></div>
+            <div className="fy-bar"><div style={{ width: `${Math.min(100, completeness)}%` }} /></div>
+          </div>
+          <button type="button" className="fy-btn fy-dark" onClick={handleSave} disabled={saving} style={{ height: 44, padding: '0 20px', borderRadius: 999, fontSize: 14 }}>{saveLabel}</button>
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(min(100%,260px),1fr))', gap: '32px 48px', alignItems: 'start' }}>
+        <nav aria-label="Profile sections" style={{ display: 'flex', flexDirection: 'column', gap: 2, position: 'sticky', top: 96, maxWidth: 260 }}>
+          {sections.map((s) => {
+            const cur = s.id === section;
+            return (
+              <button key={s.id} type="button" onClick={() => setSection(s.id)} aria-current={cur ? 'true' : undefined}
+                style={{ textAlign: 'left', height: 42, padding: '0 14px', border: 0, borderRadius: 12, background: cur ? '#F5F1FB' : 'transparent', color: cur ? '#171321' : '#6C6577', fontSize: 14, fontWeight: 500, cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                {s.label}<span style={{ fontSize: 12, fontWeight: 400, color: '#9C97A6' }}>{s.meta}</span>
+              </button>
+            );
+          })}
+        </nav>
+
+        <div style={{ gridColumn: 'span 2', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 20 }}>
+          {section === 'personal' && (
+            <Card title="Personal details">
+              <div style={fieldGrid}>
+                <PF id="profileName" label="Profile name" value={fd.profileName || ''} ph="e.g., Software Engineer Profile" onChange={(v: string) => setFormData((p: any) => ({ ...p, profileName: v }))} col="1 / -1" />
+                <PF id="fullName" label="Full name" value={pd.fullName || ''} onChange={(v: string) => handlePersonalDetailsChange('fullName', v)} />
+                <PF id="email" type="email" label="Email" value={pd.email || ''} onChange={(v: string) => handlePersonalDetailsChange('email', v)} />
+                <PF id="phone" label="Phone" value={pd.phone || ''} onChange={(v: string) => handlePersonalDetailsChange('phone', v)} />
+                <PF id="phoneExtension" label="Phone extension" value={pd.phoneExtension || ''} onChange={(v: string) => handlePersonalDetailsChange('phoneExtension', v)} />
+                <PF id="addressLine1" label="Address line 1" value={addr.line1 || ''} onChange={(v: string) => handleAddressChange('line1', v)} />
+                <PF id="addressLine2" label="Address line 2" value={addr.line2 || ''} onChange={(v: string) => handleAddressChange('line2', v)} />
+                <PF id="city" label="City" value={addr.city || ''} onChange={(v: string) => handleAddressChange('city', v)} />
+                <PF id="state" label="State / province" value={addr.state || ''} onChange={(v: string) => handleAddressChange('state', v)} />
+                <PF id="postalCode" label="Postal code" value={addr.postalCode || ''} onChange={(v: string) => handleAddressChange('postalCode', v)} />
+                <PF id="country" label="Country" value={addr.country || ''} onChange={(v: string) => handleAddressChange('country', v)} />
+                <PF id="linkedin" label="LinkedIn" value={pd.linkedin || ''} onChange={(v: string) => handlePersonalDetailsChange('linkedin', v)} />
+                <PF id="github" label="GitHub" value={pd.github || ''} onChange={(v: string) => handlePersonalDetailsChange('github', v)} />
+                <PF id="portfolio" label="Portfolio" value={pd.portfolio || ''} onChange={(v: string) => handlePersonalDetailsChange('portfolio', v)} />
+              </div>
+              {pd.additionalLinks && pd.additionalLinks.length > 0 && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <span style={{ fontSize: 13, fontWeight: 500 }}>Additional links</span>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                    {pd.additionalLinks.map((l: any, k: number) => <LinkChip key={k} url={l.url || ''} label={l.label || 'Link'} />)}
+                  </div>
+                </div>
+              )}
+              {(pd.linkedin || pd.github || pd.portfolio) && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <span style={{ fontSize: 13, fontWeight: 500 }}>Profile links</span>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                    {pd.linkedin && <LinkChip url={pd.linkedin} label="LinkedIn" />}
+                    {pd.github && <LinkChip url={pd.github} label="GitHub" tone="plain" />}
+                    {pd.portfolio && <LinkChip url={pd.portfolio} label="Portfolio" tone="plain" />}
+                  </div>
+                </div>
+              )}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+                <span style={{ fontSize: 13, fontWeight: 500 }}>Professional summary</span>
+                <EditableField multiline value={pd.summary || ''} fieldKey="professional-summary" placeholder="Write a compelling professional summary. Use • for bullet points." onSave={(v) => handlePersonalDetailsChange('summary', v)} />
+              </div>
+            </Card>
+          )}
+
+          {section === 'experience' && (
+            <Card title="Work experience">
+              <ItemList items={fd.workExperience} updateNestedField={updateNestedField} sectionKey="workExperience" empty="No work experience data found" defs={[
+                { label: 'Job title', key: 'jobTitle', ph: 'Enter job title', bold: true },
+                { label: 'Company', key: 'company', ph: 'Enter company name' },
+                { label: 'Start date', key: 'startDate', ph: 'e.g., Jan 2022' },
+                { label: 'End date', key: 'endDate', ph: 'e.g., Present or Dec 2023' },
+                { label: 'Location', key: 'location', ph: 'e.g., San Francisco, CA', full: true },
+                { label: 'Description', key: 'description', ph: 'Describe your role and responsibilities. Use • for bullet points.', multi: true },
+              ]} extras={(exp) => (
+                <>
+                  <Chips label="Technologies used" items={exp?.technologies} />
+                  {exp?.achievements && exp.achievements.length > 0 && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      <span style={{ fontSize: 13, fontWeight: 500 }}>Key achievements</span>
+                      <ul style={{ margin: 0, padding: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        {exp.achievements.map((a: string, k: number) => (
+                          <li key={k} style={{ fontSize: 14, color: '#6C6577', display: 'flex', gap: 8 }}><span>•</span><span>{a}</span></li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  <Chips label="Metrics & impact" items={exp?.metrics} tone="green" />
+                </>
+              )} />
+            </Card>
+          )}
+
+          {section === 'skills' && (
+            <Card title="Skills" right={<span style={{ fontSize: 13, color: '#6C6577' }}>{skillsAll.length} skills</span>}>
+              <form onSubmit={(e) => { e.preventDefault(); addTechnicalSkill(); }} style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <input className="fy-input" value={newSkill} onChange={(e) => setNewSkill(e.target.value)} placeholder="Add a technical skill" aria-label="New skill" style={{ flex: '1 1 220px', width: 'auto', height: 44 }} />
+                <button type="submit" className="fy-btn fy-primary" disabled={!newSkill.trim()} style={{ height: 44, padding: '0 18px', borderRadius: 12, fontSize: 14 }}>+ Add</button>
+              </form>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                {skillsAll.map((sk, i) => (
+                  <span key={i} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 14, padding: '0 6px 0 14px', height: 36, borderRadius: 999, background: '#F6F4F9' }}>
+                    {sk}
+                    <button type="button" className="fy-btn fy-ghost" onClick={() => removeTechnicalSkill(i)} aria-label={`Remove ${sk}`} style={{ width: 24, height: 24, padding: 0, borderRadius: '50%', color: '#6C6577', fontSize: 15, lineHeight: 1 }}>×</button>
+                  </span>
+                ))}
+              </div>
+              {Object.entries(fd.technicalSkills || {}).filter(([k]) => k !== 'all').map(([category, skills]) => (
+                Array.isArray(skills) && skills.length > 0 ? <Chips key={category} label={`${category.charAt(0).toUpperCase()}${category.slice(1)} skills`} items={skills as string[]} /> : null
+              ))}
+            </Card>
+          )}
+
+          {section === 'tools' && (
+            <Card title="Tools & technologies" right={<span style={{ fontSize: 13, color: '#6C6577' }}>{tools.length}</span>}>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                {tools.map((t, i) => <span key={i} style={{ fontSize: 14, height: 36, display: 'inline-flex', alignItems: 'center', padding: '0 14px', borderRadius: 999, background: '#F6F4F9' }}>{t}</span>)}
+              </div>
+            </Card>
+          )}
+
+          {section === 'answers' && (
+            <section className="fy-card" style={{ padding: 'clamp(20px,3vw,32px)', display: 'flex', flexDirection: 'column' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+                <h2 style={groupTitle}>Screening answers</h2>
+                <button type="button" className="fy-btn fy-outline" onClick={() => setShowScreeningDialog(true)} style={{ height: 40, padding: '0 16px', borderRadius: 999, fontSize: 14 }}>Edit</button>
+              </div>
+              {fd.screeningAnswers && fd.screeningAnswers.length > 0 ? (
+                fd.screeningAnswers.map((sa: ScreeningAnswer) => (
+                  <div key={sa.id} style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: '10px 20px', padding: '16px 0', borderTop: '1px solid rgba(23,19,33,.06)' }}>
+                    <span style={{ flex: '1 1 260px', fontSize: 14, lineHeight: 1.5 }}>{sa.question}</span>
+                    <span style={{ fontSize: 13, fontWeight: 500, padding: '6px 12px', borderRadius: 999, background: sa.answer ? '#F5F1FB' : '#F6F4F9', color: sa.answer ? '#4B0082' : '#9C97A6' }}>{sa.answer || 'Not answered'}</span>
+                  </div>
+                ))
+              ) : (
+                <p style={{ margin: 0, color: '#6C6577', fontSize: 14, textAlign: 'center', padding: '16px 0', borderTop: '1px solid rgba(23,19,33,.06)' }}>
+                  No screening answers configured.{' '}
+                  <button type="button" onClick={() => setShowScreeningDialog(true)} style={{ border: 0, background: 'none', color: '#8A2BE2', cursor: 'pointer', fontSize: 14, padding: 0 }}>Add answers</button>
+                </p>
+              )}
+            </section>
+          )}
+
+          {section === 'resume' && (
+            <section className="fy-card" style={{ overflow: 'hidden' }}>
+              <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 14, padding: '18px clamp(18px,3vw,28px)', borderBottom: '1px solid rgba(23,19,33,.07)' }}>
+                <div style={{ width: 34, height: 40, borderRadius: 5, border: '1px solid rgba(23,19,33,.12)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center', paddingBottom: 5, fontSize: 8, fontWeight: 600, color: '#4B0082', flex: 'none' }}>PDF</div>
+                <div style={{ flex: '1 1 200px', minWidth: 0 }}>
+                  <div style={{ fontSize: 15, fontWeight: 500 }}>{fileName || 'Résumé preview'}</div>
+                  <div style={{ fontSize: 13, color: '#6C6577' }}>Preview built from your profile data</div>
+                </div>
+              </div>
+              <div style={{ background: '#F3F1F6', padding: 'clamp(16px,4vw,40px)', display: 'flex', justifyContent: 'center' }}>
+                <article aria-label="Résumé preview" style={{ width: '100%', maxWidth: 600, minHeight: 500, background: '#fff', boxShadow: '0 1px 2px rgba(23,19,33,.08),0 12px 32px -12px rgba(23,19,33,.2)', padding: 'clamp(22px,5%,44px)', display: 'flex', flexDirection: 'column', gap: 18, fontFamily: "Georgia,'Times New Roman',serif", color: '#222', overflow: 'hidden' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4, borderBottom: '1px solid #DDD', paddingBottom: 14 }}>
+                    <span style={{ fontSize: 'clamp(20px,3vw,26px)', letterSpacing: '.02em' }}>{pd.fullName || fd.profileName}</span>
+                    <span style={{ fontSize: 11, color: '#555', fontFamily: 'Poppins,sans-serif' }}>{contactLine}</span>
+                  </div>
+                  {len('workExperience') > 0 && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                      <span style={{ fontSize: 10, letterSpacing: '.14em', textTransform: 'uppercase', fontFamily: 'Poppins,sans-serif', color: '#555' }}>Experience</span>
+                      {fd.workExperience.map((j: any, i: number) => (
+                        <div key={i} style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, fontSize: 13 }}>
+                            <span><b>{j?.jobTitle}</b>{j?.company ? `, ${j.company}` : ''}</span>
+                            <span style={{ color: '#666', fontSize: 11, whiteSpace: 'nowrap' }}>{fmtDates(j)}</span>
+                          </div>
+                          <span style={{ display: 'block', height: 5, width: '92%', background: '#EEE', borderRadius: 2 }} />
+                          <span style={{ display: 'block', height: 5, width: '78%', background: '#EEE', borderRadius: 2 }} />
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {len('educationHistory') > 0 && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      <span style={{ fontSize: 10, letterSpacing: '.14em', textTransform: 'uppercase', fontFamily: 'Poppins,sans-serif', color: '#555' }}>Education</span>
+                      {fd.educationHistory.map((e: any, i: number) => (
+                        <span key={i} style={{ fontSize: 13 }}><b>{e?.degree}</b>{e?.school ? `, ${e.school}` : ''}{formatEduDate(e?.endDate) ? ` · ${formatEduDate(e.endDate)}` : ''}</span>
+                      ))}
+                    </div>
+                  )}
+                  {skillsAll.length > 0 && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      <span style={{ fontSize: 10, letterSpacing: '.14em', textTransform: 'uppercase', fontFamily: 'Poppins,sans-serif', color: '#555' }}>Skills</span>
+                      <span style={{ fontSize: 12, lineHeight: 1.6, color: '#333' }}>{skillsAll.join(' · ')}</span>
+                    </div>
+                  )}
+                </article>
+              </div>
+            </section>
+          )}
+
+          {section === 'education' && (
+            <Card title="Education"><ItemList items={fd.educationHistory} updateNestedField={updateNestedField} sectionKey="educationHistory" defs={eduDefs} empty="No education data found" /></Card>
+          )}
+
+          {section === 'projects' && (
+            <Card title="Projects">
+              <ItemList items={fd.projects} updateNestedField={updateNestedField} sectionKey="projects" empty="No projects" defs={[
+                { label: 'Project name', key: 'name', ph: 'Enter project name', bold: true },
+                { label: 'Role', key: 'role', ph: 'Your role in the project' },
+                { label: 'Description', key: 'description', ph: 'Describe the project, your contributions, and impact. Use • for bullet points.', multi: true },
+              ]} extras={(p) => (
+                <>
+                  {(p?.url || p?.githubUrl || p?.demoUrl || (p?.links && p.links.length > 0)) && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      <span style={{ fontSize: 13, fontWeight: 500 }}>Project links</span>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                        {p?.url && <LinkChip url={p.url} label="Project URL" />}
+                        {p?.githubUrl && <LinkChip url={p.githubUrl} label="GitHub" tone="plain" />}
+                        {p?.demoUrl && <LinkChip url={p.demoUrl} label="Live demo" />}
+                        {p?.links && p.links.map((l: any, k: number) => <LinkChip key={k} url={l.url || ''} label={l.label || 'Link'} tone="plain" />)}
+                      </div>
+                    </div>
+                  )}
+                  <Chips label="Technologies" items={p?.technologies} />
+                  <Chips label="Impact & metrics" items={p?.metrics} tone="green" />
+                </>
+              )} />
+            </Card>
+          )}
+
+          {section === 'certs' && (
+            <Card title="Certifications & licenses">
+              <ItemList items={fd.certifications} updateNestedField={updateNestedField} sectionKey="certifications" empty="No certifications" defs={[
+                { label: 'Certification name', key: 'name', ph: 'Enter certification name', bold: true },
+                { label: 'Issuing organization', key: 'issuingOrganization', ph: 'Enter issuing organization' },
+                { label: 'Issue date', key: 'dateIssued', ph: 'e.g., Jan 2023' },
+                { label: 'Expiration date', key: 'expirationDate', ph: 'e.g., Jan 2026 or leave empty' },
+                { label: 'Credential ID', key: 'credentialId', ph: 'Enter credential ID', mono: true, full: true },
+              ]} />
+            </Card>
+          )}
+
+          {section === 'awards' && (
+            <Card title="Awards & honors">
+              <ItemList items={fd.awards} updateNestedField={updateNestedField} sectionKey="awards" empty="No awards" defs={[
+                { label: 'Award title', key: 'title', ph: 'Enter award title', bold: true },
+                { label: 'Issuer', key: 'issuer', ph: 'Enter issuer' },
+                { label: 'Date', key: 'date', ph: 'e.g., 2023' },
+                { label: 'Description', key: 'description', ph: 'Describe the award. Use • for bullet points.', multi: true },
+              ]} />
+            </Card>
+          )}
+
+          {section === 'volunteer' && (
+            <Card title="Volunteer experience">
+              <ItemList items={fd.volunteerExperience} updateNestedField={updateNestedField} sectionKey="volunteerExperience" empty="No volunteer experience" defs={[
+                { label: 'Role', key: 'role', ph: 'Enter role', bold: true },
+                { label: 'Organization', key: 'organization', ph: 'Enter organization' },
+                { label: 'Start date', key: 'startDate', ph: 'e.g., Jan 2022' },
+                { label: 'End date', key: 'endDate', ph: 'e.g., Present or Dec 2023' },
+                { label: 'Location', key: 'location', ph: 'e.g., San Francisco, CA', full: true },
+                { label: 'Description', key: 'description', ph: 'Describe your volunteer work. Use • for bullet points.', multi: true },
+              ]} />
+            </Card>
+          )}
+
+          {section === 'languages' && (
+            <Card title="Languages">
+              <ItemList items={fd.languages} updateNestedField={updateNestedField} sectionKey="languages" empty="No languages" defs={[
+                { label: 'Language', key: 'language', ph: 'e.g., Spanish', bold: true },
+                { label: 'Proficiency', key: 'proficiency', ph: 'e.g., Fluent, Native, Intermediate' },
+              ]} />
+            </Card>
+          )}
+        </div>
+      </div>
+
+      <ScreeningQuestionsDialog
+        isOpen={showScreeningDialog}
+        onClose={() => setShowScreeningDialog(false)}
+        onSave={(answers) => {
+          setFormData((prev: any) => ({ ...prev, screeningAnswers: answers }));
+          setShowScreeningDialog(false);
+        }}
+        initialAnswers={fd.screeningAnswers}
+      />
+    </main>
+  );
+};
+
+const cardStyle: React.CSSProperties = { padding: 'clamp(20px,3vw,32px)', display: 'flex', flexDirection: 'column', gap: 22 };
+const Card = ({ title, right, children }: { title: string; right?: React.ReactNode; children: React.ReactNode }) => (
+  <section className="fy-card" style={cardStyle}>
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+      <h2 style={{ margin: 0, fontSize: 18, fontWeight: 500 }}>{title}</h2>{right}
+    </div>
+    {children}
+  </section>
+);
+
+const fieldGrid: React.CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(220px,1fr))', gap: '16px 18px' };
+const PF = ({ label, id, value, onChange, type, ph, col }: any) => (
+  <label htmlFor={id} style={{ display: 'flex', flexDirection: 'column', gap: 7, gridColumn: col }}>
+    <span style={{ fontSize: 13, fontWeight: 500 }}>{label}</span>
+    <input id={id} type={type || 'text'} className="fy-input" value={value} placeholder={ph} onChange={(e) => onChange(e.target.value)} />
+  </label>
+);
+
+type FieldDef = { label: string; key: string; ph: string; multi?: boolean; full?: boolean; bold?: boolean; mono?: boolean; get?: (o: any) => string; set?: (i: number, v: string) => void };
+const ItemList = ({ items, sectionKey, defs, extras, empty, updateNestedField }: { items: any[]; sectionKey: string; defs: FieldDef[]; extras?: (o: any) => React.ReactNode; empty: string; updateNestedField: (s: string, i: number, f: string, v: string) => void }) => {
+  if (!items.length) return <p style={{ margin: 0, color: '#6C6577', fontSize: 14, textAlign: 'center', padding: '16px 0' }}>{empty}</p>;
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column' }}>
+      {items.map((o: any, i: number) => (
+        <div key={i} style={{ padding: '20px 0', borderTop: i === 0 ? 0 : '1px solid rgba(23,19,33,.06)', display: 'flex', flexDirection: 'column', gap: 16, ...(i === 0 ? { paddingTop: 0 } : {}) }}>
+          <div style={fieldGrid}>
+            {defs.filter((d) => !d.multi).map((d) => (
+              <div key={d.key + d.label} style={{ display: 'flex', flexDirection: 'column', gap: 7, gridColumn: d.full ? '1 / -1' : undefined }}>
+                <span style={{ fontSize: 13, fontWeight: 500 }}>{d.label}</span>
+                <EditableField value={d.get ? d.get(o) : o?.[d.key] || ''} placeholder={d.ph} fieldKey={`${sectionKey}-${d.key}-${i}`} bold={d.bold} mono={d.mono}
+                  onSave={(v) => (d.set ? d.set(i, v) : updateNestedField(sectionKey, i, d.key, v))} />
+              </div>
+            ))}
+          </div>
+          {defs.filter((d) => d.multi).map((d) => (
+            <div key={d.key} style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+              <span style={{ fontSize: 13, fontWeight: 500 }}>{d.label}</span>
+              <EditableField multiline value={o?.[d.key] || ''} placeholder={d.ph} fieldKey={`${sectionKey}-${d.key}-${i}`} onSave={(v) => updateNestedField(sectionKey, i, d.key, v)} />
+            </div>
+          ))}
+          {extras?.(o)}
+        </div>
+      ))}
+    </div>
+  );
+};
+
+const LinkChip = ({ url, label, tone }: { url: string; label: string; tone?: 'brand' | 'plain' }) => (
+  <a href={url.startsWith('http') ? url : `https://${url}`} target="_blank" rel="noopener noreferrer"
+    style={{ display: 'inline-flex', alignItems: 'center', gap: 6, height: 32, padding: '0 14px', borderRadius: 999, fontSize: 13, fontWeight: 500, background: tone === 'plain' ? '#F6F4F9' : '#F5F1FB', color: tone === 'plain' ? '#171321' : '#4B0082' }}>
+    {label} <span aria-hidden="true">↗</span>
+  </a>
+);
+const Chips = ({ label, items, tone }: { label: string; items: string[]; tone?: 'green' }) =>
+  items && items.length > 0 ? (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <span style={{ fontSize: 13, fontWeight: 500 }}>{label}</span>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+        {items.map((t, k) => (
+          <span key={k} style={{ fontSize: 13, height: 30, display: 'inline-flex', alignItems: 'center', padding: '0 12px', borderRadius: 999, background: tone === 'green' ? '#E9F6EE' : '#F6F4F9', color: tone === 'green' ? '#1E6B3A' : '#171321' }}>{t}</span>
+        ))}
+      </div>
+    </div>
+  ) : null;
+
+
+// Click-to-edit field styled with the Fyllo input language.
+const EditableField = ({ value, onSave, placeholder = 'Click to edit…', multiline = false, bold, mono }: {
+  value: string; onSave: (v: string) => void; fieldKey: string; multiline?: boolean; placeholder?: string; bold?: boolean; mono?: boolean;
+}) => {
+  const [editValue, setEditValue] = useState(value || '');
+  const [isEditing, setIsEditing] = useState(false);
+  const commit = () => { onSave(editValue); setIsEditing(false); };
+  const cancel = () => { setEditValue(value || ''); setIsEditing(false); };
+  const onKey = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !multiline) commit();
+    else if (e.key === 'Escape') cancel();
+  };
+  const font = mono ? 'ui-monospace,monospace' : undefined;
+
+  if (isEditing) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 flex items-center justify-center">
-        <div className="text-center">
-          <p className="text-gray-600">Profile not found</p>
-          <Link to="/dashboard">
-            <Button className="mt-4">Back to Dashboard</Button>
-          </Link>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {multiline ? (
+          <textarea className="fy-input" value={editValue} onChange={(e) => setEditValue(e.target.value)} onKeyDown={onKey} placeholder={placeholder} autoFocus
+            style={{ height: 'auto', minHeight: 110, padding: '12px 14px', lineHeight: 1.5, resize: 'vertical' }} />
+        ) : (
+          <input className="fy-input" value={editValue} onChange={(e) => setEditValue(e.target.value)} onKeyDown={onKey} placeholder={placeholder} autoFocus style={{ fontFamily: font }} />
+        )}
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button type="button" className="fy-btn fy-dark" onClick={commit} style={{ height: 36, padding: '0 16px', borderRadius: 999, fontSize: 13 }}>Save</button>
+          <button type="button" className="fy-btn fy-outline" onClick={cancel} style={{ height: 36, padding: '0 16px', borderRadius: 999, fontSize: 13 }}>Cancel</button>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50">
-      {/* Header */}
-      <header className="border-b bg-white/80 backdrop-blur-sm">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center h-16">
-            <div className="flex items-center space-x-3">
-              <Link to="/dashboard">
-                <Button variant="ghost" size="sm">
-                  <ArrowLeft className="h-4 w-4 mr-2" />
-                  Back to Dashboard
-                </Button>
-              </Link>
-            </div>
-            <div className="flex items-center space-x-3">
-              <Logo className="w-8 h-8" />
-              <span className="text-2xl font-bold text-gray-900">Fyllo</span>
-            </div>
-          </div>
-        </div>
-      </header>
-
-      <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">Edit Profile</h1>
-          <p className="text-gray-600">View and update your comprehensive profile information.</p>
-          {formData.resumeMetadata?.fileName && (
-            <div className="mt-2 flex items-center text-sm text-gray-500">
-              <Briefcase className="h-4 w-4 mr-1" />
-              Parsed from: {formData.resumeMetadata.fileName}
-              <Badge className="ml-2 bg-green-100 text-green-800">
-                {formData.resumeMetadata.extractionQuality?.dataCompleteness || 'N/A'}% complete
-              </Badge>
-            </div>
-          )}
-        </div>
-
-        <div className="space-y-8">
-          {/* Profile Name */}
-          <Card className="p-6">
-            <div className="flex items-center mb-4">
-              <User className="h-5 w-5 mr-2 text-brand" />
-              <h4 className="font-semibold text-gray-900">Profile Name</h4>
-            </div>
-            <Input
-              value={formData.profileName || ''}
-              onChange={(e) => setFormData((prev: any) => ({ ...prev, profileName: e.target.value }))}
-              placeholder="e.g., Software Engineer Profile"
-              className="max-w-md"
-            />
-          </Card>
-
-          {/* Personal Information */}
-          <Card className="p-6">
-            <div className="flex items-center mb-4">
-              <User className="h-5 w-5 mr-2 text-brand" />
-              <h4 className="font-semibold text-gray-900">Personal Information</h4>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <Label htmlFor="fullName">Full Name</Label>
-                <Input
-                  id="fullName"
-                  value={formData.personalDetails?.fullName || ''}
-                  onChange={(e) => handlePersonalDetailsChange('fullName', e.target.value)}
-                />
-              </div>
-              <div>
-                <Label htmlFor="email">Email</Label>
-                <Input
-                  id="email"
-                  type="email"
-                  value={formData.personalDetails?.email || ''}
-                  onChange={(e) => handlePersonalDetailsChange('email', e.target.value)}
-                />
-              </div>
-              <div>
-                <Label htmlFor="phone">Phone</Label>
-                <Input
-                  id="phone"
-                  value={formData.personalDetails?.phone || ''}
-                  onChange={(e) => handlePersonalDetailsChange('phone', e.target.value)}
-                />
-              </div>
-              <div>
-                <Label htmlFor="phoneExtension">Phone Extension</Label>
-                <Input
-                  id="phoneExtension"
-                  value={formData.personalDetails?.phoneExtension || ''}
-                  onChange={(e) => handlePersonalDetailsChange('phoneExtension', e.target.value)}
-                />
-              </div>
-              <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <Label htmlFor="addressLine1">Address Line 1</Label>
-                  <Input
-                    id="addressLine1"
-                    value={formData.personalDetails?.address?.line1 || ''}
-                    onChange={(e) => handleAddressChange('line1', e.target.value)}
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="addressLine2">Address Line 2</Label>
-                  <Input
-                    id="addressLine2"
-                    value={formData.personalDetails?.address?.line2 || ''}
-                    onChange={(e) => handleAddressChange('line2', e.target.value)}
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="city">City</Label>
-                  <Input
-                    id="city"
-                    value={formData.personalDetails?.address?.city || ''}
-                    onChange={(e) => handleAddressChange('city', e.target.value)}
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="state">State / Province</Label>
-                  <Input
-                    id="state"
-                    value={formData.personalDetails?.address?.state || ''}
-                    onChange={(e) => handleAddressChange('state', e.target.value)}
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="postalCode">Postal Code</Label>
-                  <Input
-                    id="postalCode"
-                    value={formData.personalDetails?.address?.postalCode || ''}
-                    onChange={(e) => handleAddressChange('postalCode', e.target.value)}
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="country">Country</Label>
-                  <Input
-                    id="country"
-                    value={formData.personalDetails?.address?.country || ''}
-                    onChange={(e) => handleAddressChange('country', e.target.value)}
-                  />
-                </div>
-              </div>
-              <div>
-                <Label htmlFor="linkedin">LinkedIn</Label>
-                <Input
-                  id="linkedin"
-                  value={formData.personalDetails?.linkedin || ''}
-                  onChange={(e) => handlePersonalDetailsChange('linkedin', e.target.value)}
-                />
-              </div>
-              <div>
-                <Label htmlFor="github">GitHub</Label>
-                <Input
-                  id="github"
-                  value={formData.personalDetails?.github || ''}
-                  onChange={(e) => handlePersonalDetailsChange('github', e.target.value)}
-                />
-              </div>
-              <div>
-                <Label htmlFor="portfolio">Portfolio</Label>
-                <Input
-                  id="portfolio"
-                  value={formData.personalDetails?.portfolio || ''}
-                  onChange={(e) => handlePersonalDetailsChange('portfolio', e.target.value)}
-                />
-              </div>
-            </div>
-            
-            {/* Additional Links */}
-            {formData.personalDetails?.additionalLinks && formData.personalDetails.additionalLinks.length > 0 && (
-              <div className="mt-4">
-                <Label className="text-sm font-medium">Additional Links</Label>
-                <div className="flex flex-wrap gap-2 mt-2">
-                  {formData.personalDetails.additionalLinks.map((link: any, linkIndex: number) => (
-                    <a 
-                      key={linkIndex}
-                      href={link.url?.startsWith('http') ? link.url : `https://${link.url}`}
-                      target="_blank" 
-                      rel="noopener noreferrer"
-                      className="flex items-center gap-1 px-3 py-1 text-xs bg-blue-100 text-blue-700 rounded-full hover:bg-blue-200 transition-colors"
-                    >
-                      <ExternalLink className="h-3 w-3" />
-                      {link.label || 'Link'}
-                    </a>
-                  ))}
-                </div>
-              </div>
-            )}
-            
-            {/* Main Profile Links */}
-            {(formData.personalDetails?.linkedin || formData.personalDetails?.github || formData.personalDetails?.portfolio) && (
-              <div className="mt-4">
-                <Label className="text-sm font-medium">Profile Links</Label>
-                <div className="flex flex-wrap gap-2 mt-2">
-                  {formData.personalDetails?.linkedin && (
-                    <a 
-                      href={formData.personalDetails.linkedin.startsWith('http') ? formData.personalDetails.linkedin : `https://${formData.personalDetails.linkedin}`}
-                      target="_blank" 
-                      rel="noopener noreferrer"
-                      className="flex items-center gap-1 px-3 py-1 text-xs bg-blue-100 text-blue-700 rounded-full hover:bg-blue-200 transition-colors"
-                    >
-                      <ExternalLink className="h-3 w-3" />
-                      LinkedIn
-                    </a>
-                  )}
-                  {formData.personalDetails?.github && (
-                    <a 
-                      href={formData.personalDetails.github.startsWith('http') ? formData.personalDetails.github : `https://${formData.personalDetails.github}`}
-                      target="_blank" 
-                      rel="noopener noreferrer"
-                      className="flex items-center gap-1 px-3 py-1 text-xs bg-gray-100 text-gray-700 rounded-full hover:bg-gray-200 transition-colors"
-                    >
-                      <Code className="h-3 w-3" />
-                      GitHub
-                    </a>
-                  )}
-                  {formData.personalDetails?.portfolio && (
-                    <a 
-                      href={formData.personalDetails.portfolio.startsWith('http') ? formData.personalDetails.portfolio : `https://${formData.personalDetails.portfolio}`}
-                      target="_blank" 
-                      rel="noopener noreferrer"
-                      className="flex items-center gap-1 px-3 py-1 text-xs bg-purple-100 text-purple-700 rounded-full hover:bg-purple-200 transition-colors"
-                    >
-                      <Globe className="h-3 w-3" />
-                      Portfolio
-                    </a>
-                  )}
-                </div>
-              </div>
-            )}
-            
-            <div className="mt-4">
-              <Label htmlFor="summary">Professional Summary</Label>
-              <EditableField
-                value={formData.personalDetails?.summary || ''}
-                onSave={(value) => handlePersonalDetailsChange('summary', value)}
-                fieldKey="professional-summary"
-                multiline={true}
-                placeholder="Write a compelling professional summary. Use • for bullet points."
-                className="mt-2"
-              />
-            </div>
-          </Card>
-
-          {/* Technical Skills */}
-          <Card className="p-6">
-            <div className="flex items-center mb-4">
-              <Code className="h-5 w-5 mr-2 text-brand" />
-              <h4 className="font-semibold text-gray-900">Technical Skills</h4>
-            </div>
-            
-            {/* All Skills */}
-            <div className="mb-6">
-              <Label className="text-sm font-medium">All Skills</Label>
-              <div className="flex flex-wrap gap-2 mt-2 mb-4">
-                {(formData.technicalSkills?.all || []).map((skill: string, index: number) => (
-                  <Badge key={index} variant="secondary" className="flex items-center gap-1">
-                    {skill}
-                    <button
-                      onClick={() => removeTechnicalSkill(index)}
-                      className="text-gray-500 hover:text-gray-700"
-                    >
-                      <X className="h-3 w-3" />
-                    </button>
-                  </Badge>
-                ))}
-              </div>
-              <div className="flex gap-2">
-                <Input
-                  value={newSkill}
-                  onChange={(e) => setNewSkill(e.target.value)}
-                  placeholder="Add a technical skill"
-                  onKeyPress={(e) => e.key === 'Enter' && addTechnicalSkill()}
-                  className="max-w-xs"
-                />
-                <Button onClick={addTechnicalSkill} variant="outline" size="sm">
-                  <Plus className="h-4 w-4" />
-                </Button>
-              </div>
-            </div>
-
-            {/* Categorized Skills */}
-            {Object.entries(formData.technicalSkills || {}).filter(([key]) => key !== 'all').map(([category, skills]) => (
-              <div key={category} className="mb-4">
-                <Label className="text-sm font-medium capitalize">{category} Skills</Label>
-                <div className="flex flex-wrap gap-2 mt-2">
-                  {Array.isArray(skills) && skills.map((skill: string, index: number) => (
-                    <Badge key={index} variant="outline" className="capitalize">
-                      {skill}
-                    </Badge>
-                  ))}
-                </div>
-              </div>
+    <div role="button" tabIndex={0} title="Click to edit" onClick={() => { setEditValue(value || ''); setIsEditing(true); }}
+      onKeyDown={(e) => { if (e.key === 'Enter') { setEditValue(value || ''); setIsEditing(true); } }}
+      style={{ cursor: 'pointer', minHeight: 46, borderRadius: 12, border: '1px solid rgba(23,19,33,.14)', padding: multiline ? '12px 14px' : '0 14px', display: 'flex', alignItems: multiline ? 'flex-start' : 'center', fontSize: 15, background: '#fff', fontWeight: bold ? 500 : 400, fontFamily: font, color: '#171321' }}>
+      {value ? (
+        value.includes('•') ? (
+          <div style={{ width: '100%' }}>
+            {value.split('•').filter((s) => s.trim()).map((item, k) => (
+              <div key={k} style={{ display: 'flex', gap: 8, marginBottom: 4, lineHeight: 1.5 }}><span style={{ color: '#8A2BE2' }}>•</span><span style={{ flex: 1 }}>{item.trim()}</span></div>
             ))}
-          </Card>
-
-          {/* Tools & Technologies */}
-          {formData.toolsTechnologies?.all && formData.toolsTechnologies.all.length > 0 && (
-            <Card className="p-6">
-              <div className="flex items-center mb-4">
-                <Settings className="h-5 w-5 mr-2 text-brand" />
-                <h4 className="font-semibold text-gray-900">Tools & Technologies</h4>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {formData.toolsTechnologies.all.map((tool: string, index: number) => (
-                  <Badge key={index} variant="outline">{tool}</Badge>
-                ))}
-              </div>
-            </Card>
-          )}
-
-          {/* Work Experience */}
-          <Card className="p-6">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center">
-                <Briefcase className="h-5 w-5 mr-2 text-brand" />
-                <h4 className="font-semibold text-gray-900">Work Experience</h4>
-              </div>
-              <Button 
-                size="sm" 
-                onClick={handleSave} 
-                disabled={saving}
-                className="bg-brand hover:bg-brand-dark"
-              >
-                {saving ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Save className="h-3 w-3 mr-1" />}
-                Save All Changes
-              </Button>
-            </div>
-            <div className="space-y-6">
-              {(formData.workExperience || []).map((exp: any, index: number) => (
-                <div key={index} className="border rounded-lg p-4 bg-gray-50">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                    <div>
-                      <Label className="text-sm font-medium">Job Title</Label>
-                      <EditableField
-                        value={exp?.jobTitle || ''}
-                        onSave={(value) => updateNestedField('workExperience', index, 'jobTitle', value)}
-                        fieldKey={`work-title-${index}`}
-                        placeholder="Enter job title"
-                        className="font-semibold"
-                      />
-                    </div>
-                    <div>
-                      <Label className="text-sm font-medium">Company</Label>
-                      <EditableField
-                        value={exp?.company || ''}
-                        onSave={(value) => updateNestedField('workExperience', index, 'company', value)}
-                        fieldKey={`work-company-${index}`}
-                        placeholder="Enter company name"
-                      />
-                    </div>
-                    <div>
-                      <Label className="text-sm font-medium">Start Date</Label>
-                      <EditableField
-                        value={exp?.startDate || ''}
-                        onSave={(value) => updateNestedField('workExperience', index, 'startDate', value)}
-                        fieldKey={`work-start-${index}`}
-                        placeholder="e.g., Jan 2022"
-                      />
-                    </div>
-                    <div>
-                      <Label className="text-sm font-medium">End Date</Label>
-                      <EditableField
-                        value={exp?.endDate || ''}
-                        onSave={(value) => updateNestedField('workExperience', index, 'endDate', value)}
-                        fieldKey={`work-end-${index}`}
-                        placeholder="e.g., Present or Dec 2023"
-                      />
-                    </div>
-                    <div className="md:col-span-2">
-                      <Label className="text-sm font-medium">Location</Label>
-                      <EditableField
-                        value={exp?.location || ''}
-                        onSave={(value) => updateNestedField('workExperience', index, 'location', value)}
-                        fieldKey={`work-location-${index}`}
-                        placeholder="e.g., San Francisco, CA"
-                      />
-                    </div>
-                  </div>
-                  
-                  <div className="mb-4">
-                    <Label className="text-sm font-medium">Description</Label>
-                    <EditableField
-                      value={exp?.description || ''}
-                      onSave={(value) => updateNestedField('workExperience', index, 'description', value)}
-                      fieldKey={`work-desc-${index}`}
-                      multiline={true}
-                      placeholder="Describe your role and responsibilities. Use • for bullet points."
-                    />
-                  </div>
-
-                  {exp?.technologies && exp.technologies.length > 0 && (
-                    <div className="mb-4">
-                      <Label className="text-sm font-medium">Technologies Used</Label>
-                      <div className="flex flex-wrap gap-2 mt-2">
-                        {exp.technologies.map((tech: string, techIndex: number) => (
-                          <Badge key={techIndex} variant="outline" className="text-xs">
-                            {tech}
-                          </Badge>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {exp?.achievements && exp.achievements.length > 0 && (
-                    <div className="mb-4">
-                      <Label className="text-sm font-medium">Key Achievements</Label>
-                      <ul className="mt-2 space-y-1">
-                        {exp.achievements.map((achievement: string, achIndex: number) => (
-                          <li key={achIndex} className="text-sm text-gray-700 flex items-start">
-                            <span className="mr-2">•</span>
-                            <span>{achievement}</span>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-
-                  {exp?.metrics && exp.metrics.length > 0 && (
-                    <div>
-                      <Label className="text-sm font-medium">Metrics & Impact</Label>
-                      <div className="flex flex-wrap gap-2 mt-2">
-                        {exp.metrics.map((metric: string, metricIndex: number) => (
-                          <Badge key={metricIndex} variant="secondary" className="text-xs bg-green-100 text-green-800">
-                            {metric}
-                          </Badge>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              ))}
-              {(!formData.workExperience || formData.workExperience.length === 0) && (
-                <p className="text-gray-500 text-center py-4">No work experience data found</p>
-              )}
-            </div>
-          </Card>
-
-          {/* Education */}
-          <Card className="p-6">
-            <div className="flex items-center mb-4">
-              <GraduationCap className="h-5 w-5 mr-2 text-brand" />
-              <h4 className="font-semibold text-gray-900">Education</h4>
-            </div>
-            <div className="space-y-4">
-              {(formData.educationHistory || []).map((edu: any, index: number) => (
-                <div key={index} className="border rounded-lg p-4 bg-gray-50">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <Label className="text-sm font-medium">Degree</Label>
-                      <EditableField
-                        value={edu?.degree || ''}
-                        onSave={(value) => updateNestedField('educationHistory', index, 'degree', value)}
-                        fieldKey={`edu-degree-${index}`}
-                        placeholder="e.g., Bachelor of Science"
-                        className="font-semibold"
-                      />
-                    </div>
-                    <div>
-                      <Label className="text-sm font-medium">Institution</Label>
-                      <EditableField
-                        value={edu?.school || ''}
-                        onSave={(value) => updateNestedField('educationHistory', index, 'school', value)}
-                        fieldKey={`edu-school-${index}`}
-                        placeholder="Enter school or university"
-                      />
-                    </div>
-                    <div>
-                      <Label className="text-sm font-medium">Field of Study</Label>
-                      <EditableField
-                        value={edu?.fieldOfStudy || ''}
-                        onSave={(value) => updateNestedField('educationHistory', index, 'fieldOfStudy', value)}
-                        fieldKey={`edu-field-${index}`}
-                        placeholder="e.g., Computer Science"
-                      />
-                    </div>
-                    <div>
-                      <Label className="text-sm font-medium">Location</Label>
-                      <EditableField
-                        value={edu?.location || ''}
-                        onSave={(value) => updateNestedField('educationHistory', index, 'location', value)}
-                        fieldKey={`edu-location-${index}`}
-                        placeholder="e.g., Boston, MA"
-                      />
-                    </div>
-                    <div>
-                      <Label className="text-sm font-medium">Start Date</Label>
-                      <EditableField
-                        value={formatEduDate(edu?.startDate)}
-                        onSave={(value) => updateEducationDate(index, 'startDate', value)}
-                        fieldKey={`edu-start-${index}`}
-                        placeholder="e.g., 9/2018 or 2018"
-                      />
-                    </div>
-                    <div>
-                      <Label className="text-sm font-medium">End Date / Graduation</Label>
-                      <EditableField
-                        value={formatEduDate(edu?.endDate)}
-                        onSave={(value) => updateEducationDate(index, 'endDate', value)}
-                        fieldKey={`edu-end-${index}`}
-                        placeholder="e.g., 5/2022 or 2022"
-                      />
-                    </div>
-                    <div>
-                      <Label className="text-sm font-medium">GPA</Label>
-                      <EditableField
-                        value={edu?.gpa || ''}
-                        onSave={(value) => updateNestedField('educationHistory', index, 'gpa', value)}
-                        fieldKey={`edu-gpa-${index}`}
-                        placeholder="e.g., 3.8"
-                      />
-                    </div>
-                  </div>
-                  <div className="mt-4">
-                    <Label className="text-sm font-medium">Details</Label>
-                    <EditableField
-                      value={edu?.description || ''}
-                      onSave={(value) => updateNestedField('educationHistory', index, 'description', value)}
-                      fieldKey={`edu-desc-${index}`}
-                      multiline={true}
-                      placeholder="Relevant coursework, honors, activities. Use • for bullet points."
-                    />
-                  </div>
-                </div>
-              ))}
-              {(!formData.educationHistory || formData.educationHistory.length === 0) && (
-                <p className="text-gray-500 text-center py-4">No education data found</p>
-              )}
-            </div>
-          </Card>
-
-          {/* Projects */}
-          {formData.projects && formData.projects.length > 0 && (
-            <Card className="p-6">
-              <div className="flex items-center mb-4">
-                <Code className="h-5 w-5 mr-2 text-brand" />
-                <h4 className="font-semibold text-gray-900">Projects</h4>
-              </div>
-              <div className="space-y-4">
-                {formData.projects.map((project: any, index: number) => (
-                  <div key={index} className="border rounded-lg p-4 bg-gray-50">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                      <div>
-                        <Label className="text-sm font-medium">Project Name</Label>
-                        <EditableField
-                          value={project?.name || ''}
-                          onSave={(value) => updateNestedField('projects', index, 'name', value)}
-                          fieldKey={`project-name-${index}`}
-                          placeholder="Enter project name"
-                          className="font-semibold"
-                        />
-                      </div>
-                      <div>
-                        <Label className="text-sm font-medium">Role</Label>
-                        <EditableField
-                          value={project?.role || ''}
-                          onSave={(value) => updateNestedField('projects', index, 'role', value)}
-                          fieldKey={`project-role-${index}`}
-                          placeholder="Your role in the project"
-                        />
-                      </div>
-                    </div>
-                    
-                    {/* Project Links */}
-                    {(project?.url || project?.githubUrl || project?.demoUrl || (project?.links && project.links.length > 0)) && (
-                      <div className="mb-4">
-                        <Label className="text-sm font-medium">Project Links</Label>
-                        <div className="flex flex-wrap gap-2 mt-2">
-                          {project?.url && (
-                            <a 
-                              href={project.url.startsWith('http') ? project.url : `https://${project.url}`}
-                              target="_blank" 
-                              rel="noopener noreferrer"
-                              className="flex items-center gap-1 px-3 py-1 text-xs bg-blue-100 text-blue-700 rounded-full hover:bg-blue-200 transition-colors"
-                            >
-                              <ExternalLink className="h-3 w-3" />
-                              Project URL
-                            </a>
-                          )}
-                          {project?.githubUrl && (
-                            <a 
-                              href={project.githubUrl.startsWith('http') ? project.githubUrl : `https://${project.githubUrl}`}
-                              target="_blank" 
-                              rel="noopener noreferrer"
-                              className="flex items-center gap-1 px-3 py-1 text-xs bg-gray-100 text-gray-700 rounded-full hover:bg-gray-200 transition-colors"
-                            >
-                              <Code className="h-3 w-3" />
-                              GitHub
-                            </a>
-                          )}
-                          {project?.demoUrl && (
-                            <a 
-                              href={project.demoUrl.startsWith('http') ? project.demoUrl : `https://${project.demoUrl}`}
-                              target="_blank" 
-                              rel="noopener noreferrer"
-                              className="flex items-center gap-1 px-3 py-1 text-xs bg-green-100 text-green-700 rounded-full hover:bg-green-200 transition-colors"
-                            >
-                              <Globe className="h-3 w-3" />
-                              Live Demo
-                            </a>
-                          )}
-                          {project?.links && project.links.map((link: any, linkIndex: number) => (
-                            <a 
-                              key={linkIndex}
-                              href={link.url?.startsWith('http') ? link.url : `https://${link.url}`}
-                              target="_blank" 
-                              rel="noopener noreferrer"
-                              className="flex items-center gap-1 px-3 py-1 text-xs bg-purple-100 text-purple-700 rounded-full hover:bg-purple-200 transition-colors"
-                            >
-                              <ExternalLink className="h-3 w-3" />
-                              {link.label || 'Link'}
-                            </a>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                    
-                    <div className="mb-4">
-                      <Label className="text-sm font-medium">Description</Label>
-                      <EditableField
-                        value={project?.description || ''}
-                        onSave={(value) => updateNestedField('projects', index, 'description', value)}
-                        fieldKey={`project-desc-${index}`}
-                        multiline={true}
-                        placeholder="Describe the project, your contributions, and impact. Use • for bullet points."
-                      />
-                    </div>
-
-                    {project?.technologies && project.technologies.length > 0 && (
-                      <div className="mb-4">
-                        <Label className="text-sm font-medium">Technologies</Label>
-                        <div className="flex flex-wrap gap-2 mt-2">
-                          {project.technologies.map((tech: string, techIndex: number) => (
-                            <Badge key={techIndex} variant="outline" className="text-xs">
-                              {tech}
-                            </Badge>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
-                    {project?.metrics && project.metrics.length > 0 && (
-                      <div>
-                        <Label className="text-sm font-medium">Impact & Metrics</Label>
-                        <div className="flex flex-wrap gap-2 mt-2">
-                          {project.metrics.map((metric: string, metricIndex: number) => (
-                            <Badge key={metricIndex} variant="secondary" className="text-xs bg-green-100 text-green-800">
-                              {metric}
-                            </Badge>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </Card>
-          )}
-
-          {/* Certifications */}
-          {formData.certifications && formData.certifications.length > 0 && (
-            <Card className="p-6">
-              <div className="flex items-center mb-4">
-                <Award className="h-5 w-5 mr-2 text-brand" />
-                <h4 className="font-semibold text-gray-900">Certifications & Licenses</h4>
-              </div>
-              <div className="space-y-4">
-                {formData.certifications.map((cert: any, index: number) => (
-                  <div key={index} className="border rounded-lg p-4 bg-gray-50">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div>
-                        <Label className="text-sm font-medium">Certification Name</Label>
-                        <EditableField
-                          value={cert?.name || ''}
-                          onSave={(value) => updateNestedField('certifications', index, 'name', value)}
-                          fieldKey={`cert-name-${index}`}
-                          placeholder="Enter certification name"
-                          className="font-semibold"
-                        />
-                      </div>
-                      <div>
-                        <Label className="text-sm font-medium">Issuing Organization</Label>
-                        <EditableField
-                          value={cert?.issuingOrganization || ''}
-                          onSave={(value) => updateNestedField('certifications', index, 'issuingOrganization', value)}
-                          fieldKey={`cert-org-${index}`}
-                          placeholder="Enter issuing organization"
-                        />
-                      </div>
-                      <div>
-                        <Label className="text-sm font-medium">Issue Date</Label>
-                        <EditableField
-                          value={cert?.dateIssued || ''}
-                          onSave={(value) => updateNestedField('certifications', index, 'dateIssued', value)}
-                          fieldKey={`cert-issued-${index}`}
-                          placeholder="e.g., Jan 2023"
-                        />
-                      </div>
-                      <div>
-                        <Label className="text-sm font-medium">Expiration Date</Label>
-                        <EditableField
-                          value={cert?.expirationDate || ''}
-                          onSave={(value) => updateNestedField('certifications', index, 'expirationDate', value)}
-                          fieldKey={`cert-expires-${index}`}
-                          placeholder="e.g., Jan 2026 or leave empty"
-                        />
-                      </div>
-                    </div>
-                    <div className="mt-4">
-                      <Label className="text-sm font-medium">Credential ID</Label>
-                      <EditableField
-                        value={cert?.credentialId || ''}
-                        onSave={(value) => updateNestedField('certifications', index, 'credentialId', value)}
-                        fieldKey={`cert-credential-${index}`}
-                        placeholder="Enter credential ID"
-                        className="font-mono"
-                      />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </Card>
-          )}
-
-          {/* Awards & Honors */}
-          {formData.awards && formData.awards.length > 0 && (
-            <Card className="p-6">
-              <div className="flex items-center mb-4">
-                <Trophy className="h-5 w-5 mr-2 text-brand" />
-                <h4 className="font-semibold text-gray-900">Awards & Honors</h4>
-              </div>
-              <div className="space-y-4">
-                {formData.awards.map((award: any, index: number) => (
-                  <div key={index} className="border rounded-lg p-4 bg-gray-50">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div>
-                        <Label className="text-sm font-medium">Award Title</Label>
-                        <EditableField
-                          value={award?.title || ''}
-                          onSave={(value) => updateNestedField('awards', index, 'title', value)}
-                          fieldKey={`award-title-${index}`}
-                          placeholder="Enter award title"
-                          className="font-semibold"
-                        />
-                      </div>
-                      <div>
-                        <Label className="text-sm font-medium">Issuer</Label>
-                        <EditableField
-                          value={award?.issuer || ''}
-                          onSave={(value) => updateNestedField('awards', index, 'issuer', value)}
-                          fieldKey={`award-issuer-${index}`}
-                          placeholder="Enter issuer"
-                        />
-                      </div>
-                      <div>
-                        <Label className="text-sm font-medium">Date</Label>
-                        <EditableField
-                          value={award?.date || ''}
-                          onSave={(value) => updateNestedField('awards', index, 'date', value)}
-                          fieldKey={`award-date-${index}`}
-                          placeholder="e.g., 2023"
-                        />
-                      </div>
-                    </div>
-                    <div className="mt-4">
-                      <Label className="text-sm font-medium">Description</Label>
-                      <EditableField
-                        value={award?.description || ''}
-                        onSave={(value) => updateNestedField('awards', index, 'description', value)}
-                        fieldKey={`award-desc-${index}`}
-                        multiline={true}
-                        placeholder="Describe the award. Use • for bullet points."
-                      />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </Card>
-          )}
-
-          {/* Volunteer Experience */}
-          {formData.volunteerExperience && formData.volunteerExperience.length > 0 && (
-            <Card className="p-6">
-              <div className="flex items-center mb-4">
-                <Users className="h-5 w-5 mr-2 text-brand" />
-                <h4 className="font-semibold text-gray-900">Volunteer Experience</h4>
-              </div>
-              <div className="space-y-4">
-                {formData.volunteerExperience.map((vol: any, index: number) => (
-                  <div key={index} className="border rounded-lg p-4 bg-gray-50">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div>
-                        <Label className="text-sm font-medium">Role</Label>
-                        <EditableField
-                          value={vol?.role || ''}
-                          onSave={(value) => updateNestedField('volunteerExperience', index, 'role', value)}
-                          fieldKey={`vol-role-${index}`}
-                          placeholder="Enter role"
-                          className="font-semibold"
-                        />
-                      </div>
-                      <div>
-                        <Label className="text-sm font-medium">Organization</Label>
-                        <EditableField
-                          value={vol?.organization || ''}
-                          onSave={(value) => updateNestedField('volunteerExperience', index, 'organization', value)}
-                          fieldKey={`vol-org-${index}`}
-                          placeholder="Enter organization"
-                        />
-                      </div>
-                      <div>
-                        <Label className="text-sm font-medium">Start Date</Label>
-                        <EditableField
-                          value={vol?.startDate || ''}
-                          onSave={(value) => updateNestedField('volunteerExperience', index, 'startDate', value)}
-                          fieldKey={`vol-start-${index}`}
-                          placeholder="e.g., Jan 2022"
-                        />
-                      </div>
-                      <div>
-                        <Label className="text-sm font-medium">End Date</Label>
-                        <EditableField
-                          value={vol?.endDate || ''}
-                          onSave={(value) => updateNestedField('volunteerExperience', index, 'endDate', value)}
-                          fieldKey={`vol-end-${index}`}
-                          placeholder="e.g., Present or Dec 2023"
-                        />
-                      </div>
-                      <div className="md:col-span-2">
-                        <Label className="text-sm font-medium">Location</Label>
-                        <EditableField
-                          value={vol?.location || ''}
-                          onSave={(value) => updateNestedField('volunteerExperience', index, 'location', value)}
-                          fieldKey={`vol-location-${index}`}
-                          placeholder="e.g., San Francisco, CA"
-                        />
-                      </div>
-                    </div>
-                    <div className="mt-4">
-                      <Label className="text-sm font-medium">Description</Label>
-                      <EditableField
-                        value={vol?.description || ''}
-                        onSave={(value) => updateNestedField('volunteerExperience', index, 'description', value)}
-                        fieldKey={`vol-desc-${index}`}
-                        multiline={true}
-                        placeholder="Describe your volunteer work. Use • for bullet points."
-                      />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </Card>
-          )}
-
-          {/* Languages */}
-          {formData.languages && formData.languages.length > 0 && (
-            <Card className="p-6">
-              <div className="flex items-center mb-4">
-                <Globe className="h-5 w-5 mr-2 text-brand" />
-                <h4 className="font-semibold text-gray-900">Languages</h4>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {formData.languages.map((lang: any, index: number) => (
-                  <div key={index} className="border rounded-lg p-4 bg-gray-50">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div>
-                        <Label className="text-sm font-medium">Language</Label>
-                        <EditableField
-                          value={lang?.language || ''}
-                          onSave={(value) => updateNestedField('languages', index, 'language', value)}
-                          fieldKey={`lang-name-${index}`}
-                          placeholder="e.g., Spanish"
-                          className="font-semibold"
-                        />
-                      </div>
-                      <div>
-                        <Label className="text-sm font-medium">Proficiency</Label>
-                        <EditableField
-                          value={lang?.proficiency || ''}
-                          onSave={(value) => updateNestedField('languages', index, 'proficiency', value)}
-                          fieldKey={`lang-prof-${index}`}
-                          placeholder="e.g., Fluent, Native, Intermediate"
-                        />
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </Card>
-          )}
-
-          {/* Screening Questions */}
-          <Card className="p-6">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center">
-                <ClipboardCheck className="h-5 w-5 mr-2 text-brand" />
-                <h4 className="font-semibold text-gray-900">Screening Questions</h4>
-              </div>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setShowScreeningDialog(true)}
-              >
-                Edit
-              </Button>
-            </div>
-            {formData.screeningAnswers && formData.screeningAnswers.length > 0 ? (
-              <div className="space-y-3">
-                {formData.screeningAnswers.map((sa: ScreeningAnswer) => (
-                  <div key={sa.id} className="flex items-center justify-between border rounded-lg p-3 bg-gray-50">
-                    <p className="text-sm text-gray-700 flex-1 mr-4">{sa.question}</p>
-                    <span className="text-sm font-medium text-gray-900 shrink-0">
-                      {sa.answer || <span className="text-gray-400">Not answered</span>}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="text-gray-500 text-center py-4">
-                No screening answers configured.{' '}
-                <button
-                  type="button"
-                  className="text-brand hover:underline"
-                  onClick={() => setShowScreeningDialog(true)}
-                >
-                  Add answers
-                </button>
-              </p>
-            )}
-          </Card>
-
-          <ScreeningQuestionsDialog
-            isOpen={showScreeningDialog}
-            onClose={() => setShowScreeningDialog(false)}
-            onSave={(answers) => {
-              setFormData((prev: any) => ({ ...prev, screeningAnswers: answers }));
-              setShowScreeningDialog(false);
-            }}
-            initialAnswers={formData.screeningAnswers}
-          />
-
-          {/* Actions */}
-          <div className="flex justify-end space-x-4">
-            <Link to="/dashboard">
-              <Button variant="outline">Cancel</Button>
-            </Link>
-            <Button onClick={handleSave} disabled={saving} className="bg-brand hover:bg-brand-dark">
-              {saving ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Saving...
-                </>
-              ) : (
-                <>
-                  <Save className="mr-2 h-4 w-4" />
-                  Save Changes
-                </>
-              )}
-            </Button>
           </div>
-        </div>
-      </div>
+        ) : <span style={{ whiteSpace: 'pre-line', lineHeight: 1.5 }}>{value}</span>
+      ) : <span style={{ color: '#9C97A6' }}>{placeholder}</span>}
     </div>
   );
 };
 
 export default ProfileEdit;
-

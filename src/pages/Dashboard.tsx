@@ -1,24 +1,27 @@
-
 import React, { useState, useEffect } from 'react';
-import { Button } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { Plus, FileText, Settings, Chrome, User, Upload, LogOut } from 'lucide-react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import { useProfiles } from '@/hooks/useProfiles';
+import { useFilloExtension } from '@/hooks/useFilloExtension';
 import Onboarding from '@/components/Onboarding';
 import ProfileList from '@/components/ProfileList';
-import Logo from '@/components/Logo';
+import AppShell from '@/components/fyllo/AppShell';
+import MissedFields from '@/components/fyllo/MissedFields';
+import { UsageDots } from '@/components/fyllo/PlanModals';
+import '@/components/fyllo/fyllo.css';
+
+// TODO: swap for the real Chrome Web Store listing URL once published.
+const CHROME_STORE_URL = 'https://chromewebstore.google.com/';
 
 const Dashboard = () => {
   const [showOnboarding, setShowOnboarding] = useState(false);
-  const { user, signOut } = useAuth();
+  const { user } = useAuth();
   const { profiles, loading } = useProfiles();
+  const { extensionAvailable } = useFilloExtension();
   const navigate = useNavigate();
 
   useEffect(() => {
-    // Redirect to auth if not logged in  
+    // Redirect to auth if not logged in
     if (!user) {
       navigate('/auth');
       return;
@@ -36,37 +39,6 @@ const Dashboard = () => {
     localStorage.setItem('fillo_onboarding_complete', 'true');
   };
 
-  const handleSignOut = async () => {
-    await signOut();
-    navigate('/');
-  };
-
-  // Get user's first name from email or profile
-  const getUserName = () => {
-    if (user?.email) {
-      const emailName = user.email.split('@')[0];
-      return emailName.charAt(0).toUpperCase() + emailName.slice(1);
-    }
-    return 'User';
-  };
-
-  // Calculate stats from profiles
-  const getStats = () => {
-    const totalProfiles = profiles.length;
-    const completeProfiles = profiles.filter(p => p.completeness >= 90).length;
-    const averageCompleteness = profiles.length > 0 
-      ? Math.round(profiles.reduce((sum, p) => sum + p.completeness, 0) / profiles.length)
-      : 0;
-
-    return {
-      totalProfiles,
-      completeProfiles,
-      averageCompleteness
-    };
-  };
-
-  const stats = getStats();
-
   if (!user) {
     return null; // Will redirect to auth
   }
@@ -75,157 +47,97 @@ const Dashboard = () => {
     return <Onboarding onComplete={handleOnboardingComplete} />;
   }
 
+  const meta = user.user_metadata as Record<string, string> | undefined;
+  const fullName = meta?.full_name || meta?.name || '';
+  const emailName = user.email ? user.email.split('@')[0] : '';
+  const firstName = (fullName.split(' ')[0] || emailName.charAt(0).toUpperCase() + emailName.slice(1)).trim();
+  const hr = new Date().getHours();
+  const tod = hr < 12 ? 'Good morning' : hr < 18 ? 'Good afternoon' : 'Good evening';
+
+  const readyProfiles = profiles.filter(p => p.completeness >= 75);
+  const profileName = (p: (typeof profiles)[number]) =>
+    ((p.resume_metadata as Record<string, string>)?.profile_name) || [p.first_name, p.last_name].filter(Boolean).join(' ');
+  const sub = profiles.length === 0
+    ? "Let's build your first profile. Upload a résumé to get started."
+    : readyProfiles.length === 0
+      ? 'Your profile needs a little more detail before Fyllo can fill with it.'
+      : extensionAvailable
+        ? `Your ${profileName(readyProfiles[0]) || 'first'} profile is ready to fill.`
+        : 'Your profile is ready. Add the extension to start filling.';
+
+  // Screening answers summary (from the most recently updated profile)
+  const answers: any[] = ((profiles[0]?.job_preferences as any)?.screening_answers || []).filter((a: any) => a?.enabled !== false);
+  const answered = answers.filter(a => String(a.answer ?? '').trim() !== '').length;
+  const blank = answers.length - answered;
+  const answeredPct = answers.length ? Math.round((answered / answers.length) * 100) : 0;
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50">
-      {/* Header */}
-      <header className="border-b bg-white/80 backdrop-blur-sm">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center h-16">
-            <div className="flex items-center space-x-3">
-              <Logo className="w-8 h-8" />
-              <span className="text-2xl font-bold text-gray-900">Fyllo</span>
+    <AppShell>
+      {({ openUpgrade, plan }) => (
+        <main data-screen-label="Dashboard" style={{ maxWidth: 1200, width: '100%', margin: '0 auto', padding: 'clamp(36px,5vw,64px) 24px 120px', display: 'flex', flexDirection: 'column', gap: 'clamp(40px,5vw,56px)' }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'end', gap: '20px 40px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <h1 className="fy-h1" style={{ fontSize: 'clamp(34px,4vw,52px)' }}>{tod}{firstName ? `, ${firstName}` : ''}.</h1>
+              <p style={{ margin: 0, fontSize: 17, color: '#6C6577' }}>{sub}</p>
             </div>
-            <div className="flex items-center space-x-4">
-              <Link to="/settings">
-                <Button variant="ghost" size="sm">
-                  <Settings className="h-4 w-4 mr-2" />
-                  Settings
-                </Button>
-              </Link>
-              <Button variant="ghost" size="sm">
-                <User className="h-4 w-4 mr-2" />
-                {user.email}
-              </Button>
-              <Button variant="ghost" size="sm" onClick={handleSignOut}>
-                <LogOut className="h-4 w-4 mr-2" />
-                Sign Out
-              </Button>
-            </div>
-          </div>
-        </div>
-      </header>
-
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Welcome Section */}
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">
-            Welcome back, {getUserName()}!
-          </h1>
-          <p className="text-gray-600">
-            {profiles.length === 0 
-              ? "Let's create your first application profile to get started."
-              : `You have ${profiles.length} profile${profiles.length === 1 ? '' : 's'} ready for job applications.`
-            }
-          </p>
-        </div>
-
-        {/* Quick Stats */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-          <Card className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-gray-600">Active Profiles</p>
-                <p className="text-2xl font-bold text-gray-900">{stats.totalProfiles}</p>
-                <p className="text-xs text-gray-500 mt-1">
-                  {stats.completeProfiles} fully complete
-                </p>
+            {extensionAvailable && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, height: 40, padding: '0 16px', borderRadius: 999, background: '#fff', border: '1px solid rgba(23,19,33,.08)', fontSize: 14, whiteSpace: 'nowrap', flex: 'none' }}>
+                <span aria-hidden="true" style={{ width: 8, height: 8, borderRadius: '50%', background: '#8A2BE2' }} />Extension connected
               </div>
-              <FileText className="h-8 w-8 text-brand" />
-            </div>
-          </Card>
-          
-          <Card className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-gray-600">Average Completeness</p>
-                <p className="text-2xl font-bold text-gray-900">{stats.averageCompleteness}%</p>
-                <p className="text-xs text-gray-500 mt-1">
-                  {stats.averageCompleteness >= 90 ? 'Excellent!' : 'Room for improvement'}
-                </p>
-              </div>
-              <Upload className="h-8 w-8 text-green-600" />
-            </div>
-          </Card>
-          
-          <Card className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-gray-600">Extension Status</p>
-                <Badge className="mt-1 bg-yellow-100 text-yellow-800">Not Installed</Badge>
-                <p className="text-xs text-gray-500 mt-1">Install to auto-fill</p>
-              </div>
-              <Chrome className="h-8 w-8 text-purple-600" />
-            </div>
-          </Card>
-        </div>
-
-        {/* Main Content */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          {/* Profiles Section */}
-          <div className="lg:col-span-2">
-            <ProfileList />
-          </div>
-
-          {/* Sidebar */}
-          <div className="space-y-6">
-            {/* Extension Card */}
-            <Card className="p-6">
-              <h3 className="font-semibold text-gray-900 mb-3">Browser Extension</h3>
-              <p className="text-sm text-gray-600 mb-4">
-                Install our Chrome extension to start auto-filling job applications using your profiles.
-              </p>
-              <Button variant="outline" className="w-full">
-                <Chrome className="h-4 w-4 mr-2" />
-                Install Extension
-              </Button>
-            </Card>
-
-            {/* Personalized Tips Card */}
-            <Card className="p-6">
-              <h3 className="font-semibold text-gray-900 mb-3">Tips for {getUserName()}</h3>
-              <ul className="space-y-2 text-sm text-gray-600">
-                {profiles.length === 0 ? (
-                  <>
-                    <li>• Upload your resume to create your first profile</li>
-                    <li>• Review and edit parsed information for accuracy</li>
-                    <li>• Install the browser extension once ready</li>
-                  </>
-                ) : (
-                  <>
-                    <li>• Create different profiles for different job types</li>
-                    <li>• Keep your profiles updated with latest experience</li>
-                    <li>• Use the extension on Workday and ICIMS sites</li>
-                    {stats.averageCompleteness < 90 && (
-                      <li>• Complete your profiles for better auto-fill accuracy</li>
-                    )}
-                  </>
-                )}
-              </ul>
-            </Card>
-
-            {/* Recent Activity Card */}
-            {profiles.length > 0 && (
-              <Card className="p-6">
-                <h3 className="font-semibold text-gray-900 mb-3">Recent Activity</h3>
-                <div className="space-y-3">
-                  {profiles.slice(0, 3).map((profile) => (
-                    <div key={profile.id} className="flex items-center space-x-3">
-                      <div className="w-2 h-2 bg-blue-600 rounded-full"></div>
-                      <div className="flex-1">
-                        <p className="text-sm font-medium text-gray-900">{(profile.resume_metadata as Record<string, string>)?.profile_name || [profile.first_name, profile.last_name].filter(Boolean).join(' ') || 'Untitled Profile'}</p>
-                        <p className="text-xs text-gray-500">
-                          Updated {new Date(profile.updated_at).toLocaleDateString()}
-                        </p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </Card>
             )}
           </div>
-        </div>
-      </div>
-    </div>
+
+          {!extensionAvailable && profiles.length > 0 && (
+            <div style={{ borderRadius: 24, background: '#171321', color: '#FCFBFE', padding: 'clamp(24px,4vw,40px)', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '24px 40px' }}>
+              <div style={{ flex: '1 1 320px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <h2 className="sg" style={{ margin: 0, fontWeight: 500, fontSize: 28, letterSpacing: '-0.03em' }}>One step left: add the extension.</h2>
+                <p style={{ margin: 0, fontSize: 15, lineHeight: 1.6, color: '#BEB6CB' }}>Your profile is ready. The extension is what fills applications — it connects to this account automatically.</p>
+              </div>
+              <a href={CHROME_STORE_URL} target="_blank" rel="noreferrer" className="fy-btn fy-primary" style={{ height: 50, padding: '0 24px', borderRadius: 999, fontSize: 15, color: '#fff' }}>Add to Chrome</a>
+            </div>
+          )}
+
+          <ProfileList isPro={plan.isPro} onUpgrade={openUpgrade} />
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(min(100%,420px),1fr))', gap: 24, alignItems: 'start' }}>
+            <MissedFields />
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+              {profiles.length > 0 && (
+                <section aria-labelledby="ans-h" className="fy-card" style={{ padding: 22, display: 'flex', flexDirection: 'column', gap: 16 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12 }}>
+                    <h2 id="ans-h" style={{ margin: 0, fontSize: 16, fontWeight: 500 }}>Screening answers</h2>
+                    <span style={{ fontSize: 13, color: '#6C6577' }}>{answers.length ? `${answered} of ${answers.length} answered` : 'Not started'}</span>
+                  </div>
+                  <div className="fy-bar"><div style={{ width: `${answeredPct}%` }} /></div>
+                  <p style={{ margin: 0, fontSize: 14, lineHeight: 1.55, color: '#6C6577' }}>
+                    {answers.length === 0
+                      ? 'Answer the common screening questions once and Fyllo will reuse them on every application.'
+                      : blank > 0
+                        ? `${blank} question${blank === 1 ? ' is' : 's are'} still blank — Fyllo will leave ${blank === 1 ? 'it' : 'those'} for you.`
+                        : 'Everything is answered. Fyllo can fill these for you.'}
+                  </p>
+                  {blank > 0 || answers.length === 0 ? (
+                    <button type="button" className="fy-btn fy-outline" onClick={() => navigate(`/profile/edit/${profiles[0].id}`)} style={{ alignSelf: 'flex-start', height: 38, padding: '0 16px', borderRadius: 999, fontSize: 14 }}>Finish answers</button>
+                  ) : null}
+                </section>
+              )}
+              {!plan.isPro && (
+                <section aria-labelledby="use-h" style={{ borderRadius: 20, background: '#F5F1FB', padding: 22, display: 'flex', flexDirection: 'column', gap: 14 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12 }}>
+                    <h2 id="use-h" style={{ margin: 0, fontSize: 16, fontWeight: 500 }}>Free plan</h2>
+                    <span style={{ fontSize: 13, color: '#4B0082' }}>{plan.usage.used} of {plan.usage.cap ?? 5} autofills used</span>
+                  </div>
+                  <UsageDots used={plan.usage.used} cap={plan.usage.cap} />
+                  <p style={{ margin: 0, fontSize: 14, lineHeight: 1.55, color: '#4B0082' }}>Pro is $9 a month for unlimited autofills and profiles.</p>
+                  <button type="button" className="fy-btn fy-primary" onClick={openUpgrade} style={{ alignSelf: 'flex-start', height: 40, padding: '0 18px', borderRadius: 999, fontSize: 14 }}>Upgrade to Pro</button>
+                </section>
+              )}
+            </div>
+          </div>
+        </main>
+      )}
+    </AppShell>
   );
 };
 
