@@ -23,3 +23,4 @@
 @keyframes fySpin{to{transform:rotate(360deg)}}
 @keyframes fyIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
 @media (prefers-reduced-motion:reduce){.fy *{animation:none!important;transition:none!important}}
+@media (min-width:640px){.fy .fy-sticky-nav{position:sticky;top:96px}}

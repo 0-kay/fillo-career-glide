@@ -14,3 +14,4 @@
 @keyframes fyProgress{from{transform:scaleX(0)}to{transform:scaleX(1)}}
 @keyframes fyBlink{50%{opacity:0}}
 @media (prefers-reduced-motion:reduce){.fy *{animation:none!important;transition:none!important}}
+@media (min-width:900px){.fy .fy-sticky{position:sticky;top:120px}}

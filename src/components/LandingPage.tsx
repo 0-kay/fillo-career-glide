@@ -419,7 +419,7 @@ const LandingPage = () => {
         {/* Screening */}
         <section aria-labelledby="dread" style={{ padding: 'clamp(96px,14vw,176px) 24px' }}>
           <div style={{ maxWidth: 1240, margin: '0 auto', display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(min(100%,420px),1fr))', gap: '56px 88px', alignItems: 'start' }}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 22, maxWidth: 480, position: 'sticky', top: 120 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 22, maxWidth: 480 }} className="fy-sticky">
               <span style={eyebrow}>Beyond name and email</span>
               <h2 id="dread" className="h2">Answers the questions you dread, too.</h2>
               <p style={lead}>Work authorization, sponsorship, veteran and disability status, salary expectations. Save your answers once — Fyllo recognizes the question however it's phrased.</p>
