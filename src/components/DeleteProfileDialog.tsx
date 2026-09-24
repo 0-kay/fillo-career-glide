@@ -1,5 +1,6 @@
 
 import React from 'react';
+import '@/components/fyllo/fyllo.css';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -21,19 +22,19 @@ interface DeleteProfileDialogProps {
 const DeleteProfileDialog = ({ isOpen, onClose, onConfirm, profileName }: DeleteProfileDialogProps) => {
   return (
     <AlertDialog open={isOpen} onOpenChange={onClose}>
-      <AlertDialogContent>
+      <AlertDialogContent className="fy" style={{ minHeight: 0, borderRadius: 24, padding: 28, border: 0, boxShadow: '0 40px 80px -24px rgba(23,19,33,.45)' }}>
         <AlertDialogHeader>
-          <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+          <AlertDialogTitle className="sg" style={{ fontWeight: 500, fontSize: 22, letterSpacing: '-0.025em' }}>Are you sure?</AlertDialogTitle>
           <AlertDialogDescription>
             This will permanently delete the profile "{profileName}" and all its data. 
             This action cannot be undone.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel onClick={onClose}>Cancel</AlertDialogCancel>
+          <AlertDialogCancel onClick={onClose} className="fy-btn fy-outline" style={{ height: 42, padding: '0 18px', borderRadius: 999, fontSize: 14 }}>Cancel</AlertDialogCancel>
           <AlertDialogAction 
             onClick={onConfirm}
-            className="bg-red-600 hover:bg-red-700"
+            className="fy-btn" style={{ height: 42, padding: '0 18px', borderRadius: 999, fontSize: 14, background: '#B42318', color: '#fff' }}
           >
             Delete Profile
           </AlertDialogAction>

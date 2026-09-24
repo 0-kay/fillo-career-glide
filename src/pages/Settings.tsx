@@ -1,51 +1,34 @@
-
-import React, { useEffect, useState } from 'react';
-import { Button } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Switch } from '@/components/ui/switch';
-import { ArrowLeft, User, Bell, Shield, Chrome, Loader2, CreditCard } from 'lucide-react';
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { useToast } from '@/hooks/use-toast';
-import Logo from '@/components/Logo';
+import { useFilloExtension } from '@/hooks/useFilloExtension';
+import AppShell from '@/components/fyllo/AppShell';
+import { usePlan } from '@/components/fyllo/usePlan';
+import '@/components/fyllo/fyllo.css';
 
-// supabase.functions.invoke() surfaces any non-2xx response as a generic
-// FunctionsHttpError ("Edge Function returned a non-2xx status code") and
-// discards the response body — our functions put the real reason in
-// `{ error }` on that body via the shared `fail()` helper, so read it back
-// from the error's `context` (the raw Response) instead of trusting error.message.
-async function extractFunctionErrorMessage(error: unknown): Promise<string> {
-  const context = (error as { context?: Response })?.context;
-  if (context && typeof context.json === 'function') {
-    try {
-      const body = await context.clone().json();
-      if (body?.error) return String(body.error);
-    } catch {
-      // response body wasn't JSON — fall through to the generic message
-    }
-  }
-  return error instanceof Error ? error.message : 'Please try again.';
-}
+const card: React.CSSProperties = { borderRadius: 20, background: '#FFFFFF', border: '1px solid rgba(23,19,33,.08)', padding: 'clamp(22px,3vw,32px)' };
+const h2: React.CSSProperties = { margin: 0, fontSize: 18, fontWeight: 500 };
+const muted: React.CSSProperties = { fontSize: 14, color: '#6C6577' };
+const rowLabel: React.CSSProperties = { fontSize: 15, fontWeight: 500 };
+const lbl: React.CSSProperties = { display: 'flex', flexDirection: 'column', gap: 7 };
+const lblText: React.CSSProperties = { fontSize: 13, fontWeight: 500 };
 
 const Settings = () => {
   const { user } = useAuth();
   const { toast } = useToast();
+  const { extensionAvailable } = useFilloExtension();
+  const plan = usePlan();
 
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [savingAccount, setSavingAccount] = useState(false);
 
+  const [pwOpen, setPwOpen] = useState(false);
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [savingPassword, setSavingPassword] = useState(false);
-
-  const [plan, setPlan] = useState<'free' | 'pro'>('free');
-  const [currentPeriodEnd, setCurrentPeriodEnd] = useState<string | null>(null);
-  const [usage, setUsage] = useState<{ used: number; cap: number | null }>({ used: 0, cap: 5 });
-  const [billingLoading, setBillingLoading] = useState<'month' | 'year' | 'portal' | null>(null);
 
   useEffect(() => {
     if (!user) return;
@@ -53,67 +36,14 @@ const Settings = () => {
     setEmail(user.email ?? '');
   }, [user]);
 
-  useEffect(() => {
-    if (!user) return;
-    (async () => {
-      const [{ data: profileRow }, { data: usageRow }] = await Promise.all([
-        supabase.from('profiles').select('plan, current_period_end').eq('id', user.id).single(),
-        supabase.rpc('get_fill_usage').single(),
-      ]);
-      if (profileRow) {
-        setPlan(profileRow.plan === 'pro' ? 'pro' : 'free');
-        setCurrentPeriodEnd(profileRow.current_period_end);
-      }
-      if (usageRow) setUsage({ used: usageRow.used ?? 0, cap: usageRow.cap ?? null });
-    })();
-  }, [user]);
-
   // Stripe Checkout redirects back here with ?checkout=success|cancelled.
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const checkout = params.get('checkout');
+    const checkout = new URLSearchParams(window.location.search).get('checkout');
     if (!checkout) return;
-    if (checkout === 'success') {
-      toast({ title: 'Welcome to Pro!', description: 'Your subscription is active.' });
-    } else if (checkout === 'cancelled') {
-      toast({ title: 'Checkout cancelled', description: 'No changes were made to your plan.' });
-    }
+    if (checkout === 'success') toast({ title: 'Welcome to Pro!', description: 'Your subscription is active.' });
+    else if (checkout === 'cancelled') toast({ title: 'Checkout cancelled', description: 'No changes were made to your plan.' });
     window.history.replaceState({}, '', '/settings');
   }, [toast]);
-
-  const handleUpgrade = async (interval: 'month' | 'year') => {
-    setBillingLoading(interval);
-    try {
-      const { data, error } = await supabase.functions.invoke('stripe-checkout', { body: { interval } });
-      if (error) throw new Error(await extractFunctionErrorMessage(error));
-      if (!data?.url) throw new Error(data?.error || 'Could not start checkout');
-      window.location.href = data.url;
-    } catch (error) {
-      toast({
-        title: 'Could not start checkout',
-        description: error instanceof Error ? error.message : 'Please try again.',
-        variant: 'destructive',
-      });
-      setBillingLoading(null);
-    }
-  };
-
-  const handleManageBilling = async () => {
-    setBillingLoading('portal');
-    try {
-      const { data, error } = await supabase.functions.invoke('stripe-portal');
-      if (error) throw new Error(await extractFunctionErrorMessage(error));
-      if (!data?.url) throw new Error(data?.error || 'Could not open billing portal');
-      window.location.href = data.url;
-    } catch (error) {
-      toast({
-        title: 'Could not open billing portal',
-        description: error instanceof Error ? error.message : 'Please try again.',
-        variant: 'destructive',
-      });
-      setBillingLoading(null);
-    }
-  };
 
   const handleSaveAccount = async () => {
     if (!user) return;
@@ -132,11 +62,7 @@ const Settings = () => {
           : 'Your name was saved.',
       });
     } catch (error) {
-      toast({
-        title: 'Could not save changes',
-        description: error instanceof Error ? error.message : 'Please try again.',
-        variant: 'destructive',
-      });
+      toast({ title: 'Could not save changes', description: error instanceof Error ? error.message : 'Please try again.', variant: 'destructive' });
     } finally {
       setSavingAccount(false);
     }
@@ -144,19 +70,11 @@ const Settings = () => {
 
   const handleChangePassword = async () => {
     if (newPassword.length < 8) {
-      toast({
-        title: 'Password too short',
-        description: 'Use at least 8 characters.',
-        variant: 'destructive',
-      });
+      toast({ title: 'Password too short', description: 'Use at least 8 characters.', variant: 'destructive' });
       return;
     }
     if (newPassword !== confirmPassword) {
-      toast({
-        title: "Passwords don't match",
-        description: 'Re-enter the new password in both fields.',
-        variant: 'destructive',
-      });
+      toast({ title: "Passwords don't match", description: 'Re-enter the new password in both fields.', variant: 'destructive' });
       return;
     }
     setSavingPassword(true);
@@ -165,266 +83,115 @@ const Settings = () => {
       if (error) throw error;
       setNewPassword('');
       setConfirmPassword('');
+      setPwOpen(false);
       toast({ title: 'Password updated' });
     } catch (error) {
-      toast({
-        title: 'Could not update password',
-        description: error instanceof Error ? error.message : 'Please try again.',
-        variant: 'destructive',
-      });
+      toast({ title: 'Could not update password', description: error instanceof Error ? error.message : 'Please try again.', variant: 'destructive' });
     } finally {
       setSavingPassword(false);
     }
   };
 
+  const planMeta = plan.usage.cap != null
+    ? `${plan.usage.used} of ${plan.usage.cap} autofills used this month · 1 profile`
+    : `${plan.usage.used} autofills this month`;
+  const proMeta = `Fyllo Pro${plan.currentPeriodEnd ? ` · renews ${new Date(plan.currentPeriodEnd).toLocaleDateString()}` : ''}`;
+  const pill = { height: 40, padding: '0 16px', borderRadius: 999, fontSize: 14 } as const;
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50">
-      {/* Header */}
-      <header className="border-b bg-white/80 backdrop-blur-sm">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center h-16">
-            <div className="flex items-center space-x-3">
-              <Link to="/dashboard">
-                <Button variant="ghost" size="sm">
-                  <ArrowLeft className="h-4 w-4 mr-2" />
-                  Back to Dashboard
-                </Button>
-              </Link>
-            </div>
-            <div className="flex items-center space-x-3">
-              <Logo className="w-8 h-8" />
-              <span className="text-2xl font-bold text-gray-900">Fyllo</span>
-            </div>
-          </div>
-        </div>
-      </header>
+    <AppShell plan={plan}>
+      {({ openUpgrade, openBilling }) => (
+        <main style={{ maxWidth: 820, width: '100%', margin: '0 auto', padding: 'clamp(36px,5vw,64px) 24px 120px', display: 'flex', flexDirection: 'column', gap: 28 }}>
+          <h1 className="fy-h1" style={{ margin: '0 0 8px', fontSize: 'clamp(34px,4vw,48px)' }}>Settings</h1>
 
-      <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">Settings</h1>
-          <p className="text-gray-600">Manage your account preferences and extension settings.</p>
-        </div>
-
-        <div className="space-y-6">
-          {/* Account Settings */}
-          <Card className="p-6">
-            <div className="flex items-center space-x-3 mb-6">
-              <User className="h-5 w-5 text-brand" />
-              <h3 className="text-lg font-semibold text-gray-900">Account Settings</h3>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div>
-                <Label htmlFor="name">Full Name</Label>
-                <Input
-                  id="name"
-                  placeholder="John Doe"
-                  value={fullName}
-                  onChange={(e) => setFullName(e.target.value)}
-                />
+          {!plan.isPro && (
+            <section aria-labelledby="plan-h" style={{ borderRadius: 20, background: '#F5F1FB', padding: '20px clamp(20px,3vw,28px)', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '14px 24px' }}>
+              <div style={{ flex: '1 1 260px', display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <h2 id="plan-h" style={{ margin: 0, fontSize: 16, fontWeight: 500 }}>Free plan</h2>
+                <span style={{ fontSize: 14, color: '#4B0082' }}>{planMeta}</span>
               </div>
-              <div>
-                <Label htmlFor="email">Email Address</Label>
-                <Input
-                  id="email"
-                  type="email"
-                  placeholder="john@example.com"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                />
+              <button type="button" className="fy-btn fy-primary" onClick={openUpgrade} style={{ height: 42, padding: '0 18px', borderRadius: 999, fontSize: 14 }}>See Pro</button>
+            </section>
+          )}
+
+          <section aria-labelledby="acct-h" style={{ ...card, display: 'flex', flexDirection: 'column', gap: 20 }}>
+            <h2 id="acct-h" style={h2}>Account</h2>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(220px,1fr))', gap: '16px 18px' }}>
+              <label style={lbl}><span style={lblText}>Full name</span>
+                <input className="fy-input" value={fullName} onChange={(e) => setFullName(e.target.value)} placeholder="Your name" />
+              </label>
+              <label style={lbl}><span style={lblText}>Email</span>
+                <input className="fy-input" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" />
+              </label>
+            </div>
+            <p style={{ margin: 0, fontSize: 13, color: '#6C6577' }}>Changing your email sends a confirmation link to the new address.</p>
+            <div>
+              <button type="button" className="fy-btn fy-dark" onClick={handleSaveAccount} disabled={savingAccount || !user} style={{ height: 42, padding: '0 18px', borderRadius: 999, fontSize: 14 }}>
+                {savingAccount ? 'Saving…' : 'Save changes'}
+              </button>
+            </div>
+          </section>
+
+          <section aria-labelledby="ext-h" style={{ ...card, display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '16px 24px' }}>
+            <img src="/icon128.png" alt="" style={{ width: 44, height: 44, borderRadius: 12 }} />
+            <div style={{ flex: '1 1 220px', display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <h2 id="ext-h" style={{ margin: 0, fontSize: 16, fontWeight: 500 }}>Chrome extension</h2>
+              <span style={muted}>{extensionAvailable ? 'Installed and connected to your account.' : 'Not detected in this browser.'}</span>
+            </div>
+            {!extensionAvailable && (
+              <Link to="/" className="fy-btn fy-dark" style={{ height: 42, padding: '0 18px', borderRadius: 999, fontSize: 14 }}>Add to Chrome</Link>
+            )}
+          </section>
+
+          <section aria-labelledby="priv-h" style={{ ...card, display: 'flex', flexDirection: 'column', gap: 18 }}>
+            <h2 id="priv-h" style={h2}>Privacy &amp; security</h2>
+            <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: '12px 24px', paddingTop: 4 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                <span style={rowLabel}>Password</span>
+                <span style={muted}>At least 8 characters.</span>
               </div>
+              <button type="button" className="fy-btn fy-outline" onClick={() => setPwOpen((o) => !o)} aria-expanded={pwOpen} style={pill}>
+                {pwOpen ? 'Cancel' : 'Change password'}
+              </button>
             </div>
-
-            <div className="mt-6">
-              <Button
-                className="bg-brand hover:bg-brand-dark"
-                onClick={handleSaveAccount}
-                disabled={savingAccount || !user}
-              >
-                {savingAccount && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-                Save Changes
-              </Button>
-            </div>
-          </Card>
-
-          {/* Billing & Plan */}
-          <Card className="p-6">
-            <div className="flex items-center space-x-3 mb-6">
-              <CreditCard className="h-5 w-5 text-brand" />
-              <h3 className="text-lg font-semibold text-gray-900">Billing & Plan</h3>
-              <span
-                className={`text-xs font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full ${
-                  plan === 'pro' ? 'bg-brand/10 text-brand-dark' : 'bg-gray-100 text-gray-600'
-                }`}
-              >
-                {plan === 'pro' ? 'Pro' : 'Free'}
-              </span>
-            </div>
-
-            {plan === 'pro' ? (
-              <div className="space-y-4">
-                <p className="text-sm text-gray-600">
-                  You're on the Pro plan
-                  {currentPeriodEnd ? ` — renews ${new Date(currentPeriodEnd).toLocaleDateString()}` : ''}.
-                  Unlimited profiles, unlimited autofills, full AI assistance.
-                </p>
-                <Button variant="outline" onClick={handleManageBilling} disabled={billingLoading === 'portal'}>
-                  {billingLoading === 'portal' && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-                  Manage Billing
-                </Button>
-              </div>
-            ) : (
-              <div className="space-y-4">
-                <div>
-                  <p className="text-sm text-gray-600 mb-1">
-                    {usage.cap != null
-                      ? `${usage.used} of ${usage.cap} autofills used this month`
-                      : `${usage.used} autofills this month`}
-                  </p>
-                  {usage.cap != null && (
-                    <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-                      <div
-                        className="h-full bg-brand"
-                        style={{ width: `${Math.min(100, (usage.used / usage.cap) * 100)}%` }}
-                      />
-                    </div>
-                  )}
-                  <p className="text-xs text-gray-500 mt-2">
-                    Free plan: 1 profile, 5 autofills/month, limited AI assistance.
-                  </p>
+            {pwOpen && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 16, animation: 'fyIn .15s ease-out' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(220px,1fr))', gap: '16px 18px' }}>
+                  <label style={lbl}><span style={lblText}>New password</span>
+                    <input className="fy-input" type="password" autoComplete="new-password" placeholder="At least 8 characters" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} />
+                  </label>
+                  <label style={lbl}><span style={lblText}>Confirm new password</span>
+                    <input className="fy-input" type="password" autoComplete="new-password" placeholder="Re-enter password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} />
+                  </label>
                 </div>
-                <div className="flex flex-col sm:flex-row gap-3">
-                  <Button
-                    className="bg-brand hover:bg-brand-dark"
-                    onClick={() => handleUpgrade('month')}
-                    disabled={billingLoading !== null}
-                  >
-                    {billingLoading === 'month' && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-                    Upgrade — $9/month
-                  </Button>
-                  <Button
-                    variant="outline"
-                    onClick={() => handleUpgrade('year')}
-                    disabled={billingLoading !== null}
-                  >
-                    {billingLoading === 'year' && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-                    Upgrade — $90/year
-                  </Button>
+                <div>
+                  <button type="button" className="fy-btn fy-dark" onClick={handleChangePassword} disabled={savingPassword || !newPassword} style={{ height: 42, padding: '0 18px', borderRadius: 999, fontSize: 14 }}>
+                    {savingPassword ? 'Updating…' : 'Update password'}
+                  </button>
                 </div>
               </div>
             )}
-          </Card>
-
-          {/* Notification Settings */}
-          <Card className="p-6">
-            <div className="flex items-center space-x-3 mb-6">
-              <Bell className="h-5 w-5 text-brand" />
-              <h3 className="text-lg font-semibold text-gray-900">Notifications</h3>
-              <span className="text-xs font-medium text-gray-400 uppercase tracking-wide">Coming soon</span>
-            </div>
-
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="font-medium text-gray-900">Extension Updates</p>
-                  <p className="text-sm text-gray-600">Get notified when new features are available</p>
-                </div>
-                <Switch disabled />
+            <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: '12px 24px', paddingTop: 18, borderTop: '1px solid rgba(23,19,33,.06)' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 2, maxWidth: 460 }}>
+                <span style={rowLabel}>Delete account</span>
+                <span style={{ ...muted, lineHeight: 1.5 }}>Permanently removes your account, profiles, résumé files and saved answers.</span>
               </div>
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="font-medium text-gray-900">Application Tips</p>
-                  <p className="text-sm text-gray-600">Receive helpful tips for job applications</p>
-                </div>
-                <Switch disabled />
-              </div>
+              <button type="button" className="fy-btn fy-outline" disabled title="Coming soon" style={{ ...pill, color: '#B42318', border: '1px solid rgba(180,35,24,.3)' }}>Delete account</button>
             </div>
-          </Card>
+          </section>
 
-          {/* Extension Settings */}
-          <Card className="p-6">
-            <div className="flex items-center space-x-3 mb-6">
-              <Chrome className="h-5 w-5 text-brand" />
-              <h3 className="text-lg font-semibold text-gray-900">Extension Settings</h3>
-              <span className="text-xs font-medium text-gray-400 uppercase tracking-wide">Coming soon</span>
-            </div>
-
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="font-medium text-gray-900">Auto-fill on page load</p>
-                  <p className="text-sm text-gray-600">Automatically suggest profile when forms are detected</p>
-                </div>
-                <Switch disabled />
+          {plan.isPro && (
+            <section aria-labelledby="bill-h" style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: '12px 24px', padding: '20px 4px', borderTop: '1px solid rgba(23,19,33,.08)' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                <h2 id="bill-h" style={{ margin: 0, fontSize: 15, fontWeight: 500 }}>Plan &amp; billing</h2>
+                <span style={muted}>{proMeta}</span>
               </div>
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="font-medium text-gray-900">Show success notifications</p>
-                  <p className="text-sm text-gray-600">Display notifications when forms are filled successfully</p>
-                </div>
-                <Switch disabled />
-              </div>
-            </div>
-          </Card>
-
-          {/* Privacy & Security */}
-          <Card className="p-6">
-            <div className="flex items-center space-x-3 mb-6">
-              <Shield className="h-5 w-5 text-brand" />
-              <h3 className="text-lg font-semibold text-gray-900">Privacy & Security</h3>
-            </div>
-
-            <div className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <Label htmlFor="new-password">New Password</Label>
-                  <Input
-                    id="new-password"
-                    type="password"
-                    placeholder="At least 8 characters"
-                    value={newPassword}
-                    onChange={(e) => setNewPassword(e.target.value)}
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="confirm-password">Confirm New Password</Label>
-                  <Input
-                    id="confirm-password"
-                    type="password"
-                    placeholder="Re-enter password"
-                    value={confirmPassword}
-                    onChange={(e) => setConfirmPassword(e.target.value)}
-                  />
-                </div>
-              </div>
-              <Button
-                variant="outline"
-                onClick={handleChangePassword}
-                disabled={savingPassword || !newPassword}
-              >
-                {savingPassword && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-                Change Password
-              </Button>
-
-              <div className="pt-2 border-t space-y-3">
-                <div className="flex items-center justify-between">
-                  <p className="text-sm text-gray-600">Export a copy of your account data</p>
-                  <Button variant="outline" disabled title="Coming soon">
-                    Download My Data
-                  </Button>
-                </div>
-                <div className="flex items-center justify-between">
-                  <p className="text-sm text-gray-600">Permanently delete your account and all profiles</p>
-                  <Button variant="destructive" disabled title="Coming soon">
-                    Delete Account
-                  </Button>
-                </div>
-              </div>
-            </div>
-          </Card>
-        </div>
-      </div>
-    </div>
+              <button type="button" className="fy-btn fy-outline" onClick={openBilling} style={pill}>Manage billing</button>
+            </section>
+          )}
+        </main>
+      )}
+    </AppShell>
   );
 };
 

@@ -1,0 +1,25 @@
+/* Shared Fyllo design tokens/classes for the app UI (mirrors the design handoff). */
+.fy{background:#FCFBFE;color:#171321;font-family:Poppins,ui-sans-serif,system-ui,sans-serif;-webkit-font-smoothing:antialiased;min-height:100vh}
+.fy *{box-sizing:border-box}
+.fy a{text-decoration:none;color:inherit}
+.fy button,.fy input,.fy textarea,.fy select{font-family:inherit}
+.fy input::placeholder,.fy textarea::placeholder{color:#9C97A6}
+.fy :focus-visible{outline:2px solid #8A2BE2;outline-offset:2px}
+.fy .sg{font-family:'Space Grotesk',sans-serif}
+.fy .fy-input{height:46px;border-radius:12px;border:1px solid rgba(23,19,33,.14);padding:0 14px;font-size:15px;color:#171321;background:#fff;outline:none;width:100%}
+.fy .fy-input:focus{border-color:#8A2BE2;box-shadow:0 0 0 3px rgba(138,43,226,.12)}
+.fy .fy-input[aria-invalid="true"]{border-color:#B42318}
+.fy .fy-btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;border:0;cursor:pointer;font-weight:500;white-space:nowrap;transition:background .2s,color .2s}
+.fy .fy-btn:disabled{opacity:.5;cursor:not-allowed}
+.fy .fy-primary{background:#8A2BE2;color:#fff}.fy .fy-primary:hover:not(:disabled){background:#4B0082}
+.fy .fy-dark{background:#171321;color:#fff}.fy .fy-dark:hover:not(:disabled){background:#4B0082}
+.fy .fy-outline{background:#fff;color:#171321;border:1px solid rgba(23,19,33,.14)}.fy .fy-outline:hover:not(:disabled){background:#F5F1FB}
+.fy .fy-ghost{background:none;color:#171321}.fy .fy-ghost:hover:not(:disabled){background:#F5F1FB}
+.fy .fy-card{border-radius:20px;background:#fff;border:1px solid rgba(23,19,33,.08)}
+.fy .fy-bar{height:4px;border-radius:4px;background:#F0ECF5;overflow:hidden}
+.fy .fy-bar>div{height:100%;background:#8A2BE2;border-radius:4px}
+.fy .fy-h1{margin:0;font-family:'Space Grotesk',sans-serif;font-weight:500;line-height:1.02;letter-spacing:-0.04em}
+.fy .fy-spin{border-radius:50%;border:2px solid rgba(138,43,226,.25);border-top-color:#8A2BE2;animation:fySpin .8s linear infinite;flex:none}
+@keyframes fySpin{to{transform:rotate(360deg)}}
+@keyframes fyIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){.fy *{animation:none!important;transition:none!important}}

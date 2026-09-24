@@ -1,6 +1,4 @@
 import React, { useState, useCallback } from 'react';
-import { Button } from '@/components/ui/button';
-import { Upload, FileText, X, Loader2 } from 'lucide-react';
 import { useProfiles } from '@/hooks/useProfiles';
 import { useAuth } from '@/hooks/useAuth';
 import { useToast } from '@/hooks/use-toast';
@@ -16,11 +14,30 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
   import.meta.url
 ).toString();
 
-interface ResumeUploadProps {
-  onComplete?: () => void;
+export type ResumeUploadEvent =
+  | { type: 'started'; fileName: string }
+  | { type: 'profile'; profileId: string }
+  | { type: 'uploaded' }
+  | { type: 'parsing' }
+  | { type: 'saving' }
+  | { type: 'done'; profileId: string }
+  | { type: 'failed' }
+  | { type: 'error' };
+
+// Optional headless mode used by the onboarding flow: the parent renders its own UI,
+// receives progress events and supplies screening answers to merge into the final save.
+export interface ResumeUploadOnboarding {
+  register: (handleFile: (file: File) => void) => void;
+  onEvent: (event: ResumeUploadEvent) => void;
+  getScreeningAnswers?: () => ScreeningAnswer[];
 }
 
-const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
+interface ResumeUploadProps {
+  onComplete?: () => void;
+  onboarding?: ResumeUploadOnboarding;
+}
+
+const ResumeUpload = ({ onComplete, onboarding }: ResumeUploadProps) => {
   console.log('🚀 ResumeUpload component rendered');
   const [dragActive, setDragActive] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -339,6 +356,7 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
 
     setSelectedFile(file);
     setUploading(true);
+    onboarding?.onEvent({ type: 'started', fileName: file.name });
 
     let initialFirstName = file.name;
     let initialLastName = '';
@@ -404,10 +422,11 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
       if (!profileId) throw new Error('No profile ID returned');
       
       setNewProfileId(profileId);
+      onboarding?.onEvent({ type: 'profile', profileId });
       
       // Stop the main uploading spinner and show the screening questions dialog immediately
       setUploading(false);
-      setShowScreeningDialog(true);
+      if (!onboarding) setShowScreeningDialog(true);
       
       // 2. Start the background parsing and updating task
       (async () => {
@@ -417,6 +436,7 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
           const uploadResult = await uploadResumeToStorage(file, user.id, profileId);
           if (uploadResult) uploadPath = uploadResult.path;
         }
+        onboarding?.onEvent({ type: 'uploaded' });
 
         // Update profile to reflect that uploading is done and AI processing is starting
         await updateProfile(profileId, {
@@ -433,6 +453,7 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
         });
         
         // === PARSING PHASE ===
+        onboarding?.onEvent({ type: 'parsing' });
         let success = false;
         let lastError = null;
         let parsedData = null;
@@ -471,6 +492,7 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
             } as any
           });
           
+          onboarding?.onEvent({ type: 'failed' });
           toast({
             title: "Background processing failed",
             description: "We could not parse your resume. Please try uploading again.",
@@ -676,6 +698,7 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
           completeness: calculateDataCompleteness(parsedData)
         };
         
+        onboarding?.onEvent({ type: 'saving' });
         // Before updating, get current profile to preserve user settings like screening answers
         const currentProfileRes = await getProfile(profileId);
         const currentData = currentProfileRes.data || {};
@@ -686,7 +709,11 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
           ...profileDataToUpdate,
           job_preferences: {
             ...currentJobPrefs,                // Preserve existing manual answers
-            ...parsedData.job_preferences      // Merge any AI preferences
+            ...parsedData.job_preferences,     // Merge any AI preferences
+            ...(() => {
+              const answers = onboarding?.getScreeningAnswers?.() ?? [];
+              return answers.length > 0 ? { screening_answers: answers } : {};
+            })()
           } as any,
           resume_metadata: {
             ...skeletonProfile.resume_metadata,
@@ -706,7 +733,9 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
         
         if (finalUpdate.error) {
            console.error('Final background update failed:', finalUpdate.error);
+           onboarding?.onEvent({ type: 'failed' });
         } else {
+           onboarding?.onEvent({ type: 'done', profileId });
            console.log('Background processing fully complete:', finalUpdate.data);
            // We can optionally fire an event or toast here
            toast({
@@ -726,6 +755,7 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
       });
       setUploading(false);
       setSelectedFile(null);
+      onboarding?.onEvent({ type: 'error' });
     }
     // We NO LONGER have a finally block here clearing state 
     // because processing continues in the background!
@@ -758,80 +788,59 @@ const ResumeUpload = ({ onComplete }: ResumeUploadProps) => {
     setSelectedFile(null);
   };
 
+  // Headless onboarding mode: hand the upload handler to the parent, render nothing.
+  if (onboarding) {
+    onboarding.register(handleFile);
+    return null;
+  }
+
   if (uploading) {
     return (
-      <div className="text-center py-12">
-        <Loader2 className="h-12 w-12 animate-spin text-brand mx-auto mb-4" />
-        <h3 className="text-lg font-semibold text-gray-900 mb-2">Processing Resume</h3>
-        <p className="text-gray-600">Please wait...</p>
+      <div role="status" style={{ textAlign: 'center', padding: '48px 0', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14 }}>
+        <span className="fy-spin" style={{ width: 28, height: 28, borderWidth: 3 }} aria-hidden="true" />
+        <h3 className="sg" style={{ margin: 0, fontWeight: 500, fontSize: 22, letterSpacing: '-0.025em' }}>Reading your résumé…</h3>
+        <p style={{ margin: 0, fontSize: 14, color: '#6C6577' }}>This usually takes a few seconds.</p>
       </div>
     );
   }
 
   return (
-    <div>
-      <div className="text-center mb-8">
-        <h3 className="text-xl font-semibold text-gray-900 mb-2">Upload Your Resume</h3>
-        <p className="text-gray-600">
-          Upload your resume and AI will extract the information.
-        </p>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <h3 className="sg" style={{ margin: 0, fontWeight: 500, fontSize: 22, letterSpacing: '-0.025em' }}>Upload your résumé</h3>
+        <p style={{ margin: 0, fontSize: 15, color: '#6C6577' }}>Fyllo reads it and builds your profile. You can review everything afterwards.</p>
       </div>
 
       {!selectedFile ? (
         <div
-          className={`relative border-2 border-dashed rounded-lg p-12 text-center transition-colors ${
-            dragActive 
-              ? 'border-blue-400 bg-blue-50' 
-              : 'border-gray-300 hover:border-gray-400'
-          }`}
+          style={{ position: 'relative', border: `1.5px dashed ${dragActive ? '#8A2BE2' : 'rgba(23,19,33,.18)'}`, borderRadius: 16, padding: '44px 20px', textAlign: 'center', background: dragActive ? '#F5F1FB' : '#fff', transition: 'background .2s,border-color .2s', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}
           onDragEnter={handleDrag}
           onDragLeave={handleDrag}
           onDragOver={handleDrag}
           onDrop={handleDrop}
         >
-          <Upload className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-          <h4 className="text-lg font-medium text-gray-900 mb-2">
-            Drop your resume here, or click to browse
-          </h4>
-          <p className="text-gray-600 mb-6">
-            Supports PDF, DOC, DOCX, and TXT files up to 10MB
-          </p>
-          
+          <span style={{ fontSize: 16, fontWeight: 500 }}>Drop your résumé here, or click to browse</span>
+          <span style={{ fontSize: 13, color: '#6C6577' }}>PDF, DOC, DOCX or TXT, up to 10MB</span>
           <input
             type="file"
             accept=".pdf,.doc,.docx,.txt"
             onChange={handleChange}
-            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+            aria-label="Choose a résumé file"
+            style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', opacity: 0, cursor: 'pointer' }}
           />
-          
-          <Button className="bg-brand hover:bg-brand-dark">
-            Browse Files
-          </Button>
+          <span className="fy-btn fy-dark" style={{ height: 40, padding: '0 18px', borderRadius: 999, fontSize: 14, marginTop: 8 }}>Browse files</span>
         </div>
       ) : (
-        <div className="border rounded-lg p-6">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-3">
-              <FileText className="h-8 w-8 text-brand" />
-              <div>
-                <p className="font-medium text-gray-900">{selectedFile.name}</p>
-                <p className="text-sm text-gray-600">
-                  {(selectedFile.size / 1024 / 1024).toFixed(2)} MB
-                </p>
-              </div>
-            </div>
-            <Button variant="ghost" size="sm" onClick={removeFile}>
-              <X className="h-4 w-4" />
-            </Button>
+        <div style={{ border: '1px solid rgba(23,19,33,.1)', borderRadius: 16, padding: '16px 18px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 15, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis' }}>{selectedFile.name}</div>
+            <div style={{ fontSize: 13, color: '#6C6577' }}>{(selectedFile.size / 1024 / 1024).toFixed(2)} MB</div>
           </div>
+          <button type="button" onClick={removeFile} aria-label="Remove file" className="fy-btn fy-ghost" style={{ width: 36, height: 36, borderRadius: '50%', color: '#6C6577', fontSize: 20 }}>×</button>
         </div>
       )}
 
-      <div className="mt-6 text-center">
-        <p className="text-sm text-gray-500">
-          Your resume is processed securely and never shared.
-        </p>
-      </div>
+      <p style={{ margin: 0, fontSize: 13, color: '#9C97A6' }}>Your résumé is processed securely and never shared.</p>
 
       <ScreeningQuestionsDialog
         isOpen={showScreeningDialog}
