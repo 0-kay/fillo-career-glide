@@ -15,3 +15,15 @@
 @keyframes fyBlink{50%{opacity:0}}
 @media (prefers-reduced-motion:reduce){.fy *{animation:none!important;transition:none!important}}
 @media (min-width:900px){.fy .fy-sticky{position:sticky;top:120px}}
+.fy .fy-desk{display:flex}
+.fy .fy-burger{display:none;margin-left:auto;width:44px;height:44px;border:0;border-radius:12px;background:none;color:#171321;cursor:pointer;align-items:center;justify-content:center}
+.fy .fy-burger:hover{background:#F5F1FB}
+.fy .fy-mobile-panel{display:none}
+@media (max-width:760px){
+  .fy .fy-desk{display:none}
+  .fy .fy-burger{display:flex}
+  .fy .fy-mobile-panel{display:flex;flex-direction:column;gap:4px;padding:8px 24px 20px;background:#FCFBFE;animation:fyIn .15s ease-out}
+  .fy .fy-mobile-panel>a{padding:14px 4px;font-size:17px;font-weight:500;color:#171321}
+}
+@media (min-width:761px){.fy .fy-mobile-panel{display:none!important}}
+@keyframes fyIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}

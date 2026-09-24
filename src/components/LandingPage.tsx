@@ -89,6 +89,7 @@ const LandingPage = () => {
   const [missed, setMissed] = useState(true);
   const [yearly, setYearly] = useState(false);
   const [scrolled, setScrolled] = useState(false);
+  const [navOpen, setNavOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
   const raf = useRef(0);
   const namesRef = useRef<HTMLDivElement>(null);
@@ -131,30 +132,45 @@ const LandingPage = () => {
   const signup = '/auth';
   const proPrice = yearly ? '$90' : '$9';
 
+  const navCtas = user ? (
+    <Link to="/dashboard" className="dark-btn" style={{ fontSize: 14, fontWeight: 500, padding: '10px 18px', borderRadius: 999, whiteSpace: 'nowrap', textAlign: 'center', transition: 'background .2s' }}>Open dashboard</Link>
+  ) : (
+    <>
+      <Link to="/auth" className="pill" style={{ fontSize: 14, fontWeight: 500, padding: '10px 14px', borderRadius: 999, textAlign: 'center' }}>Sign in</Link>
+      <Link to={signup} className="dark-btn" style={{ fontSize: 14, fontWeight: 500, padding: '10px 18px', borderRadius: 999, whiteSpace: 'nowrap', textAlign: 'center', transition: 'background .2s' }}>Get started free</Link>
+    </>
+  );
+
   return (
     <div className="fy" id="top">
-      <header style={{ position: 'sticky', top: 0, zIndex: 50, background: 'rgba(252,251,254,.88)', backdropFilter: 'saturate(1.4) blur(12px)', WebkitBackdropFilter: 'saturate(1.4) blur(12px)', borderBottom: `1px solid ${scrolled ? 'rgba(23,19,33,.08)' : 'rgba(23,19,33,0)'}`, transition: 'border-color .2s' }}>
+      <header style={{ position: 'sticky', top: 0, zIndex: 50, background: 'rgba(252,251,254,.88)', backdropFilter: 'saturate(1.4) blur(12px)', WebkitBackdropFilter: 'saturate(1.4) blur(12px)', borderBottom: `1px solid ${scrolled || navOpen ? 'rgba(23,19,33,.08)' : 'rgba(23,19,33,0)'}`, transition: 'border-color .2s' }}>
         <nav aria-label="Main" style={{ maxWidth: 1240, margin: '0 auto', padding: '0 24px', height: 68, display: 'flex', alignItems: 'center', gap: 24 }}>
           <a href="#top" aria-label="Fyllo home" style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 'none' }}>
             <img src="/fyllo-mark.png" alt="" style={{ width: 30, height: 30 }} />
             <span className="sg" style={{ fontWeight: 600, fontSize: 21, letterSpacing: '-0.02em' }}>Fyllo</span>
           </a>
-          <div style={{ flex: 1, display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: '4px 28px', height: 22, overflow: 'hidden', fontSize: 14, fontWeight: 500 }}>
+          <div className="fy-desk" style={{ flex: 1, justifyContent: 'center', gap: '4px 28px', fontSize: 14, fontWeight: 500 }}>
             <a className="lnk" href="#how">How it works</a>
             <a className="lnk" href="#privacy">Privacy</a>
             <a className="lnk" href="#pricing">Pricing</a>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 'none' }}>
-            {user ? (
-              <Link to="/dashboard" className="dark-btn" style={{ fontSize: 14, fontWeight: 500, padding: '10px 18px', borderRadius: 999, whiteSpace: 'nowrap', transition: 'background .2s' }}>Open dashboard</Link>
-            ) : (
-              <>
-                <Link to="/auth" className="pill" style={{ fontSize: 14, fontWeight: 500, padding: '10px 14px', borderRadius: 999 }}>Sign in</Link>
-                <Link to={signup} className="dark-btn" style={{ fontSize: 14, fontWeight: 500, padding: '10px 18px', borderRadius: 999, whiteSpace: 'nowrap', transition: 'background .2s' }}>Get started free</Link>
-              </>
-            )}
+          <div className="fy-desk" style={{ alignItems: 'center', gap: 6, flex: 'none' }}>
+            {navCtas}
           </div>
+          <button type="button" className="fy-burger" aria-label={navOpen ? 'Close menu' : 'Open menu'} aria-expanded={navOpen} aria-controls="fy-mobile-nav" onClick={() => setNavOpen((o) => !o)}>
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+              {navOpen ? <><path d="M6 6l12 12" /><path d="M18 6L6 18" /></> : <><path d="M4 7h16" /><path d="M4 12h16" /><path d="M4 17h16" /></>}
+            </svg>
+          </button>
         </nav>
+        {navOpen && (
+          <div id="fy-mobile-nav" className="fy-mobile-panel" onClick={() => setNavOpen(false)}>
+            <a href="#how">How it works</a>
+            <a href="#privacy">Privacy</a>
+            <a href="#pricing">Pricing</a>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, paddingTop: 12, borderTop: '1px solid rgba(23,19,33,.08)' }}>{navCtas}</div>
+          </div>
+        )}
       </header>
 
       <main>

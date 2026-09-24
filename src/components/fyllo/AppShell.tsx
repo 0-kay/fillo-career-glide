@@ -19,6 +19,7 @@ export default function AppShell({ children, plan: planProp, upgradeRef }: {
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const [menu, setMenu] = useState(false);
+  const [nav, setNav] = useState(false);
   const [modal, setModal] = useState<'upgrade' | 'billing' | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -50,16 +51,19 @@ export default function AppShell({ children, plan: planProp, upgradeRef }: {
             <img src="/fyllo-mark.png" alt="" style={{ width: 28, height: 28 }} />
             <span className="sg" style={{ fontWeight: 600, fontSize: 19, letterSpacing: '-0.02em' }}>Fyllo</span>
           </Link>
-          <div style={{ flex: 1, display: 'flex', gap: 4, height: 40, overflow: 'hidden', flexWrap: 'wrap' }}>
+          <div className="fy-app-desk" style={{ flex: 1, gap: 4, height: 40, overflow: 'hidden', flexWrap: 'wrap' }}>
             {tabs.map(([to, label, cur]) => (
               <Link key={to} to={to} aria-current={cur ? 'page' : undefined} style={{ height: 40, padding: '0 14px', display: 'flex', alignItems: 'center', borderRadius: 999, background: cur ? '#F5F1FB' : 'transparent', color: cur ? '#171321' : '#6C6577', fontSize: 14, fontWeight: 500 }}>{label}</Link>
             ))}
           </div>
           {!plan.isPro && (
-            <button type="button" onClick={openUpgrade} style={{ flex: 'none', height: 34, padding: '0 12px', border: '1px solid rgba(23,19,33,.12)', borderRadius: 999, background: '#fff', fontSize: 13, color: '#171321', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8, whiteSpace: 'nowrap' }}>
+            <button type="button" className="fy-app-desk" onClick={openUpgrade} style={{ flex: 'none', height: 34, alignItems: 'center', padding: '0 12px', border: '1px solid rgba(23,19,33,.12)', borderRadius: 999, background: '#fff', fontSize: 13, color: '#171321', cursor: 'pointer', gap: 8, whiteSpace: 'nowrap' }}>
               <span style={{ color: '#6C6577' }}>{usageShort}</span><span style={{ fontWeight: 500, color: '#8A2BE2' }}>Upgrade</span>
             </button>
           )}
+          <button type="button" className="fy-app-burger" aria-label={nav ? 'Close menu' : 'Open menu'} aria-expanded={nav} onClick={() => setNav((o) => !o)}>
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">{nav ? <><path d="M6 6l12 12" /><path d="M18 6L6 18" /></> : <><path d="M4 7h16" /><path d="M4 12h16" /><path d="M4 17h16" /></>}</svg>
+          </button>
           <div ref={menuRef} style={{ position: 'relative', flex: 'none' }}>
             <button type="button" onClick={() => setMenu((m) => !m)} aria-haspopup="menu" aria-expanded={menu} aria-label="Account menu" style={{ width: 38, height: 38, borderRadius: '50%', border: 0, background: '#171321', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>{initials}</button>
             {menu && (
@@ -75,6 +79,18 @@ export default function AppShell({ children, plan: planProp, upgradeRef }: {
             )}
           </div>
         </nav>
+        {nav && (
+          <div className="fy-app-panel" onClick={() => setNav(false)}>
+            {tabs.map(([to, label, cur]) => (
+              <Link key={to} to={to} aria-current={cur ? 'page' : undefined} style={{ padding: '14px 12px', borderRadius: 12, background: cur ? '#F5F1FB' : 'transparent', fontSize: 16, fontWeight: 500, color: cur ? '#171321' : '#6C6577' }}>{label}</Link>
+            ))}
+            {!plan.isPro && (
+              <button type="button" onClick={openUpgrade} style={{ marginTop: 6, height: 44, border: '1px solid rgba(23,19,33,.12)', borderRadius: 999, background: '#fff', fontSize: 14, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+                <span style={{ color: '#6C6577' }}>{usageShort}</span><span style={{ fontWeight: 500, color: '#8A2BE2' }}>Upgrade</span>
+              </button>
+            )}
+          </div>
+        )}
       </header>
       {typeof children === 'function' ? (children as any)({ openUpgrade, openBilling: () => setModal('billing'), plan }) : children}
       {modal === 'upgrade' && <UpgradeModal onClose={() => setModal(null)} plan={plan} />}
