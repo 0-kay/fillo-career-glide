@@ -24,3 +24,13 @@
 @keyframes fyIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
 @media (prefers-reduced-motion:reduce){.fy *{animation:none!important;transition:none!important}}
 @media (min-width:640px){.fy .fy-sticky-nav{position:sticky;top:96px}}
+.fy .fy-app-desk{display:flex}
+.fy .fy-app-burger{display:none;width:40px;height:40px;border:0;border-radius:12px;background:none;color:#171321;cursor:pointer;align-items:center;justify-content:center;flex:none;margin-left:auto}
+.fy .fy-app-burger:hover{background:#F5F1FB}
+.fy .fy-app-panel{display:none}
+@media (max-width:640px){
+  .fy .fy-app-desk{display:none}
+  .fy .fy-app-burger{display:flex}
+  .fy .fy-app-panel{display:flex;flex-direction:column;gap:4px;padding:8px 24px 16px;background:#FCFBFE;animation:fyIn .15s ease-out}
+}
+@media (min-width:641px){.fy .fy-app-panel{display:none!important}}
