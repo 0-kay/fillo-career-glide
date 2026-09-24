@@ -338,7 +338,7 @@ const ProfileEdit = () => {
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(min(100%,260px),1fr))', gap: '32px 48px', alignItems: 'start' }}>
-        <nav aria-label="Profile sections" style={{ display: 'flex', flexDirection: 'column', gap: 2, position: 'sticky', top: 96, maxWidth: 260 }}>
+        <nav aria-label="Profile sections" style={{ display: 'flex', flexDirection: 'column', gap: 2, maxWidth: 260 }} className="fy-sticky-nav">
           {sections.map((s) => {
             const cur = s.id === section;
             return (
