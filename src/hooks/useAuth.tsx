@@ -23,6 +23,7 @@ interface AuthContextType {
   session: Session | null;
   signUp: (email: string, password: string, fullName?: string) => Promise<{ error: any }>;
   signIn: (email: string, password: string) => Promise<{ error: any }>;
+  signInWithOAuth: (provider: 'google' | 'apple') => Promise<{ error: any }>;
   signOut: () => Promise<void>;
   loading: boolean;
 }
@@ -66,6 +67,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setUser(session?.user ?? null);
         setLoading(false);
         
+        // Google/Apple signups skip the confirmation email, so ask the server to tell the owner.
+        if (event === 'SIGNED_IN' && session && session.user.app_metadata?.provider !== 'email') {
+          supabase.functions
+            .invoke('notify-signup', { body: { domain: window.location.host } })
+            .catch((e) => console.error('notify-signup failed', e));
+        }
+
         // Always save token to Chrome storage on any auth change
         saveTokenToChrome(session);
       }
@@ -120,6 +128,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return { error };
   };
 
+  const signInWithOAuth = async (provider: 'google' | 'apple') => {
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider,
+      options: { redirectTo: `${window.location.origin}/dashboard` }
+    });
+    if (error) console.error(`${provider} sign in error:`, error);
+    return { error };
+  };
+
   const signOut = async () => {
     await supabase.auth.signOut();
     console.log('User signed out');
@@ -130,6 +147,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     session,
     signUp,
     signIn,
+    signInWithOAuth,
     signOut,
     loading
   };

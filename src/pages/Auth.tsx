@@ -19,11 +19,10 @@ const oauthBtn: React.CSSProperties = { height: 48, borderRadius: 12, gap: 10, f
 const Auth = () => {
   const [isSignUp, setIsSignUp] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [oauthNote, setOauthNote] = useState(false);
   const [authError, setAuthError] = useState('');
   const [formData, setFormData] = useState({ name: '', email: '', password: '' });
 
-  const { signIn, signUp, user } = useAuth();
+  const { signIn, signUp, signInWithOAuth, user } = useAuth();
   const { toast } = useToast();
   const navigate = useNavigate();
 
@@ -92,10 +91,10 @@ const Auth = () => {
     }
   };
 
-  const handleOAuthLogin = (provider: string) => {
-    // TODO: Implement OAuth login
-    console.log(`${provider} login clicked`);
-    setOauthNote(true);
+  const handleOAuthLogin = async (provider: 'google' | 'apple') => {
+    setAuthError('');
+    const { error } = await signInWithOAuth(provider);
+    if (error) setAuthError(error.message);
   };
 
   const emailErr = /email/.test(authError);
@@ -128,11 +127,6 @@ const Auth = () => {
                   <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z" /></svg>Apple
                 </button>
               </div>
-              {oauthNote && (
-                <p role="status" style={{ margin: '-8px 0 0', fontSize: 13, color: '#6C6577' }}>
-                  Google and Apple sign-in are coming soon {'—'} use email for now.
-                </p>
-              )}
               <div style={{ display: 'flex', alignItems: 'center', gap: 14, fontSize: 13, color: '#9C97A6' }}>
                 <span style={{ flex: 1, height: 1, background: 'rgba(23,19,33,.1)' }} />or with email<span style={{ flex: 1, height: 1, background: 'rgba(23,19,33,.1)' }} />
               </div>
