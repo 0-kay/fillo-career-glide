@@ -69,9 +69,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         
         // Google/Apple signups skip the confirmation email, so ask the server to tell the owner.
         if (event === 'SIGNED_IN' && session && session.user.app_metadata?.provider !== 'email') {
-          supabase.functions
-            .invoke('notify-signup', { body: { domain: window.location.host } })
-            .catch((e) => console.error('notify-signup failed', e));
+          // Deferred: supabase calls made synchronously inside this listener can stall on the auth lock.
+          setTimeout(() => {
+            supabase.functions
+              .invoke('notify-signup', { body: { domain: window.location.host } })
+              .then(({ data, error }) => console.log('notify-signup:', error ?? data))
+              .catch((e) => console.error('notify-signup failed', e));
+          }, 0);
         }
 
         // Always save token to Chrome storage on any auth change
