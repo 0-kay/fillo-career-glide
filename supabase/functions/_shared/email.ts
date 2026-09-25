@@ -102,3 +102,34 @@ export async function sendWelcome(u: { email: string; name?: string; siteUrl: st
   const first = u.name?.trim().split(" ")[0];
   await send(u.email, "Welcome to Fyllo: your next application takes one click", welcomeHtml(first, u.siteUrl), "kayode@fylloai.com");
 }
+
+export function confirmHtml(first: string | undefined, link: string) {
+  const step = (n: string, text: string) =>
+    `<tr><td valign="top" width="36" style="font-size:13px;font-weight:700;color:${PURPLE};padding:7px 0">${n}</td><td style="font-size:15px;line-height:1.45;color:#171321;padding:6px 0">${text}</td></tr>`;
+  return `<!doctype html><html><body style="margin:0;background:#F6F4FB;font-family:${FONT};color:#171321">
+<table width="100%" cellpadding="0" cellspacing="0"><tr><td align="center" style="padding:32px 16px">
+<table width="560" cellpadding="0" cellspacing="0" style="max-width:560px">
+<tr><td style="padding:0 0 18px 4px"><table cellpadding="0" cellspacing="0"><tr>
+<td><img src="${LOGO}" width="30" height="30" alt="" style="display:block;border:0;border-radius:7px"></td>
+<td style="padding-left:10px;font-size:18px;font-weight:600">Fyllo</td></tr></table></td></tr>
+<tr><td style="background:#fff;border-radius:22px;padding:36px 34px">
+<div style="font-size:15px;color:#6C6577;padding-bottom:14px">${first ? `Hi ${esc(first)},` : "Hi there,"}</div>
+<div style="font-size:32px;line-height:1.1;font-weight:700;letter-spacing:-0.02em;padding-bottom:16px">One tap and you're in.</div>
+<div style="font-size:16px;line-height:1.6;color:#6C6577;padding-bottom:26px">Confirm this is your email and we'll take you straight to setup. Your next job application could be a single click.</div>
+<table cellpadding="0" cellspacing="0"><tr><td style="background:${PURPLE};border-radius:999px"><a href="${esc(link)}" style="display:inline-block;padding:15px 30px;font-size:16px;font-weight:600;color:#fff;text-decoration:none">Confirm my email</a></td></tr></table>
+<div style="font-size:13px;color:#6C6577;padding:12px 0 28px">This link expires in 24 hours.</div>
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#F3EEFB;border-radius:16px"><tr><td style="padding:22px">
+<div style="font-size:16px;font-weight:700;padding-bottom:8px">What happens after you confirm</div>
+<table cellpadding="0" cellspacing="0" width="100%">
+${step("01", "Upload your r&eacute;sum&eacute;. Fyllo builds your profile from it.")}
+${step("02", "Add the Chrome extension.")}
+${step("03", "Open any application on Workday, Greenhouse, Lever and more, then press Fill.")}
+</table></td></tr></table>
+<div style="font-size:13px;color:#6C6577;padding:26px 0 6px">Button not working? Paste this link into your browser:</div>
+<div style="font-size:12px;line-height:1.5;word-break:break-all"><a href="${esc(link)}" style="color:${PURPLE}">${esc(link)}</a></div>
+</td></tr>
+<tr><td style="padding:24px 8px 0;font-size:12px;line-height:1.6;color:#6C6577">
+Didn't sign up for Fyllo? You can ignore this email and nothing will happen.<br><br>
+Fyllo &middot; <a href="https://fylloai.com" style="color:#6C6577">fylloai.com</a> &middot; <a href="https://www.fylloai.com/privacy" style="color:#6C6577">Privacy</a>
+</td></tr></table></td></tr></table></body></html>`;
+}

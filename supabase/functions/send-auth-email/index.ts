@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { Webhook } from "https://esm.sh/standardwebhooks@1.0.0";
-import { esc, layout, notifySignup, send } from "../_shared/email.ts";
+import { confirmHtml, esc, layout, notifySignup, send } from "../_shared/email.ts";
 
 /**
  * Supabase "Send Email" auth hook. Replaces Supabase's generic emails with Fyllo-branded ones
@@ -31,8 +31,8 @@ function build(p: Payload) {
   switch (e.email_action_type) {
     case "signup":
       return {
-        subject: "Confirm your Fyllo account",
-        html: layout("Welcome to Fyllo", `${hi}<br>Confirm your email to finish creating your account. Then you can set up your profile and start filling applications in seconds.`, { label: "Confirm email", href: link }),
+        subject: "Confirm your email to start using Fyllo",
+        html: confirmHtml(name, link),
       };
     case "recovery":
       return {
