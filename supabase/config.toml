@@ -1,1 +1,7 @@
 project_id = "yuojrygcrcpajiglbekd"
+
+[functions.notify-signup]
+verify_jwt = true
+
+[functions.send-auth-email]
+verify_jwt = false

@@ -15,12 +15,15 @@ const CHROME_STORE_URL = 'https://chromewebstore.google.com/';
 
 const Dashboard = () => {
   const [showOnboarding, setShowOnboarding] = useState(false);
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const { profiles, loading } = useProfiles();
   const { extensionAvailable } = useFilloExtension();
   const navigate = useNavigate();
 
   useEffect(() => {
+    // Wait for the session to load (e.g. reading it from the OAuth redirect) before deciding.
+    if (authLoading) return;
+
     // Redirect to auth if not logged in
     if (!user) {
       navigate('/auth');
@@ -32,15 +35,15 @@ const Dashboard = () => {
     if (!onboardingComplete && profiles.length === 0 && !loading) {
       setShowOnboarding(true);
     }
-  }, [user, profiles.length, loading, navigate]);
+  }, [user, authLoading, profiles.length, loading, navigate]);
 
   const handleOnboardingComplete = () => {
     setShowOnboarding(false);
     localStorage.setItem('fillo_onboarding_complete', 'true');
   };
 
-  if (!user) {
-    return null; // Will redirect to auth
+  if (authLoading || !user) {
+    return null; // Still loading the session, or redirecting to auth
   }
 
   if (showOnboarding) {
