@@ -35,3 +35,24 @@ export async function notifySignup(u: { email: string; name?: string; domain: st
     layout("New signup", `<strong>${esc(u.name || "(no name)")}</strong><br>${esc(u.email)}<br>Via ${esc(u.provider)} on ${esc(u.domain)}<br>${new Date().toUTCString()}`),
   );
 }
+
+/** Only ever link to our own domains (or localhost for dev), whatever the client sends. */
+export function safeSiteUrl(host: string): string {
+  const h = host.toLowerCase().split(":")[0];
+  if (h === "localhost") return `http://${host}`;
+  if (h === "fylloai.com" || h.endsWith(".fylloai.com")) return `https://${host}`;
+  return "https://www.fylloai.com";
+}
+
+export async function sendWelcome(u: { email: string; name?: string; siteUrl: string }) {
+  const first = u.name?.trim().split(" ")[0];
+  await send(
+    u.email,
+    "Welcome to Fyllo",
+    layout(
+      first ? `Welcome to Fyllo, ${first}` : "Welcome to Fyllo",
+      "Thanks for signing up. Your account is ready: build your profile once, and Fyllo fills your job applications for you in seconds.",
+      { label: "Go to your dashboard", href: `${u.siteUrl}/dashboard` },
+    ),
+  );
+}

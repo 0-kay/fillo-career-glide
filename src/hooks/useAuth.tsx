@@ -67,8 +67,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setUser(session?.user ?? null);
         setLoading(false);
         
-        // Google/Apple signups skip the confirmation email, so ask the server to tell the owner.
-        if (event === 'SIGNED_IN' && session && session.user.app_metadata?.provider !== 'email') {
+        // New accounts get a welcome email (and Google/Apple signups notify the owner); the server sends each once.
+        const isNewAccount = session && Date.now() - new Date(session.user.created_at).getTime() < 24 * 60 * 60 * 1000;
+        if (event === 'SIGNED_IN' && isNewAccount) {
           // Deferred: supabase calls made synchronously inside this listener can stall on the auth lock.
           setTimeout(() => {
             supabase.functions
