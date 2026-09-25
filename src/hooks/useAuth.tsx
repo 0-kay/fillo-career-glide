@@ -21,7 +21,8 @@ console.log('Supabase client initialized for authentication');
 interface AuthContextType {
   user: User | null;
   session: Session | null;
-  signUp: (email: string, password: string, fullName?: string) => Promise<{ error: any }>;
+  signUp: (email: string, password: string, fullName?: string) => Promise<{ error: any; needsConfirmation?: boolean }>;
+  resendConfirmation: (email: string) => Promise<{ error: any }>;
   signIn: (email: string, password: string) => Promise<{ error: any }>;
   signInWithOAuth: (provider: 'google' | 'apple') => Promise<{ error: any }>;
   signOut: () => Promise<void>;
@@ -102,7 +103,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // Land on the dashboard of whichever domain the user signed up on (must be in Supabase's redirect allow-list).
     const redirectUrl = `${window.location.origin}/dashboard`;
     
-    const { error } = await supabase.auth.signUp({
+    const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: {
@@ -114,9 +115,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     });
     if (error) {
       console.error('Sign up error:', error);
-    } else {
-      console.log('User signed up successfully');
+      return { error };
     }
+    // Supabase hides whether an email is taken: an existing account comes back with no identities.
+    if (data.user && data.user.identities?.length === 0) {
+      return { error: { message: 'An account with this email already exists. Try signing in instead.' } };
+    }
+    console.log('User signed up successfully');
+    return { error: null, needsConfirmation: !data.session };
+  };
+
+  const resendConfirmation = async (email: string) => {
+    const { error } = await supabase.auth.resend({
+      type: 'signup',
+      email,
+      options: { emailRedirectTo: `${window.location.origin}/dashboard` }
+    });
+    if (error) console.error('Resend confirmation error:', error);
     return { error };
   };
 
@@ -151,6 +166,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     user,
     session,
     signUp,
+    resendConfirmation,
     signIn,
     signInWithOAuth,
     signOut,

@@ -22,7 +22,9 @@ const Auth = () => {
   const [authError, setAuthError] = useState('');
   const [formData, setFormData] = useState({ name: '', email: '', password: '' });
 
-  const { signIn, signUp, signInWithOAuth, user } = useAuth();
+  const { signIn, signUp, resendConfirmation, signInWithOAuth, user } = useAuth();
+  const [sentTo, setSentTo] = useState('');
+  const [resendState, setResendState] = useState<'idle' | 'sending' | 'sent'>('idle');
   const { toast } = useToast();
   const navigate = useNavigate();
 
@@ -55,7 +57,7 @@ const Auth = () => {
 
     try {
       if (isSignUp) {
-        const { error } = await signUp(formData.email, formData.password, formData.name);
+        const { error, needsConfirmation } = await signUp(formData.email, formData.password, formData.name);
 
         if (error) {
           setAuthError(error.message);
@@ -64,11 +66,8 @@ const Auth = () => {
             description: error.message,
             variant: "destructive"
           });
-        } else {
-          toast({
-            title: "Success!",
-            description: "Please check your email to confirm your account.",
-          });
+        } else if (needsConfirmation) {
+          setSentTo(formData.email);
         }
       } else {
         const { error } = await signIn(formData.email, formData.password);
@@ -97,6 +96,17 @@ const Auth = () => {
     if (error) setAuthError(error.message);
   };
 
+  const handleResend = async () => {
+    setResendState('sending');
+    const { error } = await resendConfirmation(sentTo);
+    if (error) {
+      setResendState('idle');
+      toast({ title: 'Could not resend', description: error.message, variant: 'destructive' });
+    } else {
+      setResendState('sent');
+    }
+  };
+
   const emailErr = /email/.test(authError);
   const pwErr = /password/i.test(authError);
   const cta = loading ? (isSignUp ? 'Creating account…' : 'Signing in…') : isSignUp ? 'Create account' : 'Sign in';
@@ -110,6 +120,21 @@ const Auth = () => {
             <span className="sg" style={{ fontWeight: 600, fontSize: 21, letterSpacing: '-0.02em' }}>Fyllo</span>
           </Link>
           <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '48px 0' }}>
+            {sentTo ? (
+              <div role="status" style={{ width: '100%', maxWidth: 400, display: 'flex', flexDirection: 'column', gap: 22 }}>
+                <h1 className="sg" style={{ margin: 0, fontWeight: 500, fontSize: 40, lineHeight: 1.05, letterSpacing: '-0.035em' }}>Check your email</h1>
+                <p style={{ margin: 0, fontSize: 16, color: '#6C6577' }}>
+                  We sent a confirmation link to <strong style={{ color: '#171321' }}>{sentTo}</strong>. Click it to finish creating your account and land on your dashboard.
+                </p>
+                <p style={{ margin: 0, fontSize: 14, color: '#6C6577' }}>Nothing there? Check spam, or resend it.</p>
+                <button type="button" className="fy-btn fy-outline" disabled={resendState !== 'idle'} onClick={handleResend} style={{ height: 48, borderRadius: 999, fontSize: 15 }}>
+                  {resendState === 'sending' ? 'Sending…' : resendState === 'sent' ? 'Sent — check your inbox' : 'Resend email'}
+                </button>
+                <button type="button" onClick={() => { setSentTo(''); setResendState('idle'); setFormData((f) => ({ ...f, password: '' })); }} style={{ border: 0, background: 'none', padding: 0, fontSize: 14, fontWeight: 500, color: '#4B0082', cursor: 'pointer', alignSelf: 'flex-start' }}>
+                  Use a different email
+                </button>
+              </div>
+            ) : (
             <form onSubmit={handleSubmit} noValidate style={{ width: '100%', maxWidth: 400, display: 'flex', flexDirection: 'column', gap: 22 }}>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 <h1 className="sg" style={{ margin: 0, fontWeight: 500, fontSize: 40, lineHeight: 1.05, letterSpacing: '-0.035em' }}>
@@ -168,6 +193,7 @@ const Auth = () => {
                 </p>
               )}
             </form>
+            )}
           </div>
         </div>
         <div style={{ background: '#171321', color: '#FCFBFE', padding: 'clamp(32px,6vw,80px)', display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 40, minHeight: 560 }}>
