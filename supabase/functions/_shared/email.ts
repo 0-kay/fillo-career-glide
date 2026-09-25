@@ -1,5 +1,7 @@
 // Shared by the auth email hook and the OAuth signup notifier.
 
+// Must be a public URL: mail clients can't load images from localhost or the app bundle.
+const LOGO = "https://www.fylloai.com/fyllo-mark.png";
 export const BRAND = "#4B0082";
 export const FROM = Deno.env.get("MAIL_FROM") ?? "Fyllo <kayode@fylloai.com>";
 export const NOTIFY = (Deno.env.get("NOTIFY_EMAIL") ?? "ojedelekayode21@gmail.com,kayode@fylloai.com").split(",").map((e) => e.trim());
@@ -10,7 +12,7 @@ export function layout(title: string, body: string, button?: { label: string; hr
   return `<!doctype html><html><body style="margin:0;background:#F6F4F9;font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif;color:#1a1a2e">
 <table width="100%" cellpadding="0" cellspacing="0"><tr><td align="center" style="padding:32px 16px">
 <table width="480" cellpadding="0" cellspacing="0" style="max-width:480px;background:#fff;border-radius:16px;padding:36px">
-<tr><td style="font-size:22px;font-weight:700;color:${BRAND};padding-bottom:24px">Fyllo</td></tr>
+<tr><td style="padding-bottom:24px"><table cellpadding="0" cellspacing="0"><tr><td><img src="${LOGO}" width="30" height="30" alt="" style="display:block;border:0;border-radius:7px"></td><td style="padding-left:10px;font-size:20px;font-weight:700;color:${BRAND}">Fyllo</td></tr></table></td></tr>
 <tr><td style="font-size:20px;font-weight:600;padding-bottom:12px">${esc(title)}</td></tr>
 <tr><td style="font-size:15px;line-height:1.6;color:#444;padding-bottom:24px">${body}</td></tr>
 ${button ? `<tr><td style="padding-bottom:24px"><a href="${esc(button.href)}" style="display:inline-block;background:${BRAND};color:#fff;text-decoration:none;font-weight:600;font-size:15px;padding:12px 24px;border-radius:10px">${esc(button.label)}</a></td></tr>` : ""}
@@ -49,8 +51,6 @@ const FONT = "-apple-system,'Segoe UI',Helvetica,Arial,sans-serif";
 
 export function welcomeHtml(first: string | undefined, site: string) {
   const dash = `${site}/dashboard`;
-  const field = (label: string, value: string) =>
-    `<td width="50%" style="padding:4px"><div style="border:1px solid #DCCBF3;border-radius:10px;background:#fff;padding:9px 12px"><div style="font-size:11px;color:#6C6577">${label}</div><div style="font-size:14px;color:#171321">${value}</div></div></td>`;
   const step = (n: string, title: string, body: string, href?: string, last = false) =>
     `<tr><td style="padding:14px 0;${last ? "" : "border-bottom:1px solid #EEE9F5;"}"><table cellpadding="0" cellspacing="0"><tr>
 <td valign="top" width="41" style="font-size:14px;font-weight:700;color:${PURPLE};padding-top:1px">${n}</td>
@@ -61,22 +61,14 @@ export function welcomeHtml(first: string | undefined, site: string) {
 <table width="100%" cellpadding="0" cellspacing="0"><tr><td align="center" style="padding:32px 16px">
 <table width="560" cellpadding="0" cellspacing="0" style="max-width:560px">
 <tr><td style="padding:0 0 18px 4px"><table cellpadding="0" cellspacing="0"><tr>
-<td style="background:${PURPLE};color:#fff;font-weight:700;font-size:15px;width:30px;height:30px;text-align:center;border-radius:8px">F</td>
+<td><img src="${LOGO}" width="30" height="30" alt="" style="display:block;border:0;border-radius:7px"></td>
 <td style="padding-left:10px;font-size:18px;font-weight:600">Fyllo</td></tr></table></td></tr>
 <tr><td style="background:#fff;border-radius:22px;padding:36px 34px">
 <div style="font-size:15px;color:#6C6577;padding-bottom:14px">${first ? `Hi ${esc(first)},` : "Hi there,"}</div>
 <div style="font-size:32px;line-height:1.1;font-weight:700;letter-spacing:-0.02em;padding-bottom:16px">You won't have to type your r&eacute;sum&eacute; into a form again.</div>
 <div style="font-size:16px;line-height:1.6;color:#6C6577;padding-bottom:28px">Your account is ready. Give Fyllo about five minutes and your next application goes from twenty minutes of typing to one click.</div>
 
-<table width="100%" cellpadding="0" cellspacing="0" style="background:#F3EEFB;border-radius:16px"><tr><td style="padding:18px">
-<table width="100%" cellpadding="0" cellspacing="0"><tr>
-<td style="font-size:12px;color:#6C6577;padding:0 4px 10px">jobs.greenhouse.io &middot; Senior Product Designer</td>
-<td align="right" style="font-size:12px;font-weight:600;color:${PURPLE};padding:0 4px 10px">&#10003; 11 of 11 filled</td></tr></table>
-<table width="100%" cellpadding="0" cellspacing="0"><tr>${field("First name", "Alexandra")}${field("Email", "alex.chen@gmail.com")}</tr>
-<tr>${field("R&eacute;sum&eacute;", "Alexandra_Chen_Resume.pdf")}${field("Need sponsorship?", "No")}</tr></table>
-</td></tr></table>
-
-<div style="font-size:18px;font-weight:700;padding:32px 0 6px">Three steps to your first one-click application</div>
+<div style="font-size:18px;font-weight:700;padding:4px 0 6px">Three steps to your first one-click application</div>
 <table width="100%" cellpadding="0" cellspacing="0">
 ${step("01", "Upload your r&eacute;sum&eacute;", "Fyllo turns it into a profile: contact details, links, experience, education.", dash)}
 ${step("02", "Add the Chrome extension", "It connects to your account on its own. No extra login.", dash)}
