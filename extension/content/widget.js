@@ -16,6 +16,7 @@
   let profiles = [];
   let selectedProfileId = null;
   let profilesLoaded = false;
+  let hostPositioningInjected = false;
 
   function getProfileName(profile) {
     return (
@@ -33,21 +34,56 @@
     return div.innerHTML;
   }
 
+  // Constructable Stylesheets (CSSStyleSheet + adoptedStyleSheets) are exempt
+  // from a page's Content-Security-Policy style-src restrictions, unlike a
+  // <style> tag or a style="" attribute. Enterprise ATS pages (Workday and
+  // others) often ship a strict CSP, which would otherwise leave the widget
+  // in the DOM but invisible/unstyled with no console error to explain why.
+  function applyStylesheet(root, cssText) {
+    try {
+      const sheet = new CSSStyleSheet();
+      sheet.replaceSync(cssText);
+      root.adoptedStyleSheets = [...(root.adoptedStyleSheets || []), sheet];
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function injectHostPositioning() {
+    if (hostPositioningInjected) return;
+    const css = '#fillo-widget-host { all: initial; position: fixed !important; z-index: 2147483647 !important; bottom: 24px !important; right: 24px !important; }';
+    if (applyStylesheet(document, css)) {
+      hostPositioningInjected = true;
+    } else {
+      // Fallback for engines without Constructable Stylesheets support.
+      host.style.cssText = 'all:initial; position:fixed; z-index:2147483647; bottom:24px; right:24px;';
+    }
+  }
+
+  function injectShadowStyles() {
+    if (!applyStylesheet(shadow, WIDGET_CSS)) {
+      const style = document.createElement('style');
+      style.textContent = WIDGET_CSS;
+      shadow.prepend(style);
+    }
+  }
+
   // ---------- Mount / unmount ----------
   function mount() {
     if (host) return;
 
     host = document.createElement('div');
     host.id = 'fillo-widget-host';
-    host.style.cssText = 'all:initial; position:fixed; z-index:2147483647; bottom:24px; right:24px;';
+    injectHostPositioning();
     shadow = host.attachShadow({ mode: 'open' });
     shadow.innerHTML = `
-      <style>${WIDGET_CSS}</style>
       <div class="fillo-bubble" id="bubble" role="button" tabindex="0" aria-label="Open Fillo">
         <img src="${chrome.runtime.getURL('icons/icon48.png')}" alt="" />
       </div>
       <div class="fillo-panel hidden" id="panel"></div>
     `;
+    injectShadowStyles();
     document.documentElement.appendChild(host);
 
     const bubble = shadow.getElementById('bubble');
