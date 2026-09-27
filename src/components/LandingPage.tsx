@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { MousePointerClick } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import './landing.css';
 
@@ -233,6 +234,28 @@ const LandingPage = () => {
                       </div>
                       <button type="button" onClick={() => (done ? reset() : startFill())} aria-live="polite" style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, height: 44, border: 0, borderRadius: 12, background: done ? INK : P, color: '#fff', fontSize: 14, fontWeight: 500, cursor: 'pointer', transition: 'background .25s' }}>
                         {idle && <span aria-hidden="true" style={{ position: 'absolute', inset: 0, borderRadius: 12, animation: 'fyPulse 1.8s ease-out infinite' }} />}
+                        {idle && (
+                          <MousePointerClick
+                            aria-hidden="true"
+                            size={13}
+                            strokeWidth={2.5}
+                            style={{
+                              position: 'absolute',
+                              bottom: -7,
+                              right: 10,
+                              width: 22,
+                              height: 22,
+                              padding: 4,
+                              boxSizing: 'border-box',
+                              borderRadius: '50%',
+                              background: '#fff',
+                              color: '#171321',
+                              boxShadow: '0 2px 6px rgba(23,19,33,.28)',
+                              animation: 'fyCursorTap 1.8s ease-in-out infinite',
+                              pointerEvents: 'none',
+                            }}
+                          />
+                        )}
                         {done ? <Check s={16} w={2.5} /> : <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" aria-hidden="true"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" /></svg>}
                         <span>{idle ? 'Fill application form' : phase === 'filling' ? `Filling ${Math.max(filledCount, 1)} of ${TOTAL}…` : `Filled ${TOTAL} of ${TOTAL}`}</span>
                       </button>
