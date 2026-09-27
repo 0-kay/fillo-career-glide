@@ -6551,6 +6551,30 @@
      * @param {Object} fieldTracker - The field tracker object
      * @returns {Array} - Array of field info objects for unfilled fields only
      */
+    // Reports whether the user kept each server-filled value, so the shared cache can retire
+    // mappings people keep correcting. Fires once, when the form is submitted or the page hides.
+    function watchServerPlanOutcomes(filled) {
+        if (!filled.length || !ns.ai?.reportFillOutcome) return;
+        let sent = false;
+        const send = () => {
+            if (sent) return;
+            sent = true;
+            document.removeEventListener('submit', send, true);
+            document.removeEventListener('visibilitychange', onHide);
+            window.removeEventListener('pagehide', send);
+            const outcomes = filled.map(f => {
+                const kept = f.el.isConnected && String(f.el.value ?? '').trim() === f.value.trim();
+                const item = f.mappingId ? { id: f.mappingId } : { signature: f.signature };
+                return { ...item, outcome: !f.el.isConnected ? 'missing' : (kept ? 'success' : 'override') };
+            });
+            ns.ai.reportFillOutcome(location.href, outcomes);
+        };
+        const onHide = () => { if (document.visibilityState === 'hidden') send(); };
+        document.addEventListener('submit', send, true);
+        document.addEventListener('visibilitychange', onHide);
+        window.addEventListener('pagehide', send);
+    }
+
     function buildAIBatchQueue(fieldTracker) {
         const formEls = document.querySelectorAll('input, select, textarea, button[aria-haspopup="listbox"]');
         const batchAIFields = [];
@@ -6802,7 +6826,7 @@
                 allowRefill: false,
                 // iCIMS revert guard: tracks element → intended value so we can re-fill reversions
                 filledValues: isICIMS ? new Map() : null,
-                strategyStats: { platform: 0, classifier: 0, generic: 0, detected: 0, generic_screening: 0, ai: 0 }
+                strategyStats: { platform: 0, classifier: 0, generic: 0, detected: 0, generic_screening: 0, ai: 0, server_plan: 0 }
             };
 
             // Step 0: If detected fields with profile mappings are available, use them first
@@ -7309,6 +7333,38 @@
                 }
             }
 
+            // Step 5.4: Server fill plan. Fields the platform config did not cover are matched
+            // against the shared mapping cache on the server (model only for unknown fields),
+            // with values resolved from the profile there. Off unless SERVER_FILL_PLAN.enabled.
+            if (ns.config.SERVER_FILL_PLAN?.enabled && ns.ai?.requestServerFillPlan && profileData?.id) {
+                try {
+                    throwIfStopRequested();
+                    const skipTypes = new Set(['file', 'password', 'hidden', 'submit', 'button', 'checkbox', 'radio']);
+                    const leftovers = buildAIBatchQueue(fieldTracker)
+                        .filter(f => !skipTypes.has(String(f.type).toLowerCase()))
+                        .slice(0, ns.config.SERVER_FILL_PLAN.maxFields || 60);
+                    if (leftovers.length > 0) {
+                        const wire = leftovers.map(({element, ...info}) => info);
+                        const plan = await ns.ai.requestServerFillPlan(location.href, profileData.id, wire);
+                        const planFilled = [];
+                        for (const p of plan) {
+                            throwIfStopRequested();
+                            const target = leftovers[p.fieldIndex]?.element;
+                            if (!target || p.value == null || String(p.value).trim() === '') continue;
+                            if (await fillElement(target, p.value)) {
+                                markFieldFilled(target, 'server_plan', fieldTracker);
+                                planFilled.push({ el: target, value: String(p.value), mappingId: p.mappingId, signature: p.signature });
+                            }
+                        }
+                        relayLog('info', `Server fill plan filled ${planFilled.length}/${leftovers.length} leftover fields`);
+                        watchServerPlanOutcomes(planFilled);
+                    }
+                } catch (e) {
+                    if (e?.message === 'FILLO_STOPPED') throw e;
+                    console.warn('[Fillo] Server fill plan failed; continuing with rule-based results:', e);
+                }
+            }
+
             // Step 5.5: AI fallback. Runs only after every rule-based step, and only for
             // fields still empty. The server returns a path into the user's own profile
             // (never free text), so a value can only be one the profile contains.
@@ -7386,6 +7442,7 @@
                                fieldTracker.strategyStats.generic +
                                fieldTracker.strategyStats.generic_screening +
                                (fieldTracker.strategyStats.ai || 0) +
+                               (fieldTracker.strategyStats.server_plan || 0) +
                                detectedFilled;
 
             // Best-effort usage logging for the free-plan quota meter — not exact

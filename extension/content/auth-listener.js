@@ -4,6 +4,27 @@
 (function() {
   console.log('[Fillo Auth] Listener initialized on:', window.location.hostname);
 
+  const EXTENSION_VERSION = chrome.runtime.getManifest().version;
+  const HEARTBEAT_INTERVAL_MS = 3000;
+
+  // Marks the page as having the extension installed. Onboarding.tsx polls
+  // this attribute to auto-advance past the "add extension" step.
+  document.documentElement.dataset.fylloExtension = 'installed';
+
+  function postHeartbeat() {
+    window.postMessage({
+      source: 'fillo-extension',
+      type: 'HEARTBEAT',
+      version: EXTENSION_VERSION,
+      ts: Date.now(),
+    }, '*');
+  }
+
+  // Announce presence immediately, then keep announcing so the dashboard can
+  // tell "installed" apart from "installed and currently running."
+  postHeartbeat();
+  setInterval(postHeartbeat, HEARTBEAT_INTERVAL_MS);
+
   // Listen for postMessage from the web app
   window.addEventListener('message', async (event) => {
     // Only accept messages from the same page (this script only runs on the Fyllo web app and localhost dev origins, per manifest.json)
@@ -12,6 +33,11 @@
     }
 
     const message = event.data;
+
+    if (message && message.source === 'web-app' && message.type === 'PING') {
+      postHeartbeat();
+      return;
+    }
 
     // Check if this is a Fillo auth message
     if (message && message.source === 'web-app' && message.type === 'SEND_TOKEN') {

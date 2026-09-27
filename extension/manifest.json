@@ -52,6 +52,23 @@
         "content/auth-listener.js"
       ],
       "run_at": "document_start"
+    },
+    {
+      "matches": [
+        "https://*/*",
+        "http://*/*"
+      ],
+      "exclude_matches": [
+        "https://www.fylloai.com/*",
+        "http://localhost:8080/*",
+        "http://127.0.0.1:8080/*",
+        "http://localhost:5173/*",
+        "http://127.0.0.1:5173/*"
+      ],
+      "js": [
+        "content/widget.js"
+      ],
+      "run_at": "document_idle"
     }
   ],
   "externally_connectable": {

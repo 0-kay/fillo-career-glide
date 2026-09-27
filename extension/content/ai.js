@@ -87,6 +87,36 @@
     }catch(e){ console.error('Batch AI failed:', e.message); relayLog('error', 'Batch AI failed:', e.message); return []; }
   };
 
+  // fields: descriptors from buildAIBatchQueue (element already stripped).
+  // returns: [{ fieldIndex, value, mappingId, signature, source, confidence }]
+  ns.ai.requestServerFillPlan = async function(url, profileId, fields){
+    try{
+      if (!profileId || !fields.length) return [];
+      const wire = fields.map(f => ({
+        name: f.name, id: f.id, type: f.type, placeholder: f.placeholder, label: f.label,
+        className: f.className || '', context: typeof f.context === 'string' ? f.context : '',
+        required: Boolean(f.required), maxLength: typeof f.maxLength === 'number' ? f.maxLength : null
+      }));
+      const r = await fetchWithTimeout(`${AI_CONFIG.supabaseUrl}/functions/v1/resolve-form-fill`, {
+        method: 'POST', headers: await aiHeaders(), body: JSON.stringify({ url, profileId, fields: wire })
+      }, 20000);
+      if (!r.ok) throw new Error(`Fill plan HTTP ${r.status}`);
+      const data = await r.json();
+      relayLog('info', '🗺️ Server fill plan:', data?.debug || null);
+      return (data && data.success && Array.isArray(data.plan)) ? data.plan : [];
+    }catch(e){ console.warn('Server fill plan failed:', e.message); relayLog('warn', 'Server fill plan failed:', e.message); return []; }
+  };
+
+  // outcomes: [{ id?, signature?, outcome: 'success'|'override'|'missing' }]. Best effort; never throws.
+  ns.ai.reportFillOutcome = async function(url, outcomes){
+    try{
+      if (!outcomes.length) return;
+      await fetch(`${AI_CONFIG.supabaseUrl}/functions/v1/report-fill-outcome`, {
+        method: 'POST', headers: await aiHeaders(), body: JSON.stringify({ url, outcomes }), keepalive: true
+      });
+    }catch(e){ console.warn('Fill outcome report failed:', e.message); }
+  };
+
   ns.ai.analyzeSingleFieldWithAI = async function(fieldInfo, profileData){
     try{
       const [fieldVariations, mappingConfig] = await Promise.all([getRawMappingConfig(), loadMapping().catch(()=>[]) ]);
