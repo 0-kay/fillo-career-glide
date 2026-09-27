@@ -16,6 +16,7 @@
   let profiles = [];
   let selectedProfileId = null;
   let profilesLoaded = false;
+  let hostPositioningInjected = false;
 
   function getProfileName(profile) {
     return (
@@ -33,21 +34,56 @@
     return div.innerHTML;
   }
 
+  // Constructable Stylesheets (CSSStyleSheet + adoptedStyleSheets) are exempt
+  // from a page's Content-Security-Policy style-src restrictions, unlike a
+  // <style> tag or a style="" attribute. Enterprise ATS pages (Workday and
+  // others) often ship a strict CSP, which would otherwise leave the widget
+  // in the DOM but invisible/unstyled with no console error to explain why.
+  function applyStylesheet(root, cssText) {
+    try {
+      const sheet = new CSSStyleSheet();
+      sheet.replaceSync(cssText);
+      root.adoptedStyleSheets = [...(root.adoptedStyleSheets || []), sheet];
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function injectHostPositioning() {
+    if (hostPositioningInjected) return;
+    const css = '#fillo-widget-host { all: initial; position: fixed !important; z-index: 2147483647 !important; bottom: 24px !important; right: 24px !important; }';
+    if (applyStylesheet(document, css)) {
+      hostPositioningInjected = true;
+    } else {
+      // Fallback for engines without Constructable Stylesheets support.
+      host.style.cssText = 'all:initial; position:fixed; z-index:2147483647; bottom:24px; right:24px;';
+    }
+  }
+
+  function injectShadowStyles() {
+    if (!applyStylesheet(shadow, WIDGET_CSS)) {
+      const style = document.createElement('style');
+      style.textContent = WIDGET_CSS;
+      shadow.prepend(style);
+    }
+  }
+
   // ---------- Mount / unmount ----------
   function mount() {
     if (host) return;
 
     host = document.createElement('div');
     host.id = 'fillo-widget-host';
-    host.style.cssText = 'all:initial; position:fixed; z-index:2147483647; bottom:24px; right:24px;';
+    injectHostPositioning();
     shadow = host.attachShadow({ mode: 'open' });
     shadow.innerHTML = `
-      <style>${WIDGET_CSS}</style>
-      <div class="fillo-bubble" id="bubble" role="button" tabindex="0" aria-label="Open Fillo">
-        <img src="${chrome.runtime.getURL('icons/icon48.png')}" alt="" />
+      <div class="fillo-bubble" id="bubble" role="button" tabindex="0" aria-label="Open Fyllo">
+        <div class="fillo-bubble-icon"><img src="${chrome.runtime.getURL('icons/icon48.png')}" alt="" /></div>
       </div>
       <div class="fillo-panel hidden" id="panel"></div>
     `;
+    injectShadowStyles();
     document.documentElement.appendChild(host);
 
     const bubble = shadow.getElementById('bubble');
@@ -137,7 +173,7 @@
     const panel = shadow.getElementById('panel');
 
     if (state.loading) {
-      panel.innerHTML = panelShell('<div class="fillo-loading">Loading your profiles…</div>');
+      panel.innerHTML = panelShell('<div class="fillo-loading">Loading your profiles...</div>');
       return;
     }
 
@@ -160,7 +196,7 @@
         ? `<label class="fillo-label">Profile</label><select class="fillo-select" id="profile-select">${options}</select>`
         : '<div class="fillo-error">No profile is ready yet (needs 75% completeness).</div>'}
       <button class="fillo-fill-btn" id="fill-btn" ${profiles.length === 0 || state.filling ? 'disabled' : ''}>
-        ${state.filling ? 'Filling…' : 'Fill this form'}
+        ${state.filling ? 'Filling...' : 'Fill this form'}
       </button>
       ${statusHtml}
     `, { footer: logoutFooter() });
@@ -181,8 +217,12 @@
   function panelShell(body, { footer = '' } = {}) {
     return `
       <div class="fillo-panel-header">
-        <span>Fillo</span>
         <button class="fillo-close" id="close-btn" aria-label="Close">&times;</button>
+        <div class="fillo-panel-logo">
+          <div class="fillo-panel-logo-icon"><img src="${chrome.runtime.getURL('icons/icon48.png')}" alt="" /></div>
+          <span class="fillo-panel-logo-text">Fyllo</span>
+        </div>
+        <div class="fillo-panel-subtitle">Auto-Fill Assistant</div>
       </div>
       <div class="fillo-panel-body">${body}</div>
       ${footer}
@@ -208,13 +248,13 @@
   function renderLogoutConfirm() {
     const panel = shadow.getElementById('panel');
     panel.innerHTML = `
-      <div class="fillo-panel-header">
-        <span>Log out?</span>
+      <div class="fillo-panel-header fillo-panel-header-compact">
         <button class="fillo-close" id="close-btn" aria-label="Close">&times;</button>
+        <span class="fillo-panel-header-title">Log out of Fyllo?</span>
       </div>
       <div class="fillo-panel-body">
         <div class="fillo-warning">
-          This signs the extension out. The Fillo button will disappear from every page until you sign in again from the dashboard.
+          This signs the extension out. The Fyllo button will disappear from every page until you sign in again from the dashboard.
         </div>
       </div>
       <div class="fillo-panel-footer fillo-confirm-footer">
@@ -231,17 +271,24 @@
     });
   }
 
+  const BRAND_GRADIENT = 'linear-gradient(135deg, #8A2BE2 0%, #4B0082 100%)';
+
   const WIDGET_CSS = `
     :host { all: initial; }
-    * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    * { box-sizing: border-box; font-family: 'Space Grotesk', 'Poppins', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
     .fillo-bubble {
       width: 52px; height: 52px; border-radius: 50%;
-      background: #111827; box-shadow: 0 4px 16px rgba(0,0,0,0.25);
+      background: ${BRAND_GRADIENT}; box-shadow: 0 4px 16px rgba(75,0,130,0.35);
       display: flex; align-items: center; justify-content: center;
       cursor: pointer; transition: transform 0.15s ease;
     }
     .fillo-bubble:hover { transform: scale(1.06); }
-    .fillo-bubble img { width: 28px; height: 28px; border-radius: 6px; }
+    .fillo-bubble-icon {
+      width: 32px; height: 32px; border-radius: 9px;
+      background: rgba(255,255,255,0.25);
+      display: flex; align-items: center; justify-content: center;
+    }
+    .fillo-bubble-icon img { width: 100%; height: 100%; object-fit: contain; border-radius: 9px; }
     .fillo-panel {
       position: absolute; bottom: 64px; right: 0;
       width: 260px; background: #fff; border-radius: 12px;
@@ -250,11 +297,26 @@
     }
     .fillo-panel.hidden { display: none; }
     .fillo-panel-header {
-      display: flex; align-items: center; justify-content: space-between;
-      padding: 10px 14px; font-weight: 600; border-bottom: 1px solid #f0f0f0;
+      position: relative; text-align: center;
+      padding: 18px 16px 14px; background: ${BRAND_GRADIENT}; color: #fff;
     }
-    .fillo-close { background: none; border: none; font-size: 18px; line-height: 1; cursor: pointer; color: #9ca3af; }
-    .fillo-close:hover { color: #111827; }
+    .fillo-panel-logo { display: flex; align-items: center; justify-content: center; margin-bottom: 4px; }
+    .fillo-panel-logo-icon {
+      width: 26px; height: 26px; border-radius: 8px;
+      background: rgba(255,255,255,0.25);
+      display: flex; align-items: center; justify-content: center; margin-right: 8px;
+    }
+    .fillo-panel-logo-icon img { width: 100%; height: 100%; object-fit: contain; }
+    .fillo-panel-logo-text { font-size: 18px; font-weight: 700; color: #fff; }
+    .fillo-panel-subtitle { font-size: 11px; color: rgba(255,255,255,0.85); }
+    .fillo-panel-header-compact { text-align: left; padding: 14px 16px; }
+    .fillo-panel-header-title { font-size: 14px; font-weight: 600; }
+    .fillo-close {
+      position: absolute; top: 10px; right: 10px;
+      background: none; border: none; font-size: 18px; line-height: 1; cursor: pointer;
+      color: rgba(255,255,255,0.8);
+    }
+    .fillo-close:hover { color: #fff; }
     .fillo-panel-body { padding: 14px; }
     .fillo-label { display: block; margin-bottom: 6px; color: #6b7280; font-size: 12px; }
     .fillo-select {
@@ -263,10 +325,10 @@
     }
     .fillo-fill-btn {
       width: 100%; padding: 9px 10px; border-radius: 8px; border: none;
-      background: #111827; color: #fff; font-weight: 600; cursor: pointer; font-size: 13px;
+      background: ${BRAND_GRADIENT}; color: #fff; font-weight: 600; cursor: pointer; font-size: 13px;
     }
     .fillo-fill-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-    .fillo-fill-btn:not(:disabled):hover { background: #000; }
+    .fillo-fill-btn:not(:disabled):hover { filter: brightness(1.08); }
     .fillo-status { margin-top: 10px; font-size: 12px; }
     .fillo-status.success { color: #059669; }
     .fillo-status.error { color: #dc2626; }
