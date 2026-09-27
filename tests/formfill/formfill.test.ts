@@ -10,12 +10,14 @@ import {
 } from "../../supabase/functions/_shared/formfill/signature.ts";
 import {
   isTrusted,
-  learnedFromModel,
   matchFields,
   planFromCache,
   resolvePath,
   type MappingRow,
 } from "../../supabase/functions/_shared/formfill/resolve.ts";
+import { isQuestionLike, pickOption, ruleFor } from "../../supabase/functions/_shared/formfill/rules.ts";
+import { buildPlan } from "../../supabase/functions/_shared/formfill/plan.ts";
+import type { SystemOneFn } from "../../supabase/functions/_shared/typesafe/types.ts";
 
 const profile = JSON.parse(readFileSync("tests/ats/profile.json", "utf8"));
 
@@ -57,6 +59,9 @@ describe("signatures", () => {
     expect(companyKey("https://boards.greenhouse.io/acme/jobs/123")).toBe("boards.greenhouse.io/acme");
     expect(companyKey("https://acme.wd5.myworkdayjobs.com/en-US/careers/job/x")).toBe("acme.wd5.myworkdayjobs.com");
     expect(companyKey("not a url")).toBe("");
+    expect(companyKey("https://job-boards.greenhouse.io/embed/job_app?for=MongoDB&token=1")).toBe("job-boards.greenhouse.io/mongodb");
+    // A shared board with no tenant must not pool companies together.
+    expect(companyKey("https://job-boards.greenhouse.io/embed/job_app?token=1")).toBe("");
   });
 
   it("matches wildcard patterns to subdomains only", () => {
@@ -173,19 +178,89 @@ describe("planFromCache", () => {
   });
 });
 
-describe("learnedFromModel", () => {
-  const d = { type: "text", name: "phone", label: "Phone" };
-  it("saves confident choices", () => {
-    const r = learnedFromModel(d, { shouldFill: true, confidence: 90, dataPath: "personal_details.phone" }, undefined, 70);
-    expect(r.learn?.profilePath).toBe("personal_details.phone");
+describe("rules", () => {
+  it("resolves standard fields without a model", () => {
+    expect(ruleFor({ autocomplete: "given-name", label: "Whatever" })?.path).toBe("first_name");
+    expect(ruleFor({ type: "email" })?.path).toBe("personal_details.email");
+    expect(ruleFor({ label: "LinkedIn Profile" })?.path).toBe("personal_details.linkedin");
+    expect(ruleFor({ label: "", name: "urls[LinkedIn]" })?.path).toBe("personal_details.linkedin");
   });
-  it("does not save low-confidence, path-less or identity-less choices", () => {
-    expect(learnedFromModel(d, { shouldFill: true, confidence: 60, dataPath: "x" }, undefined, 70).learn).toBeNull();
-    expect(learnedFromModel(d, { shouldFill: true, confidence: 90, dataPath: null }, undefined, 70).learn).toBeNull();
-    expect(learnedFromModel({ type: "text" }, { shouldFill: true, confidence: 90, dataPath: "x" }, undefined, 70).learn).toBeNull();
+
+  it("never matches on substrings", () => {
+    expect(ruleFor({ label: "Have you ever worked for this company?" })).toBeNull();
+    expect(ruleFor({ label: "Do you have a disability?" })).toBeNull();
   });
-  it("replaces a demoted row instead of inserting", () => {
-    const bad = row({ scope: "company" });
-    expect(learnedFromModel(d, { shouldFill: true, confidence: 90, dataPath: "p" }, bad, 70).learn?.replaceId).toBe(bad.id);
+
+  it("detects questions", () => {
+    expect(isQuestionLike({ label: "Are you legally authorized to work in the US?*" })).toBe(true);
+    expect(isQuestionLike({ label: "Email" })).toBe(false);
+    expect(isQuestionLike({ label: "Relocation", options: ["Yes", "No"] })).toBe(true);
+  });
+
+  it("maps answers onto the page's option text", () => {
+    expect(pickOption("Yes", ["Yes, I am authorized", "No, I am not"])).toBe("Yes, I am authorized");
+    expect(pickOption("No", ["Yes", "No"])).toBe("No");
+    expect(pickOption("Female", ["Male", "Female", "Decline"])).toBe("Female");
+    expect(pickOption("Maybe", ["Yes", "No"])).toBe("Maybe");
+  });
+});
+
+describe("buildPlan", () => {
+  const fakeModel = (answers: Record<string, { choice: string; confidence: number }>): SystemOneFn =>
+    (async () => ({
+      answers: Object.fromEntries(
+        Object.entries(answers).map(([k, v]) => [k, { type: "choice", probabilities: {}, ...v }]),
+      ),
+      model: "fake",
+      usage: { input_tokens: 0, output_tokens: 0 },
+    })) as unknown as SystemOneFn;
+
+  it("offline: fills rules, reports what would need the model", async () => {
+    const r = await buildPlan(
+      [
+        { type: "text", name: "first_name", label: "First Name" },
+        { type: "text", label: "Why do you want to work here?" },
+        { type: "file", name: "resume" },
+      ],
+      [],
+      profile,
+      { systemOne: null, modelBudget: 5 },
+    );
+    expect(r.entries.map((e) => [e.fieldIndex, e.source, e.value])).toEqual([[0, "rule", "Amara"]]);
+    expect(r.stats.fromRules).toBe(1);
+  });
+
+  it("spends a capped budget on required fields first", async () => {
+    const r = await buildPlan(
+      [
+        { type: "text", label: "Optional custom thing" },
+        { type: "text", label: "Required custom thing", required: true },
+      ],
+      [],
+      profile,
+      { systemOne: null, modelBudget: 1 },
+    );
+    expect(r.stats.overBudget).toBe(1);
+  });
+
+  it("answers a choice question with the page's option and does not cache the derived answer", async () => {
+    const d = [{ type: "radio", label: "Are you legally authorized to work in the US?", options: ["Yes", "No"] }];
+    const r = await buildPlan(d, [], profile, {
+      systemOne: fakeModel({ s0: { choice: "0", confidence: 0.95 }, f0: { choice: "__none__", confidence: 0.9 } }),
+      modelBudget: 5,
+    });
+    expect(r.entries[0]).toMatchObject({ source: "screening", value: "Yes", dataPath: null });
+    expect(r.learned).toHaveLength(0);
+  });
+
+  it("reuses a saved answer verbatim for an open question and caches it by key", async () => {
+    // saved index 4 is the gender answer in the fixture profile; open question (no options).
+    const d = [{ type: "text", label: "How do you describe your gender identity?" }];
+    const r = await buildPlan(d, [], profile, {
+      systemOne: fakeModel({ s0: { choice: "4", confidence: 0.9 }, f0: { choice: "__none__", confidence: 0.9 } }),
+      modelBudget: 5,
+    });
+    expect(r.entries[0]).toMatchObject({ source: "screening", value: "Female", dataPath: "screening:gender" });
+    expect(r.learned[0].profilePath).toBe("screening:gender");
   });
 });

@@ -1,0 +1,22 @@
+{
+  "name": "Amara Okonkwo",
+  "email": "amara.okonkwo@example.com",
+  "phone": "4155550142",
+  "location": "San Francisco",
+  "org": "Stripe",
+  "urls[LinkedIn]": "linkedin.com/in/amaraokonkwo",
+  "urls[Github]": null,
+  "urls[Other Website]": "amara.dev",
+  "urls[Video Link ]": null,
+  "pronouns": null,
+  "customPronounsOption": null,
+  "eeo[gender]": "Female",
+  "eeo[race]": null,
+  "eeo[veteran]": "re:^I am not a protected veteran",
+  "eeo[disability]": "No, I do not have a disability",
+  "eeo[disabilitySignature]": "Amara Okonkwo",
+  "eeo[disabilitySignatureDate]": "re:\\d",
+  "surveysResponses[8dfb36ea-fd79-4bea-aa2d-734a7b290c35][responses][field0]": null,
+  "surveysResponses[8dfb36ea-fd79-4bea-aa2d-734a7b290c35][responses][field2]": null,
+  "__unnamed__": null
+}

@@ -3,6 +3,7 @@
 
 import { deriveCandidates, flattenProfile } from "../typesafe/candidates.ts";
 import { coerceValue } from "../typesafe/fields.ts";
+import { pickOption } from "./rules.ts";
 import {
   type FieldDescriptor,
   fieldName,
@@ -32,7 +33,7 @@ export interface PlanEntry {
   value: string | number | boolean;
   mappingId: string | null;
   signature: string;
-  source: "cache" | "llm";
+  source: "cache" | "rule" | "screening" | "llm";
   confidence: number;
   dataPath: string | null;
 }
@@ -45,6 +46,9 @@ const MAX_OVERRIDE_RATE = 0.4;
 /** A row users keep correcting is wrong (or stale) and must stop being served. */
 export function isTrusted(row: MappingRow): boolean {
   if (row.confidence < MIN_ROW_CONFIDENCE) return false;
+  // A model-learned row has not earned the benefit of the doubt a curated seed row has:
+  // retire it as soon as corrections outnumber confirmations, and re-map it.
+  if (row.source === "llm" && row.override_count >= 2 && row.override_count > row.success_count) return false;
   const seen = row.success_count + row.override_count;
   if (row.override_count >= MIN_FEEDBACK_SAMPLES && row.override_count / seen > MAX_OVERRIDE_RATE) {
     return false;
@@ -154,8 +158,26 @@ const isScalar = (v: unknown): v is string | number | boolean =>
   typeof v === "string" || typeof v === "number" || typeof v === "boolean";
 
 /** Reads the value a mapping points at. Code owns every read; the model only picks paths. */
+interface SavedAnswer {
+  key?: string;
+  id?: string;
+  answer?: unknown;
+  enabled?: boolean;
+}
+
+/** Saved screening answers, keyed by their stable key (never by array position). */
+export function screeningAnswers(profile: unknown): SavedAnswer[] {
+  const list = getPath(profile, "job_preferences.screening_answers");
+  return Array.isArray(list) ? (list as SavedAnswer[]) : [];
+}
+
 export function resolvePath(profile: unknown, path: string, today = new Date()): string | number | boolean | null {
   if (path === "__today") return today.toISOString().slice(0, 10);
+  if (path.startsWith("screening:")) {
+    const key = path.slice("screening:".length);
+    const hit = screeningAnswers(profile).find((a) => a.enabled !== false && (a.key ?? a.id) === key);
+    return hit && isScalar(hit.answer) && String(hit.answer).trim() ? hit.answer : null;
+  }
   if (path === "__current_company") {
     const v = getPath(profile, "work_experience.0.company");
     return isScalar(v) && String(v).trim() ? v : null;
@@ -183,19 +205,33 @@ export interface Resolved {
 
 /** Row + profile -> the typed value for this field, falling back to the row's default. */
 export function valueForRow(row: MappingRow, descriptor: FieldDescriptor, profile: unknown): Resolved | null {
-  const raw = resolvePath(profile, row.profile_path);
   const fallback = typeof row.meta?.default === "string" ? row.meta.default : null;
+  return valueForPath(row.profile_path, descriptor, profile, fallback);
+}
+
+/** Reads a profile path and shapes it for the target field (type coercion, option text, length). */
+export function valueForPath(
+  path: string,
+  descriptor: FieldDescriptor,
+  profile: unknown,
+  fallback: string | null = null,
+): Resolved | null {
+  const raw = resolvePath(profile, path);
   const source = raw ?? fallback;
   if (source == null || String(source).trim() === "") return null;
 
   const asText = String(source);
-  const typed = coerceValue({ path: row.profile_path, value: asText, raw: source }, descriptor);
+  // Choice fields take option text, never a coerced boolean.
+  if (descriptor.options?.length) {
+    return { value: pickOption(asText, descriptor.options), dataPath: raw == null ? null : path };
+  }
+  const typed = coerceValue({ path, value: asText, raw: source }, descriptor);
   if (typed === null || typed === "") return null;
 
   const max = typeof descriptor.maxLength === "number" ? descriptor.maxLength : null;
   if (max && max > 0 && String(typed).length > max) return null;
 
-  return { value: typed, dataPath: raw == null ? null : row.profile_path };
+  return { value: typed, dataPath: raw == null ? null : path };
 }
 
 export interface CachePlan {
@@ -240,50 +276,3 @@ export function planFromCache(
   return { entries, unresolved, demoted };
 }
 
-export interface ModelFieldResult {
-  shouldFill: boolean;
-  confidence: number;
-  dataPath: string | null;
-}
-
-export interface LearnedItem {
-  signature: string;
-  learn: {
-    type: string;
-    name: string;
-    label: string;
-    profilePath: string;
-    confidence: number;
-    replaceId?: string;
-  } | null;
-}
-
-/**
- * Decides whether a model choice is worth caching. Only confident choices that point at a real
- * profile path are saved: a wrong guess here is served to every later user of this form.
- */
-export function learnedFromModel(
-  descriptor: FieldDescriptor,
-  result: ModelFieldResult,
-  demoted: MappingRow | undefined,
-  minConfidence: number,
-): LearnedItem {
-  const signature = fieldSignature(descriptor);
-  const label = normalizeText(descriptor.label);
-  const name = fieldName(descriptor);
-  // A field with neither a stable name nor a label has no identity to key a mapping on.
-  if (!result.shouldFill || !result.dataPath || result.confidence < minConfidence || (!name && !label)) {
-    return { signature, learn: null };
-  }
-  return {
-    signature,
-    learn: {
-      type: normalizeText(descriptor.type) || "text",
-      name,
-      label,
-      profilePath: result.dataPath,
-      confidence: result.confidence,
-      replaceId: demoted?.id,
-    },
-  };
-}

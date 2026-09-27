@@ -6563,7 +6563,9 @@
             document.removeEventListener('visibilitychange', onHide);
             window.removeEventListener('pagehide', send);
             const outcomes = filled.map(f => {
-                const kept = f.el.isConnected && String(f.el.value ?? '').trim() === f.value.trim();
+                const kept = f.el.isConnected && (f.el.type === 'radio'
+                    ? f.el.checked
+                    : String(f.el.value ?? '').trim() === f.value.trim());
                 const item = f.mappingId ? { id: f.mappingId } : { signature: f.signature };
                 return { ...item, outcome: !f.el.isConnected ? 'missing' : (kept ? 'success' : 'override') };
             });
@@ -6573,6 +6575,54 @@
         document.addEventListener('submit', send, true);
         document.addEventListener('visibilitychange', onHide);
         window.addEventListener('pagehide', send);
+    }
+
+    // The field's own label text, for the server. Unlike getFieldLabel, a wrapping <label> is read
+    // without the control inside it, so a <select> does not contribute its option text
+    // ("Veteran statusSelect ...I identify as...") and rules can match the label exactly.
+    function describeLabel(el) {
+        const clean = t => String(t || '').replace(/\s+/g, ' ').trim();
+        try {
+            if (el.id) {
+                const forLabel = document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
+                if (forLabel && clean(forLabel.textContent)) return clean(forLabel.textContent);
+            }
+            const labelledBy = el.getAttribute('aria-labelledby');
+            if (labelledBy) {
+                const text = clean(labelledBy.split(/\s+/).map(id => document.getElementById(id)?.textContent || '').join(' '));
+                if (text) return text;
+            }
+            const wrap = el.closest('label');
+            if (wrap) {
+                const copy = wrap.cloneNode(true);
+                copy.querySelectorAll('input, select, textarea, button, [role="listbox"], [role="option"], ul, ol').forEach(n => n.remove());
+                // Lever-style: the label text is its own block, followed by the control's block.
+                const head = copy.querySelector('.application-label, .label, legend');
+                const text = clean(head ? head.textContent : copy.textContent);
+                if (text) return text;
+            }
+        } catch (_) { /* fall through */ }
+        return clean(getFieldLabel(el) || el.getAttribute('aria-label') || el.getAttribute('placeholder') || '');
+    }
+
+    // Choice labels for a field, read without opening anything, so the server can answer in
+    // the page's own option text. Null for free-text fields.
+    function describeOptions(el, tag, type) {
+        try {
+            if (tag === 'select') {
+                return Array.from(el.options || []).map(o => o.textContent.trim())
+                    .filter(t => t && !/^(select|choose|please select)\b/i.test(t));
+            }
+            if (type === 'radio' && el.name) {
+                return Array.from(document.querySelectorAll(`input[type="radio"][name="${CSS.escape(el.name)}"]`))
+                    .map(r => getRadioOptionText(r)).filter(Boolean);
+            }
+            if (tag === 'button') {
+                const opts = getDropdownOptionsPassive(el);
+                return opts.length ? opts : null;
+            }
+        } catch (_) { /* options are best effort */ }
+        return null;
     }
 
     function buildAIBatchQueue(fieldTracker) {
@@ -6623,11 +6673,13 @@
                 id: el.id || '',
                 type: tag === 'button' ? 'dropdown' : (el.type || 'text'),
                 placeholder: el.placeholder || '',
-                label: (type === 'radio' ? getRadioGroupQuestion(el) : '') || getFieldLabel(el) || '',
+                label: (type === 'radio' ? getRadioGroupQuestion(el) : '') || describeLabel(el),
                 className: el.className || '',
                 context: getElementContext(el),
-                required: el.required || el.hasAttribute('required'),
-                maxLength: el.maxLength > 0 ? el.maxLength : null
+                required: el.required || el.hasAttribute('required') || el.getAttribute('aria-required') === 'true',
+                maxLength: el.maxLength > 0 ? el.maxLength : null,
+                autocomplete: el.getAttribute('autocomplete') || null,
+                options: describeOptions(el, tag, type)
             };
 
             batchAIFields.push(fieldInfo);
@@ -7339,7 +7391,9 @@
             if (ns.config.SERVER_FILL_PLAN?.enabled && ns.ai?.requestServerFillPlan && profileData?.id) {
                 try {
                     throwIfStopRequested();
-                    const skipTypes = new Set(['file', 'password', 'hidden', 'submit', 'button', 'checkbox', 'radio']);
+                    // Radios are sent (screening questions are mostly radio groups); checkboxes are
+                    // not: consents and acknowledgements are the applicant's call.
+                    const skipTypes = new Set(['file', 'password', 'hidden', 'submit', 'button', 'checkbox']);
                     const leftovers = buildAIBatchQueue(fieldTracker)
                         .filter(f => !skipTypes.has(String(f.type).toLowerCase()))
                         .slice(0, ns.config.SERVER_FILL_PLAN.maxFields || 60);
@@ -7351,9 +7405,16 @@
                             throwIfStopRequested();
                             const target = leftovers[p.fieldIndex]?.element;
                             if (!target || p.value == null || String(p.value).trim() === '') continue;
-                            if (await fillElement(target, p.value)) {
-                                markFieldFilled(target, 'server_plan', fieldTracker);
-                                planFilled.push({ el: target, value: String(p.value), mappingId: p.mappingId, signature: p.signature });
+                            // A radio answer names an option: try each radio in the group until one takes it.
+                            const candidates = target.type === 'radio' && target.name
+                                ? Array.from(document.querySelectorAll(`input[type="radio"][name="${CSS.escape(target.name)}"]`))
+                                : [target];
+                            for (const el of candidates) {
+                                if (await fillElement(el, p.value)) {
+                                    markFieldFilled(el, 'server_plan', fieldTracker);
+                                    planFilled.push({ el, value: String(p.value), mappingId: p.mappingId, signature: p.signature });
+                                    break;
+                                }
                             }
                         }
                         relayLog('info', `Server fill plan filled ${planFilled.length}/${leftovers.length} leftover fields`);

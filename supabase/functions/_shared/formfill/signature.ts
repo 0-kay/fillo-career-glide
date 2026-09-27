@@ -14,6 +14,7 @@ export interface FieldDescriptor {
   className?: string | null;
   required?: boolean;
   maxLength?: number | null;
+  autocomplete?: string | null;
   options?: string[] | null;
 }
 
@@ -77,8 +78,13 @@ export function companyKey(url: string): string {
   }
   const host = u.hostname.toLowerCase();
   if (PATH_TENANT_HOSTS.has(host)) {
+    // Embedded boards name the company in a query param (/embed/job_app?for=acme), not the path.
+    const forParam = u.searchParams.get("for");
+    if (forParam) return `${host}/${forParam.toLowerCase()}`;
     const seg = u.pathname.split("/").filter(Boolean)[0];
-    if (seg) return `${host}/${seg.toLowerCase()}`;
+    if (seg && seg !== "embed") return `${host}/${seg.toLowerCase()}`;
+    // A shared board with no tenant would pool every company's questions together.
+    return "";
   }
   return host;
 }
