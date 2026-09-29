@@ -20,9 +20,13 @@
 //   ?fixture=lever            fixture file under fixtures/
 //   &platform=workday         optional: pin the platform (the page host is localhost)
 //   &auto=1                   run the fill as soon as the page is ready
+//   &server=1                 also run the server fill plan (resolve-form-fill's planner, bundled
+//                             locally from generated/formfill.js, seed rows only, no model calls)
 const q = new URLSearchParams(location.search);
 const fixture = q.get('fixture') || 'lever';
 const pinnedPlatform = q.get('platform') || null;
+const serverMode = q.get('server') === '1';
+window.__serverStats = null;
 const $report = document.getElementById('report');
 const log = (m) => { $report.textContent += '\n' + m; };
 
@@ -40,6 +44,16 @@ window.chrome = {
 const realFetch = window.fetch.bind(window);
 window.fetch = async (url, opts) => {
   if (String(url).includes('/functions/v1/match-config')) return realFetch('generated/match-config.json');
+  if (String(url).includes('/functions/v1/report-fill-outcome')) return new Response('{"success":true}');
+  if (String(url).includes('/functions/v1/resolve-form-fill')) {
+    const { fields } = JSON.parse(opts.body);
+    const allRows = await (await realFetch('generated/seed-rows.json')).json();
+    const rows = allRows.filter((r) => r.platform === pinnedPlatform);
+    const profile = await (await realFetch('profile.json')).json();
+    const r = await window.__FormFill.buildPlan(fields, rows, profile, { systemOne: null, modelBudget: Infinity });
+    window.__serverStats = { ...r.stats, plan: r.entries.map((e) => ({ label: fields[e.fieldIndex].label, source: e.source, value: e.value })) };
+    return new Response(JSON.stringify({ success: true, plan: r.entries, debug: r.stats }));
+  }
   if (String(url).includes('/functions/v1/ai-')) return new Response(JSON.stringify({ success: false }), { status: 401 });
   return realFetch(url, opts);
 };
@@ -57,8 +71,15 @@ const loadScript = (src) => new Promise((res, rej) => {
   document.head.appendChild(s);
 });
 
+// Fixtures may hold controls inside (declarative) shadow roots, as SmartRecruiters and Workday do.
+function deepAll(root, selector, out = []) {
+  out.push(...root.querySelectorAll(selector));
+  root.querySelectorAll('*').forEach((el) => { if (el.shadowRoot) deepAll(el.shadowRoot, selector, out); });
+  return out;
+}
+
 function labelFor(el) {
-  const byFor = el.id && document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
+  const byFor = el.id && el.getRootNode().querySelector(`label[for="${CSS.escape(el.id)}"]`);
   const txt = (byFor?.textContent || el.closest('label')?.textContent ||
     el.closest('li, .application-question, .field, .application-field, div')?.textContent || '');
   return txt.replace(/\s+/g, ' ').trim().slice(0, 60);
@@ -72,27 +93,29 @@ function snapshot() {
     const root = yes.closest('[data-field-path]');
     rows.push({ key: root?.getAttribute('data-field-path') || '', type: 'yesno', label: (root?.querySelector('label')?.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 60), value: pressed ? pressed.getAttribute('data-option') : '', filled: !!pressed });
   }
-  for (const el of document.querySelectorAll('#fixture input, #fixture select, #fixture textarea')) {
+  for (const el of deepAll(document.getElementById('fixture'), 'input, select, textarea')) {
     const type = (el.type || el.tagName).toLowerCase();
     if (type === 'hidden' || type === 'submit' || type === 'button') continue;
     if (type === 'radio' || type === 'checkbox') {
       const key = type + ':' + (el.name || el.id);
       if (seenGroups.has(key)) continue; seenGroups.add(key);
-      const group = el.name ? [...document.querySelectorAll(`#fixture input[name="${CSS.escape(el.name)}"]`)] : [el];
-      const optText = (g) => (document.querySelector(`label[for="${CSS.escape(g.id)}"]`)?.textContent || g.closest('label')?.textContent || g.value || '').replace(/\s+/g, ' ').trim().slice(0, 50);
+      const group = el.name ? [...el.getRootNode().querySelectorAll(`input[name="${CSS.escape(el.name)}"]`)] : [el];
+      const optText = (g) => (el.getRootNode().querySelector(`label[for="${CSS.escape(g.id)}"]`)?.textContent || g.closest('label')?.textContent || g.value || '').replace(/\s+/g, ' ').trim().slice(0, 50);
       const on = group.filter((g) => g.checked).map(optText);
       rows.push({ key: el.name || el.id, type, label: labelFor(el), value: on.join(', '), filled: on.length > 0 });
       continue;
     }
     let value = el.value || '';
     if (el.tagName === 'SELECT') value = el.selectedIndex > 0 ? el.options[el.selectedIndex].text : '';
-    rows.push({ key: el.name || el.id, type, label: labelFor(el), value, filled: value.trim() !== '' && type !== 'file' });
+    rows.push({ key: el.name || el.id || '__unnamed__', type, label: labelFor(el), value, filled: value.trim() !== '' && type !== 'file' });
   }
   return rows;
 }
 
 async function runFill() {
   const profile = await (await realFetch('profile.json')).json();
+  // The engine only asks the server when it has a profile id to send.
+  if (serverMode) { profile.id = 'harness-profile'; store.FILLO_AUTH_TOKEN = 'harness-token'; }
   const ns = window.__Fillo;
   if (pinnedPlatform) ns.domainDetector.detectPlatform = async () => pinnedPlatform;
   const t0 = performance.now();
@@ -100,7 +123,7 @@ async function runFill() {
   try { result = await ns.engine.handleFillForm(profile, false); } catch (e) { error = String(e && e.message || e); }
   const rows = snapshot();
   const filled = rows.filter((r) => r.filled);
-  window.__result = { fixture, platform: pinnedPlatform, ms: Math.round(performance.now() - t0), error, result, total: rows.length, filled: filled.length, rows };
+  window.__result = { fixture, platform: pinnedPlatform, server: serverMode, serverStats: window.__serverStats, ms: Math.round(performance.now() - t0), error, result, total: rows.length, filled: filled.length, rows };
   $report.textContent = `${fixture} (platform=${pinnedPlatform || 'none'}): ${filled.length}/${rows.length} filled in ${window.__result.ms}ms` +
     (error ? `\nERROR: ${error}` : '') + '\n\n' +
     rows.map((r) => `${r.filled ? '✔' : '·'} [${r.type}] ${r.key} — ${r.label}${r.filled ? ' → ' + r.value : ''}`).join('\n');
@@ -110,8 +133,12 @@ window.runFill = runFill;
 
 (async () => {
   try {
-    document.getElementById('fixture').innerHTML = await (await realFetch(`fixtures/${fixture}.html`)).text();
-    for (const s of SCRIPTS) await loadScript(`../../extension/content/${s}.js`);
+    // setHTMLUnsafe attaches declarative shadow roots (<template shadowrootmode>); innerHTML would not.
+    document.getElementById('fixture').setHTMLUnsafe(await (await realFetch(`fixtures/${fixture}.html`)).text());
+    // &src=<dir> loads content scripts from another directory (e.g. a baseline checkout).
+    const src = q.get('src') || '../../extension/content';
+    for (const s of SCRIPTS) await loadScript(`${src}/${s}.js`);
+    if (serverMode) await loadScript('generated/formfill.js');
     $report.textContent = 'ready';
     window.__ready = true;
     if (q.get('auto')) await runFill();

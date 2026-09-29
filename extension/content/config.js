@@ -14,7 +14,7 @@
   // Server-resolved fill for fields the platform config did not cover. The server matches
   // fields against a shared mapping cache, asks the model only for unknown fields, resolves
   // the values from the user's profile, and remembers what it learned. Off until deployed.
-  ns.config.SERVER_FILL_PLAN = { enabled: false, maxFields: 60 };
+  ns.config.SERVER_FILL_PLAN = { enabled: true, maxFields: 60 };
 
   ns.config.ENABLE_LLM_PLAN_FLAG_NAME = '__ENABLE_LLM_PLAN';
 

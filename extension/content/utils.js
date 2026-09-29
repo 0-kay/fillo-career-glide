@@ -78,36 +78,64 @@
     return null;
   };
 
+  // The match config drives platform detection and every rule-based fill, so a failed fetch
+  // used to mean a silently empty fill. Keep the last good copy in extension storage (shared
+  // by every frame), serve it while fresh, retry the network, and fall back to it when stale.
+  const MATCH_CONFIG_STORAGE_KEY = 'FILLO_MATCH_CONFIG_CACHE';
+  const MATCH_CONFIG_FRESH_MS = 10 * 60 * 1000;
+  let matchConfigMemo = null;
+
+  async function readStoredMatchConfig(){
+    try {
+      const got = await chrome.storage.local.get(MATCH_CONFIG_STORAGE_KEY);
+      const entry = got?.[MATCH_CONFIG_STORAGE_KEY];
+      return entry?.config ? entry : null;
+    } catch (_) { return null; }
+  }
+
   utils.fetchMatchConfigFromApi = async function({ limit = 25, authToken = null } = {}){
+    if (matchConfigMemo) return matchConfigMemo;
     const endpoint = ns.config?.MATCH_CONFIG_ENDPOINT;
     const supabaseKey = ns.config?.AI_CONFIG?.supabaseKey;
     if (!endpoint || !supabaseKey) return null;
 
-    try {
-      const res = await fetch(`${endpoint}?limit=${encodeURIComponent(limit)}`, {
-        headers: {
-          apikey: supabaseKey,
-          Authorization: `Bearer ${authToken || supabaseKey}`,
-          'Content-Type': 'application/json',
-        },
-      });
-
-      if (!res.ok) {
-        console.warn(`[Fillo] Failed to load match config API: ${res.status} ${res.statusText}`);
-        return null;
-      }
-
-      const payload = await res.json();
-      if (payload?.success && payload.config) {
-        console.log(`[Fillo] Loaded match config from Edge Function (${payload.rowCount || 0} row(s))`);
-        return payload.config;
-      }
-
-      console.warn('[Fillo] Match config API returned no config:', payload);
-    } catch (error) {
-      console.warn('[Fillo] Failed to load match config API:', error);
+    const stored = await readStoredMatchConfig();
+    if (stored && Date.now() - stored.at < MATCH_CONFIG_FRESH_MS) {
+      matchConfigMemo = stored.config;
+      return matchConfigMemo;
     }
 
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const res = await utils.fetchWithTimeout(`${endpoint}?limit=${encodeURIComponent(limit)}`, {
+          headers: {
+            apikey: supabaseKey,
+            Authorization: `Bearer ${authToken || supabaseKey}`,
+            'Content-Type': 'application/json',
+          },
+        }, 8000);
+        if (res.ok) {
+          const payload = await res.json();
+          if (payload?.success && payload.config) {
+            matchConfigMemo = payload.config;
+            try { await chrome.storage.local.set({ [MATCH_CONFIG_STORAGE_KEY]: { config: payload.config, at: Date.now() } }); } catch (_) {}
+            return matchConfigMemo;
+          }
+          console.warn('[Fillo] Match config API returned no config:', payload);
+        } else {
+          console.warn(`[Fillo] Match config API ${res.status} (attempt ${attempt + 1})`);
+        }
+      } catch (error) {
+        console.warn(`[Fillo] Match config fetch failed (attempt ${attempt + 1}):`, error?.message || error);
+      }
+      await new Promise(r => setTimeout(r, 400 * (attempt + 1)));
+    }
+
+    if (stored) {
+      console.warn(`[Fillo] Using cached match config (${Math.round((Date.now() - stored.at) / 60000)} min old)`);
+      matchConfigMemo = stored.config;
+      return matchConfigMemo;
+    }
     return null;
   };
 
@@ -228,6 +256,8 @@
         'personal_details.country': pd.country || address.country,
         'personal_details.postalCode': pd.postalCode || pd.postal_code || address.postalCode || address.postal_code,
         'personal_details.website': pd.website || pd.portfolio,
+        // The app never stores a phone country code; Workday's picker matches the country name.
+        'personal_details.countryPhoneCode': address.country || pd.country,
       };
       const aliasValue = aliases[path];
       return aliasValue === undefined || aliasValue === '' ? null : aliasValue;
@@ -253,6 +283,11 @@
       if (flattened.length > 0) return Array.from(new Set(flattened)).join(', ');
     }
 
+    // Education dates are saved as { year, month }. Unconverted, they reach inputs as "[object Object]".
+    if (cur && typeof cur === 'object' && !Array.isArray(cur) && ('year' in cur || 'month' in cur)) {
+      return utils.formatDateParts(cur);
+    }
+
     // Special handling for array fields - return first element
     // Common array fields: work_experience, education_history, projects, etc.
     if (Array.isArray(cur) && cur.length > 0) {
@@ -262,10 +297,34 @@
     return cur;
   };
 
+  // { year: "2018", month: "6" } -> "06/2018"; year only -> "2018"; neither -> null.
+  utils.formatDateParts = function(d){
+    const year = String(d?.year ?? '').trim();
+    const month = String(d?.month ?? '').trim();
+    if (!year) return null;
+    return /^\d{1,2}$/.test(month) ? `${month.padStart(2, '0')}/${year}` : year;
+  };
+
+  // querySelectorAll that also searches open shadow roots. Web-component ATSs (SmartRecruiters'
+  // spl-*, parts of Workday) render every control inside shadow DOM, where document.querySelectorAll
+  // finds nothing.
+  utils.queryAllDeep = function(selector, root = document){
+    const out = [...root.querySelectorAll(selector)];
+    root.querySelectorAll('*').forEach(el => { if (el.shadowRoot) out.push(...utils.queryAllDeep(selector, el.shadowRoot)); });
+    return out;
+  };
+
   utils.isElementVisible = function(el){
     const style = window.getComputedStyle(el);
     if (el?.tagName?.toLowerCase() === 'input' && el.type === 'file') {
       return !el.disabled && style.display !== 'none' && style.visibility !== 'hidden';
+    }
+    // Validation proxies (e.g. React-Select's hidden "required" input) are rendered but are not
+    // fields: hidden from assistive tech and unreachable by keyboard. Filling one is a wrong fill.
+    const tag = el?.tagName?.toLowerCase();
+    if ((tag === 'input' || tag === 'textarea' || tag === 'select') &&
+        el.getAttribute('aria-hidden') === 'true' && el.getAttribute('tabindex') === '-1') {
+      return false;
     }
     return style.display !== 'none' && style.visibility !== 'hidden' && el.offsetParent !== null;
   };

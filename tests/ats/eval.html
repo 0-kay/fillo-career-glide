@@ -1,0 +1,129 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Fillo fill accuracy</title>
+<style>
+  body { font: 14px system-ui, sans-serif; margin: 16px; }
+  table { border-collapse: collapse; margin: 8px 0 20px; }
+  th, td { border: 1px solid #ccc; padding: 4px 8px; text-align: left; vertical-align: top; }
+  th { background: #f4f4f4; }
+  .wrong { color: #b00020; font-weight: 600; }
+  .miss { color: #8a6d00; }
+  .ok { color: #1b6e20; }
+  iframe { width: 1200px; height: 800px; position: absolute; left: -99999px; }
+  pre { font-size: 12px; }
+</style>
+</head>
+<body>
+<h2>Fillo fill accuracy</h2>
+<p>Runs every fixture through the real content scripts and scores the result against
+<code>expected/&lt;fixture&gt;.json</code>. <b>Precision</b> = correct / (correct + wrong fills);
+<b>recall</b> = correct / fields that should be filled. A wrong fill is worse than a blank one.
+Mode <code>server</code> adds the server planner (seed rows + rules, no model calls).</p>
+<div id="summary">running…</div>
+<div id="detail"></div>
+<script>
+// Usage: eval.html            all fixtures, both modes
+//        eval.html?mode=server  one mode
+//        eval.html?src=generated/baseline  content scripts from another directory
+const RUNS = [
+  { fixture: 'greenhouse', platform: 'greenhouse' },
+  { fixture: 'lever', platform: 'lever' },
+  { fixture: 'ashby', platform: 'ashby' },
+  { fixture: 'smartrecruiters', platform: 'smartrecruiters' },
+  { fixture: 'smartrecruiters', platform: '' },
+  { fixture: 'jobvite', platform: '' },
+  { fixture: 'workable', platform: '' },
+  { fixture: 'greenhouse', platform: '' },
+  { fixture: 'lever', platform: '' },
+];
+const q = new URLSearchParams(location.search);
+const MODES = q.get('mode') ? [q.get('mode')] : ['client', 'server'];
+
+const norm = (s) => String(s ?? '').toLowerCase().replace(/\s+/g, ' ').trim();
+function matches(expected, actual) {
+  if (expected.startsWith('re:')) return new RegExp(expected.slice(3), 'i').test(String(actual).trim());
+  return norm(actual).includes(norm(expected));
+}
+
+function score(expected, rows) {
+  const out = [];
+  for (const [key, want] of Object.entries(expected)) {
+    const all = rows.filter((r) => r.key === key);
+    const filled = all.filter((r) => r.filled);
+    const got = filled.map((r) => r.value).join(' | ');
+    let verdict;
+    if (all.length === 0) verdict = 'absent';
+    else if (want === null) verdict = filled.length ? 'wrong' : 'ok-blank';
+    else if (!filled.length) verdict = 'miss';
+    else verdict = filled.some((r) => matches(want, r.value)) ? 'ok' : 'wrong';
+    out.push({ key, want, got, verdict });
+  }
+  return out;
+}
+
+function runOne(fixture, platform, mode) {
+  return new Promise((resolve) => {
+    const fr = document.createElement('iframe');
+    fr.src = `harness.html?fixture=${fixture}${platform ? '&platform=' + platform : ''}${mode === 'server' ? '&server=1' : ''}${q.get('src') ? '&src=' + q.get('src') : ''}&auto=1`;
+    document.body.appendChild(fr);
+    const started = Date.now();
+    const t = setInterval(() => {
+      const r = fr.contentWindow?.__result;
+      if (r || Date.now() - started > 60000) {
+        clearInterval(t);
+        fr.remove();
+        resolve(r || { error: 'timeout', rows: [] });
+      }
+    }, 250);
+  });
+}
+
+(async () => {
+  const results = [];
+  for (const mode of MODES) {
+    for (const { fixture, platform } of RUNS) {
+      const expected = await (await fetch(`expected/${fixture}.json`)).json();
+      const r = await runOne(fixture, platform, mode);
+      const scored = score(expected, r.rows || []);
+      const c = (v) => scored.filter((s) => s.verdict === v).length;
+      const correct = c('ok'), wrong = c('wrong'), miss = c('miss'), blankOk = c('ok-blank');
+      const shouldFill = scored.filter((s) => s.want !== null && s.verdict !== 'absent').length;
+      results.push({
+        mode, fixture, platform: platform || 'generic', error: r.error || null,
+        correct, wrong, miss, blankOk,
+        precision: correct + wrong ? correct / (correct + wrong) : 1,
+        recall: shouldFill ? correct / shouldFill : 1,
+        serverStats: r.serverStats ? { ...r.serverStats, plan: undefined } : null,
+        scored,
+      });
+    }
+  }
+
+  const pct = (x) => (x * 100).toFixed(0) + '%';
+  const byMode = MODES.map((mode) => {
+    const rs = results.filter((r) => r.mode === mode);
+    const sum = (k) => rs.reduce((a, r) => a + r[k], 0);
+    const correct = sum('correct'), wrong = sum('wrong'), miss = sum('miss');
+    return { mode, correct, wrong, miss, precision: correct / (correct + wrong || 1), recall: correct / (correct + wrong + miss || 1) };
+  });
+
+  document.getElementById('summary').innerHTML =
+    '<table><tr><th>mode</th><th>correct</th><th>wrong fills</th><th>missed</th><th>precision</th><th>recall</th></tr>' +
+    byMode.map((m) => `<tr><td>${m.mode}</td><td>${m.correct}</td><td class="${m.wrong ? 'wrong' : ''}">${m.wrong}</td><td>${m.miss}</td><td>${pct(m.precision)}</td><td>${pct(m.recall)}</td></tr>`).join('') +
+    '</table>';
+
+  document.getElementById('detail').innerHTML = results.map((r) =>
+    `<h3>${r.fixture} · ${r.platform} · ${r.mode} — ${r.correct} ok, <span class="wrong">${r.wrong} wrong</span>, <span class="miss">${r.miss} missed</span>${r.error ? ' · ERROR ' + r.error : ''}</h3>` +
+    (r.serverStats ? `<pre>server: ${JSON.stringify(r.serverStats)}</pre>` : '') +
+    '<table><tr><th>field</th><th>expected</th><th>got</th><th>verdict</th></tr>' +
+    r.scored.filter((s) => s.verdict !== 'ok' && s.verdict !== 'ok-blank').map((s) =>
+      `<tr><td>${s.key}</td><td>${s.want === null ? '(blank)' : s.want}</td><td>${s.got || ''}</td><td class="${s.verdict === 'wrong' ? 'wrong' : 'miss'}">${s.verdict}</td></tr>`).join('') +
+    '</table>').join('');
+
+  window.__eval = { byMode, results: results.map(({ scored, ...rest }) => ({ ...rest, problems: scored.filter((s) => !['ok', 'ok-blank'].includes(s.verdict)) })) };
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,15 @@
+{
+  "_systemfield_name": "Amara Okonkwo",
+  "_systemfield_email": "amara.okonkwo@example.com",
+  "c056fccb-fe8a-4203-b6a2-c27aa2945ace": "4155550142",
+  "36c56bf7-e26a-44de-aee7-f82043b1edeb": "linkedin.com/in/amaraokonkwo",
+  "1858ecb8-a700-4cbd-b9a4-4be7dd43a616": "re:^yes$",
+  "cce8d43f-65de-4562-82d5-c90ebe465756": "re:^no$",
+  "1e3cc34f-ba37-40fe-b7bd-005a2fcce0fc": null,
+  "242f4d67-7c7c-42b7-8522-2fb91a94d63a": null,
+  "communicationConsent": null,
+  "eeoc_gender": "Female",
+  "eeoc_race": null,
+  "eeoc_veteran": "re:^I am not a protected veteran",
+  "__unnamed__": null
+}

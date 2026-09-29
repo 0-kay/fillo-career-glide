@@ -95,7 +95,8 @@
       const wire = fields.map(f => ({
         name: f.name, id: f.id, type: f.type, placeholder: f.placeholder, label: f.label,
         className: f.className || '', context: typeof f.context === 'string' ? f.context : '',
-        required: Boolean(f.required), maxLength: typeof f.maxLength === 'number' ? f.maxLength : null
+        required: Boolean(f.required), maxLength: typeof f.maxLength === 'number' ? f.maxLength : null,
+        autocomplete: f.autocomplete || null, options: Array.isArray(f.options) ? f.options.slice(0, 50) : null
       }));
       const r = await fetchWithTimeout(`${AI_CONFIG.supabaseUrl}/functions/v1/resolve-form-fill`, {
         method: 'POST', headers: await aiHeaders(), body: JSON.stringify({ url, profileId, fields: wire })

@@ -3,6 +3,8 @@
 
 import { deriveCandidates, flattenProfile } from "../typesafe/candidates.ts";
 import { coerceValue } from "../typesafe/fields.ts";
+import { pickOption } from "./rules.ts";
+import { canonicalKey } from "./canonical.ts";
 import {
   type FieldDescriptor,
   fieldName,
@@ -32,7 +34,7 @@ export interface PlanEntry {
   value: string | number | boolean;
   mappingId: string | null;
   signature: string;
-  source: "cache" | "llm";
+  source: "cache" | "rule" | "screening" | "llm";
   confidence: number;
   dataPath: string | null;
 }
@@ -45,6 +47,9 @@ const MAX_OVERRIDE_RATE = 0.4;
 /** A row users keep correcting is wrong (or stale) and must stop being served. */
 export function isTrusted(row: MappingRow): boolean {
   if (row.confidence < MIN_ROW_CONFIDENCE) return false;
+  // A model-learned row has not earned the benefit of the doubt a curated seed row has:
+  // retire it as soon as corrections outnumber confirmations, and re-map it.
+  if (row.source === "llm" && row.override_count >= 2 && row.override_count > row.success_count) return false;
   const seen = row.success_count + row.override_count;
   if (row.override_count >= MIN_FEEDBACK_SAMPLES && row.override_count / seen > MAX_OVERRIDE_RATE) {
     return false;
@@ -154,8 +159,77 @@ const isScalar = (v: unknown): v is string | number | boolean =>
   typeof v === "string" || typeof v === "number" || typeof v === "boolean";
 
 /** Reads the value a mapping points at. Code owns every read; the model only picks paths. */
+interface SavedAnswer {
+  key?: string;
+  id?: string;
+  question?: string;
+  answer?: unknown;
+  enabled?: boolean;
+}
+
+/**
+ * Where else a value may live. Config and rules name one path, but real profiles differ:
+ * the app stores EEO answers only as screening answers, saves the personal site as
+ * `portfolio`, and older/parsed profiles use snake_case keys.
+ */
+const PATH_ALIASES: Record<string, string[]> = {
+  "job_preferences.eeo.gender": ["screening:gender"],
+  "job_preferences.eeo.disability_status": ["screening:disability"],
+  "job_preferences.eeo.veteran_status": ["screening:veteran"],
+  "job_preferences.eeo.race": ["screening:race"],
+  "personal_details.website": ["personal_details.portfolio"],
+  "personal_details.portfolio": ["personal_details.website"],
+  "personal_details.city": ["personal_details.address.city"],
+  "personal_details.full_name": ["personal_details.fullName"],
+  // The app never stores a phone country code; pickers such as Workday's match the country name.
+  "personal_details.countryPhoneCode": ["personal_details.address.country"],
+};
+
+/** Education dates are saved as { year, month }: "06/2018", or "2018" without a month. */
+function formatDateParts(v: unknown): string | null {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return null;
+  const d = v as { year?: unknown; month?: unknown };
+  if (!("year" in d) && !("month" in d)) return null;
+  const year = String(d.year ?? "").trim();
+  const month = String(d.month ?? "").trim();
+  if (!year) return null;
+  return /^\d{1,2}$/.test(month) ? `${month.padStart(2, "0")}/${year}` : year;
+}
+
+/** snake_case <-> camelCase for the last path segment (job_title <-> jobTitle). */
+function caseVariant(path: string): string | null {
+  const i = path.lastIndexOf(".");
+  const last = path.slice(i + 1);
+  const alt = last.includes("_")
+    ? last.replace(/_([a-z])/g, (_, c) => c.toUpperCase())
+    : /[A-Z]/.test(last) ? last.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`) : null;
+  return alt ? path.slice(0, i + 1) + alt : null;
+}
+
+/** Saved screening answers, keyed by their stable key (never by array position). */
+export function screeningAnswers(profile: unknown): SavedAnswer[] {
+  const list = getPath(profile, "job_preferences.screening_answers");
+  return Array.isArray(list) ? (list as SavedAnswer[]) : [];
+}
+
 export function resolvePath(profile: unknown, path: string, today = new Date()): string | number | boolean | null {
+  const v = resolveOne(profile, path, today);
+  if (v !== null) return v;
+  for (const alt of [...(PATH_ALIASES[path] ?? []), caseVariant(path)]) {
+    if (!alt) continue;
+    const w = resolveOne(profile, alt, today);
+    if (w !== null) return w;
+  }
+  return null;
+}
+
+function resolveOne(profile: unknown, path: string, today: Date): string | number | boolean | null {
   if (path === "__today") return today.toISOString().slice(0, 10);
+  if (path.startsWith("screening:")) {
+    const key = path.slice("screening:".length);
+    const hit = screeningAnswers(profile).find((a) => a.enabled !== false && canonicalKey(a) === key);
+    return hit && isScalar(hit.answer) && String(hit.answer).trim() ? hit.answer : null;
+  }
   if (path === "__current_company") {
     const v = getPath(profile, "work_experience.0.company");
     return isScalar(v) && String(v).trim() ? v : null;
@@ -167,6 +241,8 @@ export function resolvePath(profile: unknown, path: string, today = new Date()):
 
   const v = getPath(profile, path);
   if (isScalar(v) && String(v).trim() !== "") return v;
+  const date = formatDateParts(v);
+  if (date) return date;
 
   // Older profiles have no fullName; compose it rather than leave the field blank.
   if (path === "personal_details.fullName" || path === "name") {
@@ -183,19 +259,33 @@ export interface Resolved {
 
 /** Row + profile -> the typed value for this field, falling back to the row's default. */
 export function valueForRow(row: MappingRow, descriptor: FieldDescriptor, profile: unknown): Resolved | null {
-  const raw = resolvePath(profile, row.profile_path);
   const fallback = typeof row.meta?.default === "string" ? row.meta.default : null;
+  return valueForPath(row.profile_path, descriptor, profile, fallback);
+}
+
+/** Reads a profile path and shapes it for the target field (type coercion, option text, length). */
+export function valueForPath(
+  path: string,
+  descriptor: FieldDescriptor,
+  profile: unknown,
+  fallback: string | null = null,
+): Resolved | null {
+  const raw = resolvePath(profile, path);
   const source = raw ?? fallback;
   if (source == null || String(source).trim() === "") return null;
 
   const asText = String(source);
-  const typed = coerceValue({ path: row.profile_path, value: asText, raw: source }, descriptor);
+  // Choice fields take option text, never a coerced boolean.
+  if (descriptor.options?.length) {
+    return { value: pickOption(asText, descriptor.options), dataPath: raw == null ? null : path };
+  }
+  const typed = coerceValue({ path, value: asText, raw: source }, descriptor);
   if (typed === null || typed === "") return null;
 
   const max = typeof descriptor.maxLength === "number" ? descriptor.maxLength : null;
   if (max && max > 0 && String(typed).length > max) return null;
 
-  return { value: typed, dataPath: raw == null ? null : row.profile_path };
+  return { value: typed, dataPath: raw == null ? null : path };
 }
 
 export interface CachePlan {
@@ -240,50 +330,3 @@ export function planFromCache(
   return { entries, unresolved, demoted };
 }
 
-export interface ModelFieldResult {
-  shouldFill: boolean;
-  confidence: number;
-  dataPath: string | null;
-}
-
-export interface LearnedItem {
-  signature: string;
-  learn: {
-    type: string;
-    name: string;
-    label: string;
-    profilePath: string;
-    confidence: number;
-    replaceId?: string;
-  } | null;
-}
-
-/**
- * Decides whether a model choice is worth caching. Only confident choices that point at a real
- * profile path are saved: a wrong guess here is served to every later user of this form.
- */
-export function learnedFromModel(
-  descriptor: FieldDescriptor,
-  result: ModelFieldResult,
-  demoted: MappingRow | undefined,
-  minConfidence: number,
-): LearnedItem {
-  const signature = fieldSignature(descriptor);
-  const label = normalizeText(descriptor.label);
-  const name = fieldName(descriptor);
-  // A field with neither a stable name nor a label has no identity to key a mapping on.
-  if (!result.shouldFill || !result.dataPath || result.confidence < minConfidence || (!name && !label)) {
-    return { signature, learn: null };
-  }
-  return {
-    signature,
-    learn: {
-      type: normalizeText(descriptor.type) || "text",
-      name,
-      label,
-      profilePath: result.dataPath,
-      confidence: result.confidence,
-      replaceId: demoted?.id,
-    },
-  };
-}
