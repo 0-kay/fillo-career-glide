@@ -314,7 +314,23 @@
     return out;
   };
 
+  // Honeypots are fields bots fill and people can't see (Workday's "beecatcher": a 1x1 clipped
+  // input named "website", labelled "This input is for robots only"). Filling one flags the
+  // applicant as a bot, so they never count as fields.
+  const HONEYPOT_TEXT = /for robots|robots only|do not (fill|enter|complete)|leave (this )?(field )?(blank|empty)|honey\s*pot|bot trap/i;
+  utils.isHoneypot = function(el){
+    if (!el || !/^(INPUT|TEXTAREA)$/.test(el.tagName)) return false;
+    if (el.getAttribute('data-automation-id') === 'beecatcher') return true;
+    if (/honey|hp_|bot_?trap/i.test(`${el.name || ''} ${el.id || ''}`)) return true;
+    const root = el.getRootNode ? el.getRootNode() : document;
+    const label = (el.id && root.querySelector?.(`label[for="${CSS.escape(el.id)}"]`)?.textContent) || '';
+    if (HONEYPOT_TEXT.test(`${label} ${el.getAttribute('aria-label') || ''} ${el.getAttribute('placeholder') || ''}`)) return true;
+    const rect = el.getBoundingClientRect();
+    return el.type !== 'file' && el.type !== 'radio' && el.type !== 'checkbox' && rect.width <= 1 && rect.height <= 1;
+  };
+
   utils.isElementVisible = function(el){
+    if (utils.isHoneypot(el)) return false;
     const style = window.getComputedStyle(el);
     if (el?.tagName?.toLowerCase() === 'input' && el.type === 'file') {
       return !el.disabled && style.display !== 'none' && style.visibility !== 'hidden';

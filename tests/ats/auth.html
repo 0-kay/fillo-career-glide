@@ -1,0 +1,125 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Fillo ATS account screens</title>
+<style>
+  body { font: 14px system-ui, sans-serif; margin: 16px; }
+  #fixture { border: 1px dashed #ccc; padding: 12px; margin-bottom: 16px; max-width: 700px; }
+  .pass { color: #1b6e20; } .fail { color: #b00020; font-weight: 600; }
+</style>
+</head>
+<body>
+<h2>ATS account screens (content/ats-auth.js)</h2>
+<div id="fixture"></div>
+<pre id="report">running…</pre>
+<script>
+// Checks detection, filling and the honeypot guard against saved Workday / iCIMS account screens,
+// with the real content scripts. Results in window.__authResult ({ passed, failed, lines }).
+const store = {};
+const sent = [];
+window.chrome = {
+  runtime: { id: 'harness', getManifest: () => ({ version: '0' }), getURL: (p) => p,
+    onMessage: { addListener() {} }, sendMessage: (m) => { sent.push(m); return Promise.resolve({}); }, lastError: null },
+  storage: { local: { get: async (k) => (typeof k === 'string' ? { [k]: store[k] } : {}), set: async (o) => Object.assign(store, o), remove: async () => {} } },
+};
+const realFetch = window.fetch.bind(window);
+window.fetch = async (url, opts) => {
+  if (String(url).includes('/functions/v1/match-config')) return realFetch('generated/match-config.json');
+  if (String(url).includes('/functions/v1/')) return new Response('{"success":false}', { status: 401 });
+  return realFetch(url, opts);
+};
+const loadScript = (src) => new Promise((res, rej) => {
+  const s = document.createElement('script'); s.src = src; s.onload = res; s.onerror = () => rej(new Error(src)); document.head.appendChild(s);
+});
+
+const lines = []; let passed = 0, failed = 0;
+function check(name, ok, detail = '') {
+  ok ? passed++ : failed++;
+  lines.push(`${ok ? '✔' : '✘'} ${name}${ok || !detail ? '' : '  — ' + detail}`);
+}
+async function mount(name, host) {
+  document.getElementById('fixture').innerHTML = await (await realFetch(`fixtures/auth/${name}.html`)).text();
+  window.__Fillo.atsAuth.hostname = () => host;
+}
+const $ = (sel) => document.querySelector(sel);
+
+(async () => {
+  try {
+    for (const s of ['namespace', 'config', 'utils', 'domain-detector', 'mapping', 'ai', 'planner', 'engine', 'ats-auth']) {
+      await loadScript(`../../extension/content/${s}.js`);
+    }
+    await loadScript('../../extension/lib/password.js');
+    const auth = window.__Fillo.atsAuth;
+    const WD = 'nvidia.wd5.myworkdayjobs.com', IC = 'careers-navitus.icims.com';
+
+    // Password generator
+    const samples = Array.from({ length: 300 }, () => self.filloGeneratePassword());
+    check('generator: 20 chars', samples.every((p) => p.length === 20));
+    check('generator: every class every time', samples.every((p) => /[A-Z]/.test(p) && /[a-z]/.test(p) && /\d/.test(p) && /[!@#$%^&*\-_=+?]/.test(p)));
+    check('generator: no quotes, slashes, brackets, spaces', samples.every((p) => !/["'`\\<> ]/.test(p)));
+    check('generator: no repeats in 300', new Set(samples).size === 300);
+
+    // Workday: chooser
+    await mount('workday-chooser', WD);
+    let d = auth.describe(auth.detect());
+    check('workday chooser: screen', d?.screen === 'chooser', JSON.stringify(d));
+    check('workday chooser: google + linkedin offered', d?.sso.includes('google') && d?.sso.includes('linkedin'), JSON.stringify(d?.sso));
+    check('workday chooser: tenant', d?.tenant === WD && d?.tenantName === 'Nvidia', `${d?.tenant} ${d?.tenantName}`);
+    check('workday chooser: highlight never clicks', auth.highlight('sso:google') === true);
+
+    // Workday: sign in
+    await mount('workday-signin', WD);
+    d = auth.describe(auth.detect());
+    check('workday sign-in: screen', d?.screen === 'sign-in', JSON.stringify(d));
+    let r = auth.fill({ email: 'amara.okonkwo@example.com', password: null });
+    check('workday sign-in: email filled, password left to the password manager', r.ok && r.filled.join() === 'email' && $('#input-7').value === '', JSON.stringify(r));
+    check('workday sign-in: honeypot empty', $('[data-automation-id="beecatcher"]').value === '');
+    check('honeypot is not a field', window.__Fillo.utils.isHoneypot($('[data-automation-id="beecatcher"]')) && !window.__Fillo.utils.isElementVisible($('[data-automation-id="beecatcher"]')));
+
+    // Workday: create account
+    await mount('workday-create', WD);
+    d = auth.describe(auth.detect());
+    check('workday create: screen', d?.screen === 'create-account', JSON.stringify(d));
+    const pw = self.filloGeneratePassword();
+    r = auth.fill({ email: 'amara.okonkwo@example.com', password: pw });
+    check('workday create: email, password, confirm filled', r.filled.join() === 'email,password,confirm', JSON.stringify(r));
+    check('workday create: password and confirm match', $('#input-15').value === pw && $('#input-16').value === pw);
+    check('workday create: site autocomplete hints kept', $('#input-15').getAttribute('autocomplete') === 'new-password');
+    check('workday create: terms box left for the applicant', !$('#input-19').checked);
+    check('workday create: honeypot empty after auth fill', $('[data-automation-id="beecatcher"]').value === '');
+
+    // The regular form fill must not touch the honeypot either (it is named "website").
+    await mount('workday-create', WD);
+    window.__Fillo.domainDetector.detectPlatform = async () => 'workday';
+    const profile = await (await realFetch('profile.json')).json();
+    await window.__Fillo.engine.handleFillForm(profile, false).catch(() => {});
+    check('regular fill: honeypot empty', $('[data-automation-id="beecatcher"]').value === '', $('[data-automation-id="beecatcher"]').value);
+    check('regular fill: no password typed', $('#input-15').value === '' && $('#input-16').value === '');
+
+    // iCIMS
+    await mount('icims-enter-email', IC);
+    d = auth.describe(auth.detect());
+    check('icims enter-email: screen', d?.screen === 'enter-email', JSON.stringify(d));
+    check('icims tenant name', d?.tenantName === 'Navitus', d?.tenantName);
+    r = auth.fill({ email: 'amara.okonkwo@example.com', password: 'unused' });
+    check('icims enter-email: email only', r.filled.join() === 'email', JSON.stringify(r));
+
+    await mount('icims-create', IC);
+    d = auth.describe(auth.detect());
+    check('icims create (synthetic): screen', d?.screen === 'create-account', JSON.stringify(d));
+
+    // Elsewhere nothing is detected.
+    await mount('workday-create', 'boards.greenhouse.io');
+    document.getElementById('fixture').innerHTML = '<form><label for="x">Password</label><input type="password" id="x"></form>';
+    check('other sites: no account screen', auth.detect() === null);
+  } catch (e) {
+    failed++; lines.push('✘ harness error: ' + e.message);
+  }
+  document.getElementById('report').innerHTML = `${passed} passed, ${failed} failed\n\n` +
+    lines.map((l) => `<span class="${l.startsWith('✔') ? 'pass' : 'fail'}">${l.replace(/</g, '&lt;')}</span>`).join('\n');
+  window.__authResult = { passed, failed, lines };
+})();
+</script>
+</body>
+</html>

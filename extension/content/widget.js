@@ -17,6 +17,8 @@
   let selectedProfileId = null;
   let profilesLoaded = false;
   let hostPositioningInjected = false;
+  // Workday / iCIMS account screen on this page, reported by content/ats-auth.js via background.
+  let auth = { state: null, plan: null, account: null, hasSessionPassword: false, status: null, password: null };
 
   function getProfileName(profile) {
     return (
@@ -98,6 +100,7 @@
     document.addEventListener('click', handleOutsideClick, true);
 
     renderMainPanel();
+    refreshAuth();
   }
 
   function unmount() {
@@ -167,6 +170,133 @@
     });
   }
 
+  // ---------- ATS account screens ----------
+  const PROVIDER_NAMES = { google: 'Google', linkedin: 'LinkedIn', microsoft: 'Microsoft', apple: 'Apple', facebook: 'Facebook', indeed: 'Indeed' };
+
+  function selectedEmail() {
+    const p = profiles.find((x) => x.id === selectedProfileId) || profiles[0];
+    return p?.personal_details?.email || null;
+  }
+
+  function refreshAuth() {
+    chrome.runtime.sendMessage({ action: 'FILLO_AUTH_GET_STATE' }, (res) => {
+      if (!res?.success) return;
+      auth = { ...auth, state: res.state, plan: res.plan, account: res.account, hasSessionPassword: res.hasSessionPassword };
+      if (!res.state) auth.status = null;
+      updateBadge();
+      if (panelOpen) renderMainPanel();
+    });
+  }
+
+  function updateBadge() {
+    const bubble = shadow?.getElementById('bubble');
+    if (bubble) bubble.classList.toggle('fillo-bubble--attention', !!auth.state);
+  }
+
+  function authFill(mode) {
+    auth.status = { type: 'info', msg: 'Filling…' };
+    renderMainPanel();
+    chrome.runtime.sendMessage({ action: 'FILLO_AUTH_REQUEST_FILL', mode, email: selectedEmail() }, (res) => {
+      if (res?.error === 'pro_required') auth.status = { type: 'error', msg: 'Account setup is a Pro feature.' };
+      else if (!res?.ok) auth.status = { type: 'error', msg: res?.error || 'Nothing to fill on this screen.' };
+      else if (mode === 'create') {
+        auth.hasSessionPassword = true;
+        auth.status = { type: 'success', msg: 'Filled. Tick "I agree", then click Create Account. Save the password when your browser offers.' };
+        chrome.runtime.sendMessage({ action: 'FILLO_AUTH_HIGHLIGHT', target: 'submit' });
+      } else {
+        auth.status = { type: 'success', msg: res.filled.includes('password')
+          ? 'Filled. Click Sign In.'
+          : 'Email filled. Let your password manager fill the password, then click Sign In.' };
+      }
+      renderMainPanel();
+    });
+  }
+
+  function authHighlight(target) {
+    chrome.runtime.sendMessage({ action: 'FILLO_AUTH_HIGHLIGHT', target });
+  }
+
+  function authShowPassword() {
+    chrome.runtime.sendMessage({ action: 'FILLO_AUTH_SHOW_PASSWORD' }, (res) => {
+      auth.password = res?.password || null;
+      renderMainPanel();
+    });
+  }
+
+  function authCardHtml() {
+    const s = auth.state;
+    if (!s) return '';
+    const company = escapeHtml(s.tenantName);
+    const email = selectedEmail();
+    const status = auth.status ? `<div class="fillo-status ${auth.status.type}">${escapeHtml(auth.status.msg)}</div>` : '';
+    const sso = (s.sso || []).filter((p) => PROVIDER_NAMES[p]);
+    const ssoHtml = sso.length
+      ? `<div class="fillo-auth-note">Fastest: sign in with ${sso.map((p) => PROVIDER_NAMES[p]).join(' or ')} (no password or email check).</div>
+         <div class="fillo-auth-row">${sso.map((p) => `<button class="fillo-auth-btn secondary" data-auth-sso="${p}" title="Point to the site's ${PROVIDER_NAMES[p]} button">${PROVIDER_NAMES[p]} sign-in</button>`).join('')}</div>`
+      : '';
+
+    if (auth.plan && auth.plan !== 'pro') {
+      return `<div class="fillo-auth">
+        <div class="fillo-auth-title">${company} needs a candidate account</div>
+        ${ssoHtml}
+        <div class="fillo-auth-note">Fyllo Pro creates these accounts for you and fills your sign-in on every employer's site.</div>
+        <a class="fillo-auth-btn" href="https://www.fylloai.com/pricing" target="_blank" rel="noopener">Upgrade to Pro</a>
+      </div>`;
+    }
+
+    const known = auth.account
+      ? `<div class="fillo-auth-note">You created an account here${auth.account.email ? ` as ${escapeHtml(auth.account.email)}` : ''}.</div>` : '';
+    let body = '';
+    switch (s.screen) {
+      case 'chooser':
+        body = `${ssoHtml}${s.emailChoice ? `<button class="fillo-auth-btn ${sso.length ? 'secondary' : ''}" data-auth-highlight="email-choice">Use email instead</button>` : ''}`;
+        break;
+      case 'create-account':
+      case 'reset-password':
+        body = `${s.screen === 'create-account' ? known : ''}
+          <div class="fillo-auth-note">Fyllo fills ${email ? escapeHtml(email) : 'your email'} and a strong password, and your browser saves it for next time.</div>
+          <button class="fillo-auth-btn" data-auth-fill="create" ${email ? '' : 'disabled'}>${s.screen === 'create-account' ? 'Fill new account' : 'Fill new password'}</button>
+          ${auth.hasSessionPassword ? '<button class="fillo-auth-link" data-auth-show>Show the password</button>' : ''}`;
+        break;
+      case 'sign-in':
+        body = `${known || (s.hasConfirmField ? '' : '<div class="fillo-auth-note">No account yet? Click the site\'s Create Account link.</div>')}
+          <button class="fillo-auth-btn" data-auth-fill="sign-in" ${email ? '' : 'disabled'}>Fill sign-in</button>
+          ${auth.hasSessionPassword ? '<button class="fillo-auth-link" data-auth-show>Show the password</button>' : ''}
+          <div class="fillo-auth-note">Forgot it? Use the site's "Forgot your password?" link and Fyllo fills a new one.</div>`;
+        break;
+      case 'enter-email':
+      case 'forgot-password':
+        body = `<button class="fillo-auth-btn" data-auth-fill="email" ${email ? '' : 'disabled'}>Fill my email</button>
+          <div class="fillo-auth-note">Then click ${s.screen === 'enter-email' ? 'Next' : 'Submit'}.</div>`;
+        break;
+      case 'verify-email':
+        body = `<div class="fillo-auth-note">${company} sent a verification link to ${email ? escapeHtml(email) : 'your email'}. Open it, then come back here to continue.</div>`;
+        break;
+      default:
+        body = ssoHtml;
+    }
+    const password = auth.password
+      ? `<div class="fillo-auth-password"><code>${escapeHtml(auth.password)}</code></div>` : '';
+    return `<div class="fillo-auth">
+      <div class="fillo-auth-title">${s.screen === 'create-account' ? `Create your ${company} account`
+        : s.screen === 'reset-password' ? `Set a new ${company} password` : `Sign in to ${company}`}</div>
+      ${body}${password}${status}
+    </div>`;
+  }
+
+  function attachAuthHandlers() {
+    shadow.querySelectorAll('[data-auth-fill]').forEach((b) => b.addEventListener('click', () => authFill(b.getAttribute('data-auth-fill'))));
+    shadow.querySelectorAll('[data-auth-sso]').forEach((b) => b.addEventListener('click', () => authHighlight(`sso:${b.getAttribute('data-auth-sso')}`)));
+    shadow.querySelectorAll('[data-auth-highlight]').forEach((b) => b.addEventListener('click', () => authHighlight(b.getAttribute('data-auth-highlight'))));
+    shadow.querySelectorAll('[data-auth-show]').forEach((b) => b.addEventListener('click', authShowPassword));
+  }
+
+  chrome.runtime.onMessage.addListener((req) => {
+    if (req?.action !== 'FILLO_AUTH_STATE' || !host) return;
+    if (!req.state || req.state.screen !== auth.state?.screen) { auth.status = null; auth.password = null; }
+    refreshAuth();
+  });
+
   // ---------- Render ----------
   function renderMainPanel(state = {}) {
     if (!shadow) return;
@@ -192,6 +322,7 @@
       : '';
 
     panel.innerHTML = panelShell(`
+      ${authCardHtml()}
       ${profiles.length > 0
         ? `<label class="fillo-label">Profile</label><select class="fillo-select" id="profile-select">${options}</select>`
         : '<div class="fillo-error">No profile is ready yet (needs 75% completeness).</div>'}
@@ -210,6 +341,7 @@
     }
     const fillBtn = shadow.getElementById('fill-btn');
     if (fillBtn) fillBtn.addEventListener('click', fillCurrentPage);
+    attachAuthHandlers();
 
     attachLogoutHandler();
   }
@@ -333,6 +465,32 @@
     .fillo-status.success { color: #059669; }
     .fillo-status.error { color: #dc2626; }
     .fillo-error { color: #dc2626; font-size: 12px; }
+    .fillo-status.info { color: #6b7280; }
+    .fillo-bubble--attention::after {
+      content: ''; position: absolute; top: 2px; right: 2px; width: 12px; height: 12px;
+      border-radius: 50%; background: #f59e0b; border: 2px solid #fff;
+    }
+    .fillo-bubble { position: relative; }
+    .fillo-auth {
+      border: 1px solid #e5e7eb; border-radius: 10px; padding: 10px; margin-bottom: 12px;
+      background: #faf5ff;
+    }
+    .fillo-auth-title { font-weight: 600; font-size: 13px; margin-bottom: 6px; color: #111827; }
+    .fillo-auth-note { font-size: 12px; color: #4b5563; line-height: 1.4; margin: 6px 0; }
+    .fillo-auth-row { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 6px; }
+    .fillo-auth-btn {
+      display: block; width: 100%; box-sizing: border-box; text-align: center; text-decoration: none;
+      padding: 8px 10px; border-radius: 8px; border: none; margin-top: 6px;
+      background: ${BRAND_GRADIENT}; color: #fff; font-weight: 600; cursor: pointer; font-size: 12.5px;
+    }
+    .fillo-auth-row .fillo-auth-btn { flex: 1; width: auto; margin-top: 0; }
+    .fillo-auth-btn.secondary { background: #fff; color: #4b0082; border: 1px solid #d8b4fe; }
+    .fillo-auth-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .fillo-auth-link { background: none; border: none; color: #6d28d9; font-size: 12px; cursor: pointer; padding: 6px 0 0; }
+    .fillo-auth-password code {
+      display: block; margin-top: 6px; padding: 6px 8px; border-radius: 6px; background: #fff;
+      border: 1px dashed #c4b5fd; font-size: 12px; user-select: all; word-break: break-all;
+    }
     .fillo-loading { color: #6b7280; font-size: 12px; }
     .fillo-warning { color: #374151; font-size: 12.5px; line-height: 1.4; }
     .fillo-panel-footer { padding: 8px 14px; border-top: 1px solid #f0f0f0; }
