@@ -23,8 +23,12 @@ const CASES: Array<{ d: FieldDescriptor; want: string | null }> = [
   { d: { type: "radio", label: "Can you work in the US without company sponsorship?", options: YN }, want: "Yes" },
   { d: { type: "text", label: "Do you require visa sponsorship to work in the US?" }, want: "No" },
   { d: { type: "select-one", label: "Please select your protected veteran status", options: ["I identify as one or more of the classifications of protected veteran listed above", "I am not a protected veteran", "I decline to self-identify for protected veteran status"] }, want: "I am not a protected veteran" },
+  // Jobvite (Egnyte) dropdowns: one derivable from saved answers, one not.
+  { d: { type: "select-one", label: "Work Authorization", required: true, options: ["I am authorized to work in the country in which this job will be performed", "I will require visa sponsorship to work in the country in which this job will be performed"] }, want: "I am authorized to work" },
+  { d: { type: "select-one", label: "Work Status", required: true, options: ["US Citizen", "Permanent Resident", "H1 Visa", "TN Visa", "F1 Visa", "Decline to Self Identify"] }, want: null },
   // Questions with no saved answer: must stay blank rather than be guessed.
-  { d: { type: "text", label: "Are you currently subject to any non-compete or non-solicitation agreement that would impact your ability to work at Airbnb?", options: YN, required: true }, want: null },
+  // The profile saved "No" to the default non-compete question.
+  { d: { type: "text", label: "Are you currently subject to any non-compete or non-solicitation agreement that would impact your ability to work at Airbnb?", options: YN, required: true }, want: "No" },
   { d: { type: "text", label: "Are you currently or have you ever worked for Airbnb in any capacity?", options: YN, required: true }, want: null },
   { d: { type: "text", label: "Candidate AI Usage Attestation:", options: ["I agree", "I do not agree"], required: true }, want: null },
   { d: { type: "text", name: "question_69024585", label: "How did you hear about this job?", required: true }, want: null },

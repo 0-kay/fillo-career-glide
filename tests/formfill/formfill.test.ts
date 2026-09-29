@@ -173,6 +173,22 @@ describe("planFromCache", () => {
     expect(plan.entries[0].value).toBe("Mobile");
   });
 
+  it("finds values where real profiles keep them", () => {
+    // EEO answers exist only as screening answers; the site is saved as `portfolio`.
+    expect(resolvePath(profile, "job_preferences.eeo.gender")).toBe("Female");
+    expect(resolvePath(profile, "job_preferences.eeo.disability_status")).toMatch(/^No, I do not have a disability/);
+    expect(resolvePath(profile, "personal_details.website")).toBe("https://amara.dev");
+    expect(resolvePath(profile, "screening:veteran")).toBe("I am not a protected veteran");
+    // snake_case config paths still read camelCase profiles
+    expect(resolvePath(profile, "work_experience.0.job_title")).toBe("Senior Software Engineer");
+    // education dates are { year, month } objects in real profiles
+    expect(resolvePath(profile, "education_history.0.startDate")).toBe("09/2014");
+    expect(resolvePath({ e: { year: "2018" } }, "e")).toBe("2018");
+    expect(resolvePath(profile, "personal_details.countryPhoneCode")).toBe("United States of America");
+    // an unanswered default question is a gap, not an empty string
+    expect(resolvePath(profile, "screening:race")).toBeNull();
+  });
+
   it("composes a full name when the profile has none", () => {
     expect(resolvePath({ first_name: "Ada", last_name: "Lovelace" }, "personal_details.fullName")).toBe("Ada Lovelace");
   });
@@ -254,10 +270,10 @@ describe("buildPlan", () => {
   });
 
   it("reuses a saved answer verbatim for an open question and caches it by key", async () => {
-    // saved index 4 is the gender answer in the fixture profile; open question (no options).
+    // saved index 13 is the gender answer in the fixture profile; open question (no options).
     const d = [{ type: "text", label: "How do you describe your gender identity?" }];
     const r = await buildPlan(d, [], profile, {
-      systemOne: fakeModel({ s0: { choice: "4", confidence: 0.9 }, f0: { choice: "__none__", confidence: 0.9 } }),
+      systemOne: fakeModel({ s0: { choice: "13", confidence: 0.9 }, f0: { choice: "__none__", confidence: 0.9 } }),
       modelBudget: 5,
     });
     expect(r.entries[0]).toMatchObject({ source: "screening", value: "Female", dataPath: "screening:gender" });

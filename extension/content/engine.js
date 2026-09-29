@@ -6584,12 +6584,14 @@
         const clean = t => String(t || '').replace(/\s+/g, ' ').trim();
         try {
             if (el.id) {
-                const forLabel = document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
+                // Inside a shadow root the label sits in the same root, not in document.
+                const forLabel = el.getRootNode().querySelector(`label[for="${CSS.escape(el.id)}"]`);
                 if (forLabel && clean(forLabel.textContent)) return clean(forLabel.textContent);
             }
             const labelledBy = el.getAttribute('aria-labelledby');
             if (labelledBy) {
-                const text = clean(labelledBy.split(/\s+/).map(id => document.getElementById(id)?.textContent || '').join(' '));
+                const root = el.getRootNode();
+                const text = clean(labelledBy.split(/\s+/).map(id => (root.getElementById?.(id) || document.getElementById(id))?.textContent || '').join(' '));
                 if (text) return text;
             }
             const wrap = el.closest('label');
@@ -6614,7 +6616,7 @@
                     .filter(t => t && !/^(select|choose|please select)\b/i.test(t));
             }
             if (type === 'radio' && el.name) {
-                return Array.from(document.querySelectorAll(`input[type="radio"][name="${CSS.escape(el.name)}"]`))
+                return Array.from(el.getRootNode().querySelectorAll(`input[type="radio"][name="${CSS.escape(el.name)}"]`))
                     .map(r => getRadioOptionText(r)).filter(Boolean);
             }
             if (tag === 'button') {
@@ -6626,7 +6628,7 @@
     }
 
     function buildAIBatchQueue(fieldTracker) {
-        const formEls = document.querySelectorAll('input, select, textarea, button[aria-haspopup="listbox"]');
+        const formEls = ns.utils.queryAllDeep('input, select, textarea, button[aria-haspopup="listbox"]');
         const batchAIFields = [];
         const queuedRadioGroups = new Set();
 
@@ -6659,7 +6661,7 @@
                 isEmpty = !btnText || btnText.includes('select') || btnText.includes('choose') || btnText.includes('please');
             } else if (type === 'radio') {
                 const groupSelector = el.name ? `input[type="radio"][name="${CSS.escape(el.name)}"]` : null;
-                const group = groupSelector ? Array.from(document.querySelectorAll(groupSelector)) : [el];
+                const group = groupSelector ? Array.from(el.getRootNode().querySelectorAll(groupSelector)) : [el];
                 isEmpty = group.every(radio => !radio.checked);
             } else {
                 isEmpty = (!el.value || el.value.trim() === '' || isErroredField(el));
@@ -7407,7 +7409,7 @@
                             if (!target || p.value == null || String(p.value).trim() === '') continue;
                             // A radio answer names an option: try each radio in the group until one takes it.
                             const candidates = target.type === 'radio' && target.name
-                                ? Array.from(document.querySelectorAll(`input[type="radio"][name="${CSS.escape(target.name)}"]`))
+                                ? Array.from(target.getRootNode().querySelectorAll(`input[type="radio"][name="${CSS.escape(target.name)}"]`))
                                 : [target];
                             for (const el of candidates) {
                                 if (await fillElement(el, p.value)) {

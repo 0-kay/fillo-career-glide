@@ -47,6 +47,7 @@ const PHRASES: Record<string, string[]> = {
   "job_preferences.eeo.gender": ["gender", "gender identity", "sex"],
   "job_preferences.eeo.disability_status": ["disability status", "disability"],
   "screening:veteran": ["veteran status", "protected veteran status", "veteran"],
+  "screening:race": ["race", "ethnicity", "race ethnicity", "race or ethnicity"],
   __today: ["date signed", "signature date", "today s date", "todays date", "date of signature", "disability signature date"],
 };
 

@@ -4,6 +4,7 @@
 import { deriveCandidates, flattenProfile } from "../typesafe/candidates.ts";
 import { coerceValue } from "../typesafe/fields.ts";
 import { pickOption } from "./rules.ts";
+import { canonicalKey } from "./canonical.ts";
 import {
   type FieldDescriptor,
   fieldName,
@@ -161,8 +162,48 @@ const isScalar = (v: unknown): v is string | number | boolean =>
 interface SavedAnswer {
   key?: string;
   id?: string;
+  question?: string;
   answer?: unknown;
   enabled?: boolean;
+}
+
+/**
+ * Where else a value may live. Config and rules name one path, but real profiles differ:
+ * the app stores EEO answers only as screening answers, saves the personal site as
+ * `portfolio`, and older/parsed profiles use snake_case keys.
+ */
+const PATH_ALIASES: Record<string, string[]> = {
+  "job_preferences.eeo.gender": ["screening:gender"],
+  "job_preferences.eeo.disability_status": ["screening:disability"],
+  "job_preferences.eeo.veteran_status": ["screening:veteran"],
+  "job_preferences.eeo.race": ["screening:race"],
+  "personal_details.website": ["personal_details.portfolio"],
+  "personal_details.portfolio": ["personal_details.website"],
+  "personal_details.city": ["personal_details.address.city"],
+  "personal_details.full_name": ["personal_details.fullName"],
+  // The app never stores a phone country code; pickers such as Workday's match the country name.
+  "personal_details.countryPhoneCode": ["personal_details.address.country"],
+};
+
+/** Education dates are saved as { year, month }: "06/2018", or "2018" without a month. */
+function formatDateParts(v: unknown): string | null {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return null;
+  const d = v as { year?: unknown; month?: unknown };
+  if (!("year" in d) && !("month" in d)) return null;
+  const year = String(d.year ?? "").trim();
+  const month = String(d.month ?? "").trim();
+  if (!year) return null;
+  return /^\d{1,2}$/.test(month) ? `${month.padStart(2, "0")}/${year}` : year;
+}
+
+/** snake_case <-> camelCase for the last path segment (job_title <-> jobTitle). */
+function caseVariant(path: string): string | null {
+  const i = path.lastIndexOf(".");
+  const last = path.slice(i + 1);
+  const alt = last.includes("_")
+    ? last.replace(/_([a-z])/g, (_, c) => c.toUpperCase())
+    : /[A-Z]/.test(last) ? last.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`) : null;
+  return alt ? path.slice(0, i + 1) + alt : null;
 }
 
 /** Saved screening answers, keyed by their stable key (never by array position). */
@@ -172,10 +213,21 @@ export function screeningAnswers(profile: unknown): SavedAnswer[] {
 }
 
 export function resolvePath(profile: unknown, path: string, today = new Date()): string | number | boolean | null {
+  const v = resolveOne(profile, path, today);
+  if (v !== null) return v;
+  for (const alt of [...(PATH_ALIASES[path] ?? []), caseVariant(path)]) {
+    if (!alt) continue;
+    const w = resolveOne(profile, alt, today);
+    if (w !== null) return w;
+  }
+  return null;
+}
+
+function resolveOne(profile: unknown, path: string, today: Date): string | number | boolean | null {
   if (path === "__today") return today.toISOString().slice(0, 10);
   if (path.startsWith("screening:")) {
     const key = path.slice("screening:".length);
-    const hit = screeningAnswers(profile).find((a) => a.enabled !== false && (a.key ?? a.id) === key);
+    const hit = screeningAnswers(profile).find((a) => a.enabled !== false && canonicalKey(a) === key);
     return hit && isScalar(hit.answer) && String(hit.answer).trim() ? hit.answer : null;
   }
   if (path === "__current_company") {
@@ -189,6 +241,8 @@ export function resolvePath(profile: unknown, path: string, today = new Date()):
 
   const v = getPath(profile, path);
   if (isScalar(v) && String(v).trim() !== "") return v;
+  const date = formatDateParts(v);
+  if (date) return date;
 
   // Older profiles have no fullName; compose it rather than leave the field blank.
   if (path === "personal_details.fullName" || path === "name") {

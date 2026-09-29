@@ -71,8 +71,15 @@ const loadScript = (src) => new Promise((res, rej) => {
   document.head.appendChild(s);
 });
 
+// Fixtures may hold controls inside (declarative) shadow roots, as SmartRecruiters and Workday do.
+function deepAll(root, selector, out = []) {
+  out.push(...root.querySelectorAll(selector));
+  root.querySelectorAll('*').forEach((el) => { if (el.shadowRoot) deepAll(el.shadowRoot, selector, out); });
+  return out;
+}
+
 function labelFor(el) {
-  const byFor = el.id && document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
+  const byFor = el.id && el.getRootNode().querySelector(`label[for="${CSS.escape(el.id)}"]`);
   const txt = (byFor?.textContent || el.closest('label')?.textContent ||
     el.closest('li, .application-question, .field, .application-field, div')?.textContent || '');
   return txt.replace(/\s+/g, ' ').trim().slice(0, 60);
@@ -86,14 +93,14 @@ function snapshot() {
     const root = yes.closest('[data-field-path]');
     rows.push({ key: root?.getAttribute('data-field-path') || '', type: 'yesno', label: (root?.querySelector('label')?.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 60), value: pressed ? pressed.getAttribute('data-option') : '', filled: !!pressed });
   }
-  for (const el of document.querySelectorAll('#fixture input, #fixture select, #fixture textarea')) {
+  for (const el of deepAll(document.getElementById('fixture'), 'input, select, textarea')) {
     const type = (el.type || el.tagName).toLowerCase();
     if (type === 'hidden' || type === 'submit' || type === 'button') continue;
     if (type === 'radio' || type === 'checkbox') {
       const key = type + ':' + (el.name || el.id);
       if (seenGroups.has(key)) continue; seenGroups.add(key);
-      const group = el.name ? [...document.querySelectorAll(`#fixture input[name="${CSS.escape(el.name)}"]`)] : [el];
-      const optText = (g) => (document.querySelector(`label[for="${CSS.escape(g.id)}"]`)?.textContent || g.closest('label')?.textContent || g.value || '').replace(/\s+/g, ' ').trim().slice(0, 50);
+      const group = el.name ? [...el.getRootNode().querySelectorAll(`input[name="${CSS.escape(el.name)}"]`)] : [el];
+      const optText = (g) => (el.getRootNode().querySelector(`label[for="${CSS.escape(g.id)}"]`)?.textContent || g.closest('label')?.textContent || g.value || '').replace(/\s+/g, ' ').trim().slice(0, 50);
       const on = group.filter((g) => g.checked).map(optText);
       rows.push({ key: el.name || el.id, type, label: labelFor(el), value: on.join(', '), filled: on.length > 0 });
       continue;
@@ -126,7 +133,8 @@ window.runFill = runFill;
 
 (async () => {
   try {
-    document.getElementById('fixture').innerHTML = await (await realFetch(`fixtures/${fixture}.html`)).text();
+    // setHTMLUnsafe attaches declarative shadow roots (<template shadowrootmode>); innerHTML would not.
+    document.getElementById('fixture').setHTMLUnsafe(await (await realFetch(`fixtures/${fixture}.html`)).text());
     // &src=<dir> loads content scripts from another directory (e.g. a baseline checkout).
     const src = q.get('src') || '../../extension/content';
     for (const s of SCRIPTS) await loadScript(`${src}/${s}.js`);

@@ -14,6 +14,7 @@
 // confidence by 10+ points).
 
 import { choice, NO_MATCH, toPercent } from "../typesafe/questions.ts";
+import { canonicalKey } from "./canonical.ts";
 import { isChoice, type Questions, type SystemOneFn } from "../typesafe/types.ts";
 
 export interface SavedAnswer {
@@ -33,7 +34,8 @@ export interface ScreeningItem {
 
 export type ScreeningResult =
   | { kind: "option"; value: string; confidence: number }
-  | { kind: "saved"; key: string; value: string; confidence: number };
+  /** key is the canonical question key, or null for a question the applicant wrote (not cacheable). */
+  | { kind: "saved"; key: string | null; value: string; confidence: number };
 
 const YES_NO_START = /^(are|do|does|did|will|would|can|could|have|has|is|were|was|should|may)\b/i;
 
@@ -120,8 +122,7 @@ export async function answerScreening(
       if (options[n] !== undefined) out.set(item.index, { kind: "option", value: options[n], confidence });
     } else {
       const sa = saved[n];
-      const savedKey = sa?.key ?? sa?.id;
-      if (sa && savedKey) out.set(item.index, { kind: "saved", key: savedKey, value: String(sa.answer), confidence });
+      if (sa) out.set(item.index, { kind: "saved", key: canonicalKey(sa), value: String(sa.answer), confidence });
     }
   }
   return out;

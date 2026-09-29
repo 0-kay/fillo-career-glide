@@ -256,6 +256,8 @@
         'personal_details.country': pd.country || address.country,
         'personal_details.postalCode': pd.postalCode || pd.postal_code || address.postalCode || address.postal_code,
         'personal_details.website': pd.website || pd.portfolio,
+        // The app never stores a phone country code; Workday's picker matches the country name.
+        'personal_details.countryPhoneCode': address.country || pd.country,
       };
       const aliasValue = aliases[path];
       return aliasValue === undefined || aliasValue === '' ? null : aliasValue;
@@ -281,6 +283,11 @@
       if (flattened.length > 0) return Array.from(new Set(flattened)).join(', ');
     }
 
+    // Education dates are saved as { year, month }. Unconverted, they reach inputs as "[object Object]".
+    if (cur && typeof cur === 'object' && !Array.isArray(cur) && ('year' in cur || 'month' in cur)) {
+      return utils.formatDateParts(cur);
+    }
+
     // Special handling for array fields - return first element
     // Common array fields: work_experience, education_history, projects, etc.
     if (Array.isArray(cur) && cur.length > 0) {
@@ -288,6 +295,23 @@
     }
 
     return cur;
+  };
+
+  // { year: "2018", month: "6" } -> "06/2018"; year only -> "2018"; neither -> null.
+  utils.formatDateParts = function(d){
+    const year = String(d?.year ?? '').trim();
+    const month = String(d?.month ?? '').trim();
+    if (!year) return null;
+    return /^\d{1,2}$/.test(month) ? `${month.padStart(2, '0')}/${year}` : year;
+  };
+
+  // querySelectorAll that also searches open shadow roots. Web-component ATSs (SmartRecruiters'
+  // spl-*, parts of Workday) render every control inside shadow DOM, where document.querySelectorAll
+  // finds nothing.
+  utils.queryAllDeep = function(selector, root = document){
+    const out = [...root.querySelectorAll(selector)];
+    root.querySelectorAll('*').forEach(el => { if (el.shadowRoot) out.push(...utils.queryAllDeep(selector, el.shadowRoot)); });
+    return out;
   };
 
   utils.isElementVisible = function(el){

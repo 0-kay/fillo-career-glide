@@ -29,17 +29,20 @@ generic path. Results land in `window.__result` and the side panel (`✔` = fill
 | `lever` | `lever` | static form |
 | `greenhouse` | `greenhouse` | React-select dropdowns are inert in a static snapshot |
 | `ashby` | `ashby` | Yes/No button pairs, radio EEO groups |
+| `smartrecruiters` | `smartrecruiters` | every control is inside open shadow roots (0 in the light DOM) |
+| `jobvite` | none (no config) | native selects; "Work Status" must stay blank |
 | `workable` | none needed | negative test: job-specific Yes/No skill questions must stay blank |
 
-`profile.json` is in the extension's real profile shape (the `application_profiles` row),
-with screening answers copied from `ScreeningQuestionsDialog` defaults.
-
 ## Adding a fixture
-Open the real application page in a browser, let it render, and save the form's controls with
-their real attributes and labels to `fixtures/<name>.html` (body content only, no scripts).
-Public pages only, no personal data. Fixtures are static: widgets that need the page's own
-JavaScript (menus, autocomplete) can't be exercised here, so verify those in a real browser
-with the extension loaded unpacked.
+Run `capture.js` in the DevTools console on the application page **before filling anything in**
+(or as a DevTools snippet). It downloads `<host>.html`; move it to `fixtures/`. It keeps open shadow
+roots as declarative shadow DOM (the harness mounts fixtures with `setHTMLUnsafe`), records which
+elements were hidden as inline `display:none`, drops scripts/styles/media, trims very long custom
+option lists, and clears every value. Then add `expected/<name>.json` and a row to `RUNS` in
+`eval.html`. Fixtures are static: widgets that need the page's own JavaScript (menus,
+autocomplete) can't be exercised here, so verify those in a real browser with the extension
+loaded unpacked.
 
 ## Not covered
-iCIMS (application is behind account creation), Workday (tenant-specific, needs a login).
+iCIMS and Workday: both show the application only after creating a candidate account, so the
+fixtures have to be captured by someone signed in (use `capture.js`).

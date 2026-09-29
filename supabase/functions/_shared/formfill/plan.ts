@@ -173,13 +173,13 @@ export async function buildPlan(
       signature: fieldSignature(d),
       source: "screening",
       confidence: r.confidence,
-      dataPath: r.kind === "saved" ? `screening:${r.key}` : null,
+      dataPath: r.kind === "saved" && r.key ? `screening:${r.key}` : null,
     });
     answered.add(i);
     stats.fromScreening++;
     // Only a verbatim saved answer is cacheable. A derived option depends on this applicant's
     // answers, so the question -> option decision cannot be shared.
-    if (r.kind === "saved" && r.confidence >= MIN_LEARN_CONFIDENCE) {
+    if (r.kind === "saved" && r.key && r.confidence >= MIN_LEARN_CONFIDENCE) {
       const l = learnable(d, `screening:${r.key}`, r.confidence, cache.demoted.get(i)?.id);
       if (l) learned.push(l);
     }
