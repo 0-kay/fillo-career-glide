@@ -33,6 +33,13 @@ generic path. Results land in `window.__result` and the side panel (`✔` = fill
 | `jobvite` | none (no config) | native selects; "Work Status" must stay blank |
 | `workable` | none needed | negative test: job-specific Yes/No skill questions must stay blank |
 
+## Account screens (Workday, iCIMS)
+`auth.html` runs `content/ats-auth.js` against `fixtures/auth/*` (Workday chooser, sign-in and
+create-account screens captured from a live tenant without submitting anything; iCIMS's email
+step; a synthetic iCIMS create step) and checks detection, filling, the honeypot guard and the
+password generator. `widget.html?screen=…&plan=…` previews the widget's account card with stubbed
+extension APIs.
+
 ## Adding a fixture
 Run `capture.js` in the DevTools console on the application page **before filling anything in**
 (or as a DevTools snippet). It downloads `<host>.html`; move it to `fixtures/`. It keeps open shadow

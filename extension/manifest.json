@@ -35,6 +35,7 @@
         "content/ai.js",
         "content/planner.js",
         "content/engine.js",
+        "content/ats-auth.js",
         "content/messaging.js"
       ],
       "css": [

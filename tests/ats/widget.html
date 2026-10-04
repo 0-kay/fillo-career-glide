@@ -1,0 +1,52 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Fillo widget preview</title>
+<style>body { font: 14px system-ui, sans-serif; margin: 16px; min-height: 700px; background: #f3f4f6; }</style>
+</head>
+<body>
+<p>Widget preview with stubbed extension APIs.
+  <code>?screen=chooser|sign-in|create-account|reset-password|enter-email|verify-email&amp;plan=pro|free&amp;known=1&amp;sso=google,linkedin</code></p>
+<script>
+const q = new URLSearchParams(location.search);
+const screen = q.get('screen') || 'create-account';
+const plan = q.get('plan') || 'pro';
+const state = {
+  platform: 'workday', screen, tenant: 'nvidia.wd5.myworkdayjobs.com', tenantName: 'Nvidia',
+  sso: (q.get('sso') ?? (screen === 'chooser' ? 'google,linkedin' : '')).split(',').filter(Boolean),
+  hasEmailField: true, hasPasswordField: true, hasConfirmField: screen === 'create-account', emailChoice: screen === 'chooser',
+};
+let sessionPw = null;
+const listeners = [];
+window.chrome = {
+  runtime: {
+    id: 'preview', getURL: (p) => `../../extension/${p}`,
+    onMessage: { addListener: (fn) => listeners.push(fn) },
+    sendMessage(msg, cb) {
+      const reply = (r) => setTimeout(() => cb && cb(r), 50);
+      switch (msg.action) {
+        case 'FILLO_WIDGET_GET_PROFILES': return reply({ success: true, profiles: [{ id: 'p1', resume_metadata: { profile_name: 'Amara Okonkwo' }, personal_details: { email: 'amara.okonkwo@example.com' }, completeness: 90 }] });
+        case 'FILLO_AUTH_GET_STATE': return reply({ success: true, state, plan, account: q.get('known') ? { email: 'amara.okonkwo@example.com', status: 'active' } : null, hasSessionPassword: !!sessionPw });
+        case 'FILLO_AUTH_REQUEST_FILL':
+          if (plan !== 'pro') return reply({ ok: false, error: 'pro_required' });
+          if (msg.mode === 'create') sessionPw = 'Xk7#pR2m-Qa9!vT4wE8z';
+          return reply({ ok: true, filled: msg.mode === 'create' ? ['email', 'password', 'confirm'] : ['email'] });
+        case 'FILLO_AUTH_SHOW_PASSWORD': return reply({ password: sessionPw });
+        default: return reply({ ok: true });
+      }
+    },
+  },
+  storage: {
+    local: { get: (k, cb) => { const r = { FILLO_AUTH_TOKEN: 'preview' }; cb ? cb(r) : Promise.resolve(r); }, set: () => {} },
+    onChanged: { addListener() {} },
+  },
+};
+</script>
+<script src="../../extension/content/widget.js"></script>
+<script>
+// Open the panel so the card is visible.
+setTimeout(() => document.getElementById('fillo-widget-host')?.shadowRoot.getElementById('bubble')?.click(), 200);
+</script>
+</body>
+</html>
