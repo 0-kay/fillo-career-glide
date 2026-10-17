@@ -1,12 +1,12 @@
 // Shared by the auth email hook and the OAuth signup notifier.
 
-// Must be a public URL: mail clients can't load images from localhost or the app bundle.
-const LOGO = "https://www.fylloai.com/fyllo-mark.png";
+import { esc, FONT, LOGO, PURPLE } from "./email-theme.ts";
+
+export { esc };
 export const BRAND = "#4B0082";
 export const FROM = Deno.env.get("MAIL_FROM") ?? "Fyllo <kayode@fylloai.com>";
 export const NOTIFY = (Deno.env.get("NOTIFY_EMAIL") ?? "ojedelekayode21@gmail.com,kayode@fylloai.com").split(",").map((e) => e.trim());
 
-export const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
 export function layout(title: string, body: string, button?: { label: string; href: string }) {
   return `<!doctype html><html><body style="margin:0;background:#F6F4F9;font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif;color:#1a1a2e">
@@ -46,8 +46,6 @@ export function safeSiteUrl(host: string): string {
   return "https://www.fylloai.com";
 }
 
-const PURPLE = "#8A2BE2";
-const FONT = "-apple-system,'Segoe UI',Helvetica,Arial,sans-serif";
 
 export function welcomeHtml(first: string | undefined, site: string) {
   const dash = `${site}/dashboard`;
