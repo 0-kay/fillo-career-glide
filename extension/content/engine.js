@@ -6839,7 +6839,18 @@
             // complete (offline, not signed in, function not deployed yet), we don't
             // block the core feature over a billing hiccup — only an explicit `false`
             // stops the run.
-            const fillAllowed = await ns.utils.callSupabaseRpc('can_run_fill');
+            //
+            // The entitlement check also covers admin suspend/revoke and the platform
+            // kill switch; the server holds the real decision (and re-checks it on the AI
+            // and planner endpoints), this only avoids starting a run that will be refused.
+            const entitlement = await ns.utils.getEntitlement();
+            if (entitlement && entitlement.allowed === false) {
+                const blockedMessage = entitlement.message || 'Autofill is unavailable right now.';
+                ns.utils.showNotification(`⛔ ${blockedMessage}`, 'error');
+                relayLog('info', `Fill blocked by entitlement: ${entitlement.reason || entitlement.status}`);
+                return { filled: 0, message: blockedMessage };
+            }
+            const fillAllowed = entitlement ? true : await ns.utils.callSupabaseRpc('can_run_fill');
             if (fillAllowed === false) {
                 ns.utils.showNotification('⭐ Free plan limit reached (5 fills/month). Upgrade to Pro for unlimited autofills.', 'error');
                 relayLog('info', 'Fill blocked: free-tier monthly quota reached');
@@ -7512,6 +7523,7 @@
             // metering, so a rare double-count (e.g. the iCIMS re-fill below) is fine.
             if (totalFilled > 0) {
                 ns.utils.callSupabaseRpc('log_fill_usage').catch(() => {});
+                ns.utils.invalidateEntitlement();
             }
 
             // Step 8.5: iCIMS post-parse watcher.

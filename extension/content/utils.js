@@ -53,6 +53,46 @@
     }
   };
 
+  // Server-side entitlement (status, balance, kill switch). The answer is cached for about
+  // a minute so a fill doesn't pay a round trip per call; a block is never served from the
+  // cache, so reinstating a user takes effect on their next fill. A revoked answer is also
+  // remembered in storage: once the account's tokens stop refreshing the RPC can no longer
+  // answer, and falling back to "allowed" would let a cached client keep going.
+  const ENTITLEMENT_TTL_MS = 60 * 1000;
+  let entitlementCache = null;
+
+  utils.invalidateEntitlement = function(){ entitlementCache = null; };
+
+  utils.getEntitlement = async function(){
+    try {
+      const now = Date.now();
+      if (entitlementCache && now - entitlementCache.at < ENTITLEMENT_TTL_MS && entitlementCache.value.allowed) {
+        return entitlementCache.value;
+      }
+      const { FILLO_AUTH_TOKEN } = await chrome.storage.local.get('FILLO_AUTH_TOKEN');
+      if (!FILLO_AUTH_TOKEN) {
+        await chrome.storage.local.remove('FILLO_ENTITLEMENT');
+        return null;
+      }
+
+      const value = await utils.callSupabaseRpc('get_my_entitlement');
+      if (value && typeof value === 'object' && typeof value.allowed === 'boolean') {
+        entitlementCache = { at: now, value };
+        await chrome.storage.local.set({ FILLO_ENTITLEMENT: { status: value.status, allowed: value.allowed, reason: value.reason, message: value.message } });
+        return value;
+      }
+
+      const { FILLO_ENTITLEMENT } = await chrome.storage.local.get('FILLO_ENTITLEMENT');
+      if (FILLO_ENTITLEMENT && FILLO_ENTITLEMENT.status === 'REVOKED') {
+        return { allowed: false, status: 'REVOKED', reason: 'revoked', message: FILLO_ENTITLEMENT.message || 'Your access has been removed. Contact support.' };
+      }
+      return null;
+    } catch (e) {
+      console.warn('[Fillo] entitlement check failed (ignored):', e?.message || e);
+      return null;
+    }
+  };
+
   utils.parseMatchTableRow = function(row){
     if (!row) return null;
 

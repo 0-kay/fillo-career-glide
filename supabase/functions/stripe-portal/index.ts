@@ -13,7 +13,7 @@ import { getServiceClient } from "../_shared/stripe/supabase.ts";
 serve(async (req: Request) => {
   if (req.method === "OPTIONS") return preflight();
 
-  const auth = await requireUser(req);
+  const auth = await requireUser(req, { gate: "none" });
   if (auth instanceof Response) return auth;
 
   try {

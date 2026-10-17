@@ -3,6 +3,7 @@ import type Stripe from "https://esm.sh/stripe@18.5.0?target=deno";
 import { readEnv } from "../_shared/typesafe/client.ts";
 import { getStripe } from "../_shared/stripe/client.ts";
 import { getServiceClient } from "../_shared/stripe/supabase.ts";
+import { sendLifecycleEmail } from "../_shared/lifecycle-email.ts";
 
 /**
  * Stripe calls this directly (no Supabase session) to report subscription lifecycle
@@ -44,6 +45,7 @@ serve(async (req: Request) => {
   const db = getServiceClient();
 
   async function upsertFromSubscription(sub: Stripe.Subscription, fallbackUserId?: string) {
+    const eventId = event.id;
     const userId = (sub.metadata?.supabase_user_id as string | undefined) ?? fallbackUserId;
     const item = sub.items.data[0];
     const plan = ["active", "trialing"].includes(sub.status) ? "pro" : "free";
@@ -59,11 +61,23 @@ serve(async (req: Request) => {
         : null,
     };
 
+    // Read the plan we're about to overwrite so we only email on a real change.
+    const lookup = userId
+      ? db.from("profiles").select("id, plan").eq("id", userId).maybeSingle()
+      : db.from("profiles").select("id, plan").eq("stripe_customer_id", patch.stripe_customer_id).maybeSingle();
+    const { data: before } = await lookup;
+
     const query = userId
       ? db.from("profiles").update(patch).eq("id", userId)
       : db.from("profiles").update(patch).eq("stripe_customer_id", patch.stripe_customer_id);
     const { error } = await query;
     if (error) throw error;
+
+    // Never throws; a mail problem must not make Stripe retry a webhook that already succeeded.
+    if (before?.id && before.plan !== plan) {
+      if (plan === "pro") await sendLifecycleEmail(db, before.id, `sub:${sub.id}`, { kind: "pro_activated", source: "payment" });
+      else if (before.plan === "pro") await sendLifecycleEmail(db, before.id, `event:${eventId}`, { kind: "pro_ended" });
+    }
   }
 
   try {
