@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import { useProfiles } from '@/hooks/useProfiles';
+import { screeningProgress } from '@/utils/profileCompleteness';
 import { useFilloExtension } from '@/hooks/useFilloExtension';
 import Onboarding from '@/components/Onboarding';
 import ProfileList from '@/components/ProfileList';
@@ -69,10 +70,9 @@ const Dashboard = () => {
         : 'Your profile is ready. Add the extension to start filling.';
 
   // Screening answers summary (from the most recently updated profile)
-  const answers: any[] = ((profiles[0]?.job_preferences as any)?.screening_answers || []).filter((a: any) => a?.enabled !== false);
-  const answered = answers.filter(a => String(a.answer ?? '').trim() !== '').length;
-  const blank = answers.length - answered;
-  const answeredPct = answers.length ? Math.round((answered / answers.length) * 100) : 0;
+  const { answered, total, pct: answeredPct } = screeningProgress((profiles[0]?.job_preferences as any)?.screening_answers);
+  const blank = total - answered;
+  const answers = { length: total };
 
   return (
     <AppShell>

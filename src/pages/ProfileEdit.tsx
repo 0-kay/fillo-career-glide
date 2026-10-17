@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
+import { computeCompleteness } from '@/utils/profileCompleteness';
 import { Link, useParams, useNavigate } from 'react-router-dom';
 import { useProfiles } from '@/hooks/useProfiles';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/hooks/useAuth';
+import { supabase } from '@/integrations/supabase/client';
 import ScreeningQuestionsDialog, { ScreeningAnswer } from '@/components/ScreeningQuestionsDialog';
 import AppShell from '@/components/fyllo/AppShell';
 import '@/components/fyllo/fyllo.css';
@@ -42,6 +44,17 @@ const ProfileEdit = () => {
   const [showScreeningDialog, setShowScreeningDialog] = useState(false);
   const [section, setSection] = useState('personal');
   const [saved, setSaved] = useState(false);
+  const [fileUrl, setFileUrl] = useState<string | null>(null);
+  const [showOriginal, setShowOriginal] = useState(true);
+
+  // The résumé the user uploaded lives in private storage; sign a short-lived link to show it.
+  const storedPath = formData?.resumeMetadata?.file_path as string | undefined;
+  useEffect(() => {
+    if (section !== 'resume' || !storedPath || fileUrl) return;
+    supabase.storage.from('resumes').createSignedUrl(storedPath, 3600).then(({ data }) => {
+      if (data?.signedUrl) setFileUrl(data.signedUrl);
+    });
+  }, [section, storedPath, fileUrl]);
 
   useEffect(() => {
     if (authLoading) return; // Wait until authentication check is complete
@@ -192,6 +205,13 @@ const ProfileEdit = () => {
           last_name: nameParts.length > 1 ? nameParts[nameParts.length - 1] : '',
         } : {}),
         personal_details: personalDetails,
+        completeness: computeCompleteness({
+          personalDetails,
+          workExperience: formData.workExperience,
+          educationHistory: formData.educationHistory,
+          technicalSkills: formData.technicalSkills,
+          screeningAnswers: formData.screeningAnswers,
+        }),
         work_experience: formData.workExperience,
         education_history: formData.educationHistory,
         technical_skills: formData.technicalSkills,
@@ -256,12 +276,13 @@ const ProfileEdit = () => {
   const tools: string[] = fd?.toolsTechnologies?.all || [];
   const len = (k: string) => (fd?.[k] || []).length;
 
-  const completeness = (() => {
-    const q = fd?.resumeMetadata?.extractionQuality?.dataCompleteness;
-    if (q !== undefined && q !== null && !isNaN(Number(q))) return Math.round(Number(q));
-    const checks = [pd.fullName, pd.email, pd.phone, pd.summary, pd.address?.city, skillsAll.length, len('workExperience'), len('educationHistory')];
-    return Math.round((checks.filter(Boolean).length / checks.length) * 100);
-  })();
+  const completeness = computeCompleteness({
+    personalDetails: pd,
+    workExperience: fd?.workExperience,
+    educationHistory: fd?.educationHistory,
+    technicalSkills: fd?.technicalSkills,
+    screeningAnswers: fd?.screeningAnswers,
+  });
 
   const sections = [
     { id: 'personal', label: 'Personal details', meta: '' },
@@ -299,6 +320,7 @@ const ProfileEdit = () => {
   }
 
   const fileName = fd.resumeMetadata?.fileName;
+  const isPdf = fd.resumeMetadata?.fileType === 'application/pdf' || /\.pdf$/i.test(fileName || '');
   const initial = ((fd.profileName || 'P').trim()[0] || 'P').toUpperCase();
   const saveLabel = saving ? 'Saving…' : saved ? 'Saved' : 'Save changes';
   const addr = pd.address || {};
@@ -324,7 +346,11 @@ const ProfileEdit = () => {
         <div style={{ display: 'flex', alignItems: 'center', gap: 18 }}>
           <div aria-hidden="true" className="sg" style={{ width: 64, height: 64, borderRadius: 18, background: '#8A2BE2', color: '#fff', fontWeight: 600, fontSize: 24, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{initial}</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <h1 className="sg" style={{ margin: 0, fontWeight: 500, fontSize: 'clamp(30px,3.4vw,42px)', lineHeight: 1.05, letterSpacing: '-0.035em' }}>{fd.profileName || 'Untitled Profile'}</h1>
+            <h1 style={{ margin: 0 }}>
+              <input className="sg" aria-label="Profile name (click to rename)" value={fd.profileName || ''} placeholder="Untitled Profile"
+                onChange={(e) => setFormData((p: any) => ({ ...p, profileName: e.target.value }))}
+                style={{ width: '100%', minWidth: 220, border: 0, borderBottom: '1px dashed #D9D4E3', background: 'transparent', padding: 0, color: 'inherit', fontWeight: 500, fontSize: 'clamp(30px,3.4vw,42px)', lineHeight: 1.05, letterSpacing: '-0.035em', outline: 'none' }} />
+            </h1>
             {fileName && <span style={{ fontSize: 14, color: '#6C6577' }}>From {fileName} · Default profile</span>}
           </div>
         </div>
@@ -478,9 +504,21 @@ const ProfileEdit = () => {
                 <div style={{ width: 34, height: 40, borderRadius: 5, border: '1px solid rgba(23,19,33,.12)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center', paddingBottom: 5, fontSize: 8, fontWeight: 600, color: '#4B0082', flex: 'none' }}>PDF</div>
                 <div style={{ flex: '1 1 200px', minWidth: 0 }}>
                   <div style={{ fontSize: 15, fontWeight: 500 }}>{fileName || 'Résumé preview'}</div>
-                  <div style={{ fontSize: 13, color: '#6C6577' }}>Preview built from your profile data</div>
+                  <div style={{ fontSize: 13, color: '#6C6577' }}>{isPdf && fileUrl && showOriginal ? 'The file you uploaded' : 'Preview built from your profile data'}</div>
                 </div>
+                {isPdf && fileUrl && (
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    <button type="button" className={`fy-btn ${showOriginal ? 'fy-dark' : 'fy-outline'}`} onClick={() => setShowOriginal(true)} style={{ height: 36, padding: '0 14px', borderRadius: 999, fontSize: 13 }}>Your file</button>
+                    <button type="button" className={`fy-btn ${showOriginal ? 'fy-outline' : 'fy-dark'}`} onClick={() => setShowOriginal(false)} style={{ height: 36, padding: '0 14px', borderRadius: 999, fontSize: 13 }}>From profile data</button>
+                  </div>
+                )}
+                {fileUrl && (
+                  <a href={fileUrl} target="_blank" rel="noreferrer" className="fy-btn fy-outline" style={{ height: 36, padding: '0 14px', borderRadius: 999, fontSize: 13 }}>Open original</a>
+                )}
               </div>
+              {isPdf && fileUrl && showOriginal ? (
+                <iframe title="Uploaded résumé" src={fileUrl} style={{ display: 'block', width: '100%', height: 'min(80vh,900px)', border: 0, background: '#F3F1F6' }} />
+              ) : (
               <div style={{ background: '#F3F1F6', padding: 'clamp(16px,4vw,40px)', display: 'flex', justifyContent: 'center' }}>
                 <article aria-label="Résumé preview" style={{ width: '100%', maxWidth: 600, minHeight: 500, background: '#fff', boxShadow: '0 1px 2px rgba(23,19,33,.08),0 12px 32px -12px rgba(23,19,33,.2)', padding: 'clamp(22px,5%,44px)', display: 'flex', flexDirection: 'column', gap: 18, fontFamily: "Georgia,'Times New Roman',serif", color: '#222', overflow: 'hidden' }}>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 4, borderBottom: '1px solid #DDD', paddingBottom: 14 }}>
@@ -518,6 +556,7 @@ const ProfileEdit = () => {
                   )}
                 </article>
               </div>
+              )}
             </section>
           )}
 
