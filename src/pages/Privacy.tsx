@@ -19,7 +19,7 @@ const Privacy = () => {
       <main className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
         <div className="bg-white rounded-2xl border shadow-sm p-8 sm:p-12">
           <h1 className="text-3xl sm:text-4xl font-display text-gray-900 mb-2">Privacy Policy</h1>
-          <p className="text-sm text-gray-500 mb-10">Last updated: October 4, 2026</p>
+          <p className="text-sm text-gray-500 mb-10">Last updated: October 12, 2026</p>
 
           <div className="prose prose-slate max-w-none prose-headings:font-display prose-a:text-brand">
             <p>
@@ -99,6 +99,19 @@ const Privacy = () => {
                 Supabase, our hosting provider, over HTTPS.
               </li>
             </ul>
+
+            <h2>Administrator access</h2>
+            <p>
+              A small number of Fyllo administrators use an internal dashboard to support you and run the
+              service: they can see your account email, plan, access status, how many fills you've used and
+              been granted (with the reason for each change), when you were last active, and the company,
+              role title and status of applications you've logged. They can add or remove fills, pause or
+              remove access, and delete your activity data or account. They can't see your profile
+              contents, the values Fyllo fills into forms, or links and notes you've saved. Administrators
+              sign in with multi-factor authentication, and every action they take, including viewing your
+              account, is recorded in an audit log. Fill counts and the record of changes to them are kept as
+              anonymous records after an account is deleted.
+            </p>
 
             <h2>What we don't do</h2>
             <ul>

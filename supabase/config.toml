@@ -5,3 +5,6 @@ verify_jwt = true
 
 [functions.send-auth-email]
 verify_jwt = false
+
+[functions.process-resume]
+verify_jwt = true

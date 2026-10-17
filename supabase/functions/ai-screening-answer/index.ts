@@ -215,7 +215,7 @@ function skipAnswer(index: number, questionText: string) {
 serve(async (req: any) => {
   if (req.method === "OPTIONS") return preflight();
 
-  const auth = await requireUser(req);
+  const auth = await requireUser(req, { gate: "fill" });
   if (auth instanceof Response) return auth;
 
   try {

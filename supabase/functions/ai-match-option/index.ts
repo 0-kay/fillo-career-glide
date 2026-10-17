@@ -9,7 +9,7 @@ import { systemOne } from "../_shared/typesafe/runtime.deno.ts";
 serve(async (req: Request) => {
   if (req.method === "OPTIONS") return preflight();
 
-  const auth = await requireUser(req);
+  const auth = await requireUser(req, { gate: "fill" });
   if (auth instanceof Response) return auth;
 
   try {

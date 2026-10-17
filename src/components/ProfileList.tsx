@@ -2,11 +2,14 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useProfiles } from '@/hooks/useProfiles';
 import { useToast } from '@/hooks/use-toast';
+import { supabase } from '@/integrations/supabase/client';
 import DeleteProfileDialog from './DeleteProfileDialog';
 import ResumeUpload from './ResumeUpload';
 import './fyllo/fyllo.css';
 
 const PENDING = ['Pending', 'Uploading', 'Processing'];
+// The server finishes (or fails) a parse within ~2.5 minutes; anything older was cut off.
+const STALE_PARSE_MS = 5 * 60 * 1000;
 const CHIPS = ['#8A2BE2', '#171321'];
 
 interface ProfileListProps {
@@ -41,6 +44,13 @@ const ProfileList = ({ isPro = true, onUpgrade }: ProfileListProps) => {
   });
 
   const handleEdit = (profileId: string) => navigate(`/profile/edit/${profileId}`);
+  // The file is already in storage, so a retry only asks the server to parse it again.
+  const retryParsing = async (profileId: string) => {
+    const { error } = await supabase.functions.invoke('process-resume', { body: { profileId } });
+    if (error) toast({ title: "Couldn't restart processing", description: "Please try again in a moment.", variant: "destructive" });
+    refetch();
+  };
+
   const handleDelete = (profileId: string, profileName: string) =>
     setDeleteDialog({ isOpen: true, profileId, profileName });
 
@@ -134,8 +144,11 @@ const ProfileList = ({ isPro = true, onUpgrade }: ProfileListProps) => {
             const st = getProfileStats(profile);
             const summary = getProfileSummary(profile);
             const status = (profile.resume_metadata as any)?.parsing_status;
-            const parsing = PENDING.includes(status);
-            const failed = status === 'Failed';
+            // A tab closed mid-parse leaves the status stuck; treat old pending rows as failed.
+            const uploadedAt = Date.parse((profile.resume_metadata as any)?.uploadDate || '');
+            const stale = PENDING.includes(status) && !isNaN(uploadedAt) && Date.now() - uploadedAt > STALE_PARSE_MS;
+            const parsing = PENDING.includes(status) && !stale;
+            const failed = status === 'Failed' || stale;
             const ready = !parsing && !failed;
             const low = ready && profile.completeness < 75;
             const stats = [
@@ -162,7 +175,11 @@ const ProfileList = ({ isPro = true, onUpgrade }: ProfileListProps) => {
                   </div>
                 )}
                 {failed && (
-                  <p style={{ margin: 0, padding: '10px 12px', borderRadius: 12, background: '#FDECEA', color: '#B42318', fontSize: 13, lineHeight: 1.5 }}>We couldn't read this résumé. Open the profile to fill it in by hand, or upload it again.</p>
+                  <p style={{ margin: 0, padding: '10px 12px', borderRadius: 12, background: '#FDECEA', color: '#B42318', fontSize: 13, lineHeight: 1.5 }}>We couldn't read this résumé. Try again, open the profile to fill it in by hand, or upload it again.{' '}
+                    {(profile.resume_metadata as any)?.file_path && (
+                      <button type="button" onClick={() => retryParsing(profile.id)} style={{ border: 0, background: 'none', padding: 0, color: 'inherit', fontWeight: 500, textDecoration: 'underline', cursor: 'pointer', font: 'inherit' }}>Try again</button>
+                    )}
+                  </p>
                 )}
                 {ready && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
