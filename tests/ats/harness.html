@@ -107,7 +107,7 @@ function snapshot() {
     }
     let value = el.value || '';
     if (el.tagName === 'SELECT') value = el.selectedIndex > 0 ? el.options[el.selectedIndex].text : '';
-    rows.push({ key: el.name || el.id || '__unnamed__', type, label: labelFor(el), value, filled: value.trim() !== '' && type !== 'file' });
+    rows.push({ key: el.name || el.id || '__unnamed__', type, label: labelFor(el), value: type === 'file' ? (el.files[0]?.name || '') : value, filled: value.trim() !== '' && type !== 'file', uploaded: type === 'file' && el.files.length > 0 });
   }
   return rows;
 }
@@ -120,7 +120,9 @@ async function runFill() {
   if (pinnedPlatform) ns.domainDetector.detectPlatform = async () => pinnedPlatform;
   const t0 = performance.now();
   let result, error = null;
-  try { result = await ns.engine.handleFillForm(profile, false); } catch (e) { error = String(e && e.message || e); }
+  const resume = new URLSearchParams(location.search).has('resume')
+    ? { resumeDataUri: 'data:application/pdf;base64,JVBERi0xLjQKJSVFT0YK', resumeFileName: 'resume.pdf' } : {};
+  try { result = await ns.engine.handleFillForm(profile, false, resume); } catch (e) { error = String(e && e.message || e); }
   const rows = snapshot();
   const filled = rows.filter((r) => r.filled);
   window.__result = { fixture, platform: pinnedPlatform, server: serverMode, serverStats: window.__serverStats, ms: Math.round(performance.now() - t0), error, result, total: rows.length, filled: filled.length, rows };

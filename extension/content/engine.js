@@ -2480,10 +2480,10 @@
                     let autocompleteOptions = [];
 
                     // Helper to deeply query elements, bypassing Shadow DOM boundaries
-                    const querySelectorAllDeep = (selector, root = document) => {
+                    const queryAllDeep = (selector, root = document) => {
                         let results = Array.from(root.querySelectorAll(selector));
                         for (const el of root.querySelectorAll('*')) {
-                            if (el.shadowRoot) results = results.concat(querySelectorAllDeep(selector, el.shadowRoot));
+                            if (el.shadowRoot) results = results.concat(queryAllDeep(selector, el.shadowRoot));
                         }
                         return results;
                     };
@@ -2496,10 +2496,10 @@
                     autocompleteOptions = (await waitFor(() => {
                         let found = [];
                         if (wrapperShadow) {
-                            found = querySelectorAllDeep(optionSelector, wrapperShadow);
+                            found = queryAllDeep(optionSelector, wrapperShadow);
                         }
                         if (found.length === 0) {
-                            found = querySelectorAllDeep(optionSelector);
+                            found = queryAllDeep(optionSelector);
                         }
                         const filtered = found
                             .filter(o => isElementVisible(o))
@@ -3333,6 +3333,214 @@
             return true;
         } catch (e) {
             console.warn('[Fillo] Resume upload failed:', e);
+            return false;
+        }
+    }
+
+    /**
+     * SmartRecruiters spl-autocomplete: typing alone doesn't persist — the component clears
+     * itself unless a suggestion is clicked. Suggestions are <spl-select-option>s portalled
+     * elsewhere in the document, so they're searched document-wide. With allowFreeText a
+     * value with no matching suggestion is kept as typed (job titles, companies, schools).
+     */
+    async function fillSmartRecruitersAutocomplete(host, strVal, { allowFreeText = false } = {}) {
+        const findRealInput = (root) => {
+            const found = root.querySelector('input');
+            if (found) return found;
+            for (const child of root.querySelectorAll('*')) {
+                if (child.shadowRoot) {
+                    const inner = findRealInput(child.shadowRoot);
+                    if (inner) return inner;
+                }
+            }
+            return null;
+        };
+        const input = findRealInput(host) || (host.shadowRoot && findRealInput(host.shadowRoot));
+        if (!input) return false;
+
+        input.focus({ preventScroll: true });
+        const nativeSetter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input), 'value')?.set;
+        if (nativeSetter) nativeSetter.call(input, '');
+        else input.value = '';
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        if (!document.execCommand('insertText', false, strVal)) {
+            if (nativeSetter) nativeSetter.call(input, strVal);
+            else input.value = strVal;
+            input.dispatchEvent(new InputEvent('input', { bubbles: true, cancelable: true, inputType: 'insertText', data: strVal }));
+        }
+
+        const findOptionsDoc = (root) => {
+            let found = Array.from(root.querySelectorAll('spl-select-option'));
+            for (const child of root.querySelectorAll('*')) {
+                if (child.shadowRoot) found = found.concat(findOptionsDoc(child.shadowRoot));
+            }
+            return found;
+        };
+        const options = (await waitFor(() => {
+            const found = findOptionsDoc(document).filter(o => isElementVisible(o));
+            return found.length ? found : null;
+        }, { timeout: 2000 })) || [];
+
+        // Match the value we were given, not whatever SmartRecruiters suggests first
+        // (its list is ranked by popularity, not by what was typed).
+        const norm = (t) => String(t || '').toLowerCase().replace(/\s+/g, ' ').trim();
+        const want = norm(strVal);
+        const labelOf = (o) => norm(o.textContent);
+        const best = options.find(o => labelOf(o) === want)
+            || options.find(o => labelOf(o).startsWith(want))
+            || options.find(o => labelOf(o).includes(want))
+            || (allowFreeText ? null : options[0]);
+        if (!best) {
+            if (allowFreeText) {
+                input.dispatchEvent(new FocusEvent('blur', { bubbles: true }));
+                await new Promise(r => setTimeout(r, 200));
+                return String(input.value || '').trim().length > 0;
+            }
+            console.log(`[Platform/SmartRecruiters] No autocomplete option matched "${strVal}"`);
+            dispatchKey(input, 'Escape', 'Escape', 27);
+            return false;
+        }
+        best.click();
+        await new Promise(r => setTimeout(r, 300));
+        return String(input.value || '').trim().length > 0;
+    }
+
+    /**
+     * SmartRecruiters work-experience / education sections. Each entry is added with the
+     * section's Add button, filled inside the form that opens, then saved. Everything lives in
+     * shadow DOM, so the generic (Workday-shaped) array filler can't see it.
+     */
+    async function fillSmartRecruitersSections(platformConfig, profileData, fieldTracker) {
+        const deep = (sel) => { try { return ns.utils.queryAllDeep(sel); } catch (_) { return []; } };
+        const hostsFor = (f) => {
+            const sels = [f.selector, f.dataTest ? `[data-test="${f.dataTest}"]` : null].filter(Boolean);
+            for (const sel of sels) {
+                const found = deep(sel).filter(el => isElementVisible(el));
+                if (found.length) return found;
+            }
+            return [];
+        };
+        const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+        let total = 0;
+
+        for (const [arrayPath, cfg] of Object.entries(platformConfig?.arrays || {})) {
+            if (arrayPath !== 'work_experience' && arrayPath !== 'education_history') continue;
+            const entries = profileData?.[arrayPath];
+            if (!Array.isArray(entries) || !entries.length) continue;
+            const fields = cfg.fields || [];
+            const anchor = fields.find(f => ['company', 'institution'].includes(f.name)) || fields[0];
+            const primaryKey = anchor?.key;
+
+            for (const entry of entries) {
+                throwIfStopRequested();
+                if (!entry || typeof entry !== 'object') continue;
+                const primary = String(entry[primaryKey] || '').trim();
+
+                // Skip entries already on the page (saved earlier or by SmartRecruiters' resume parse).
+                if (primary && cfg.entryDataTest) {
+                    const saved = deep(`[data-test="${cfg.entryDataTest}"]`);
+                    if (saved.some(el => (el.textContent || '').toLowerCase().includes(primary.toLowerCase()))) {
+                        console.log(`[Platform/SmartRecruiters] ${arrayPath} "${primary}" already on page — skipping`);
+                        continue;
+                    }
+                }
+
+                const addBtn = deep(`[data-test="${cfg.addButtonDataTest}"]`).find(el => isElementVisible(el));
+                if (!addBtn) { console.warn(`[Platform/SmartRecruiters] Add button ${cfg.addButtonDataTest} not found`); break; }
+                deepClick(addBtn);
+
+                const opened = await waitFor(() => hostsFor(anchor).length ? true : null, { timeout: 4000 });
+                if (!opened) { console.warn(`[Platform/SmartRecruiters] ${arrayPath} form did not open`); continue; }
+                await sleep(250);
+
+                let filledHere = 0;
+                for (const f of fields) {
+                    let value = entry[f.key];
+                    if (f.key === 'currentlyWorking') value = entry.currentlyWorking ?? entry.is_current;
+                    if (value && typeof value === 'object' && 'year' in value) value = ns.utils.formatDateParts(value);
+                    const isCurrentFlag = f.type === 'checkbox';
+                    if (isCurrentFlag) {
+                        const isCurrent = value === true || /^(present|current|now)$/i.test(String(entry.endDate ?? entry.end_date ?? '').trim());
+                        if (!isCurrent) continue;
+                        const box = hostsFor(f).pop();
+                        if (box) { deepClick(box); filledHere++; await sleep(150); }
+                        continue;
+                    }
+                    if (f.name === 'endDate' && /^(present|current|now)$/i.test(String(value || '').trim())) continue;
+                    if (value == null || String(value).trim() === '') continue;
+
+                    const host = hostsFor(f).pop();
+                    if (!host) continue;
+                    const ok = host.tagName.toLowerCase() === 'spl-autocomplete'
+                        ? await fillSmartRecruitersAutocomplete(host, String(value), { allowFreeText: true })
+                        : await fillElement(host, String(value));
+                    if (ok) { filledHere++; markFieldFilled(host, 'platform', fieldTracker); }
+                    await sleep(80);
+                }
+
+                if (filledHere > 0) {
+                    const saveBtn = deep(`[data-test="${cfg.saveButtonDataTest}"]`).filter(el => isElementVisible(el)).pop();
+                    if (saveBtn) { deepClick(saveBtn); await sleep(600); }
+                    total++;
+                } else {
+                    const cancelBtn = deep(`[data-test="${cfg.cancelButtonDataTest}"]`).filter(el => isElementVisible(el)).pop();
+                    if (cancelBtn) { deepClick(cancelBtn); await sleep(300); }
+                }
+            }
+        }
+        return total;
+    }
+
+    /**
+     * Generic résumé upload for ATSs whose file input is visually hidden behind a custom
+     * button (Greenhouse, Ashby, ...). Ranks every file input by how "resume"-like its
+     * id/name/label/container is, ignores cover-letter inputs, and never replaces a file.
+     */
+    async function uploadResumeGeneric() {
+        if (!ns.state.resumeDataUri) return false;
+
+        const inputs = (typeof ns.utils?.queryAllDeep === 'function'
+            ? ns.utils.queryAllDeep('input[type="file"]')
+            : Array.from(document.querySelectorAll('input[type="file"]')))
+            .filter(i => !i.disabled);
+        if (!inputs.length) return false;
+
+        const scoreInput = (input) => {
+            const own = [input.id, input.name, input.getAttribute('aria-label'), input.getAttribute('data-testid'), input.getAttribute('data-field-path')].join(' ');
+            const labelText = [
+                ...(input.labels ? Array.from(input.labels).map(l => l.textContent) : []),
+                input.closest('[data-field-path], [role="group"], .field-wrapper, .field, fieldset')?.textContent || ''
+            ].join(' ').slice(0, 400);
+            if (/cover[\s_-]?letter/i.test(own) || (/cover[\s_-]?letter/i.test(labelText) && !/resume|\bcv\b/i.test(own))) return -1;
+            let score = 0;
+            if (/resume|\bcv\b/i.test(own)) score += 10;
+            if (/resume|\bcv\b/i.test(labelText)) score += 5;
+            if (/\.(pdf|docx?)\b|pdf/i.test(input.accept || '')) score += 1;
+            return score;
+        };
+
+        const ranked = inputs.map(i => ({ i, s: scoreInput(i) })).filter(x => x.s > 0).sort((a, b) => b.s - a.s);
+        // Only trust an unlabelled single input when nothing resume-like was found
+        const target = ranked[0]?.i || (inputs.length === 1 && scoreInput(inputs[0]) >= 0 ? inputs[0] : null);
+        if (!target) return false;
+        if (fileInputHasExistingFile(target)) {
+            relayLog('info', '[Fillo] Resume upload skipped because the form already has a file selected');
+            return false;
+        }
+
+        try {
+            const res = await fetch(ns.state.resumeDataUri);
+            const blob = await res.blob();
+            const fileObj = new File([blob], ns.state.resumeFileName || 'resume.pdf', { type: blob.type || 'application/pdf' });
+            const dt = new DataTransfer();
+            dt.items.add(fileObj);
+            target.files = dt.files;
+            target.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
+            target.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
+            relayLog('info', '[Fillo] Resume uploaded to detected file input', { id: target.id, name: target.name });
+            return true;
+        } catch (e) {
+            console.warn('[Fillo] Generic resume upload failed:', e);
             return false;
         }
     }
@@ -6128,61 +6336,13 @@
             // elements portalled elsewhere in the document, not inside the field's own shadow tree,
             // so it has to be searched for document-wide.
             if (field.type === 'sr-autocomplete') {
-                const strVal = String(displayValue);
                 let host = null;
                 for (const sel of selectors) {
                     try { host = document.querySelector(sel); } catch (_) { continue; }
                     if (host) break;
                 }
                 if (!host) return false;
-
-                const findRealInput = (root) => {
-                    const found = root.querySelector('input');
-                    if (found) return found;
-                    for (const child of root.querySelectorAll('*')) {
-                        if (child.shadowRoot) {
-                            const inner = findRealInput(child.shadowRoot);
-                            if (inner) return inner;
-                        }
-                    }
-                    return null;
-                };
-                const input = findRealInput(host) || (host.shadowRoot && findRealInput(host.shadowRoot));
-                if (!input) return false;
-
-                input.focus({ preventScroll: true });
-                const nativeSetter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input), 'value')?.set;
-                if (nativeSetter) nativeSetter.call(input, '');
-                else input.value = '';
-                input.dispatchEvent(new Event('input', { bubbles: true }));
-                if (!document.execCommand('insertText', false, strVal)) {
-                    if (nativeSetter) nativeSetter.call(input, strVal);
-                    else input.value = strVal;
-                    input.dispatchEvent(new InputEvent('input', { bubbles: true, cancelable: true, inputType: 'insertText', data: strVal }));
-                }
-
-                const findOptionsDoc = (root) => {
-                    let found = Array.from(root.querySelectorAll('spl-select-option'));
-                    for (const child of root.querySelectorAll('*')) {
-                        if (child.shadowRoot) found = found.concat(findOptionsDoc(child.shadowRoot));
-                    }
-                    return found;
-                };
-                const options = (await waitFor(() => {
-                    const found = findOptionsDoc(document).filter(o => isElementVisible(o));
-                    return found.length ? found : null;
-                }, { timeout: 2000 })) || [];
-
-                const strLower = strVal.toLowerCase();
-                const best = options.find(o => (o.textContent || '').trim().toLowerCase().startsWith(strLower)) || options[0];
-                if (!best) {
-                    console.log(`[Platform/SmartRecruiters] No autocomplete option matched "${strVal}" for ${field.name}`);
-                    dispatchKey(input, 'Escape', 'Escape', 27);
-                    return false;
-                }
-                best.click();
-                await new Promise(r => setTimeout(r, 300));
-                return String(input.value || '').trim().length > 0;
+                return fillSmartRecruitersAutocomplete(host, String(displayValue));
             }
 
             // iCIMS custom dropdown: type character-by-character into search, pick first match
@@ -6971,6 +7131,10 @@
                 }
             }
 
+            if (!isICIMS) {
+                await uploadResumeGeneric();
+            }
+
             // Step 1: Detect platform and load platform-specific fields
             let platform = null;
             let platformFields = [];
@@ -7091,8 +7255,10 @@
 
                 relayLog('info', `📋 Fill order: ${tasks.map(t => t.type === 'field' ? (t.field.name || t.field.profilePath) : t.arrayPath).join(' → ')}`);
 
+                const isSmartRecruiters = platform === 'smartrecruiters';
                 for (const task of tasks) {
                     throwIfStopRequested();
+                    if (task.type === 'array' && isSmartRecruiters) continue; // handled below
                     if (task.type === 'field') {
                         await processPlatformField(task.field, profileData, fieldTracker);
                         // Note: country dropdown re-render is awaited inside fillElement,
@@ -7113,6 +7279,17 @@
                             await processArrayFields(task.fields, { ...profileData, websites: websitesArray }, fieldTracker, 'websites');
                         }
                     }
+                }
+            }
+
+            if (platform === 'smartrecruiters' && platformFields.length > 0) {
+                try {
+                    const srConfig = await ns.mapping.loadPlatformConfig(platform);
+                    const n = await fillSmartRecruitersSections(srConfig, profileData, fieldTracker);
+                    relayLog('info', `🧩 SmartRecruiters sections saved: ${n}`);
+                } catch (e) {
+                    if (e?.message === 'FILLO_STOPPED') throw e;
+                    console.warn('[Fillo] SmartRecruiters section fill failed:', e);
                 }
             }
 
